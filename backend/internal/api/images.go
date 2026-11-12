@@ -41,12 +41,13 @@ func (s *Server) imageFromPath(w http.ResponseWriter, r *http.Request) (*store.I
 	return img, true
 }
 
-// GET /images?status=pending&equipment=...&camera=...&day_time=...&weather=...
+// GET /images?package=...&status=pending&equipment=...&camera=...&day_time=...&weather=...
 //
 //	&direction=...&vehicle_type=...&vehicle_color=...&plate=...&limit=50&skip=0
 func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := store.ImageFilter{
+		Package:      q.Get("package"),
 		Status:       q.Get("status"),
 		Equipment:    q.Get("equipment"),
 		Camera:       q.Get("camera"),
@@ -134,7 +135,7 @@ type annotationRequest struct {
 	Vehicles     []store.Vehicle `json:"vehicles"`
 
 	// false: só salva o rascunho (continua pending).
-	// true: valida tudo, gera o nome v2, move para dataset/ e marca reviewed.
+	// true: valida tudo, renomeia para o padrão v2 (na pasta do pacote) e marca verified.
 	Complete bool `json:"complete"`
 }
 
@@ -162,7 +163,6 @@ func (req annotationRequest) applyTo(img *store.Image) {
 
 // PUT /images/{sha1}
 // Header opcional X-User: quem está anotando (vai para o histórico).
-// TODO: quando tiver login, o usuário vem da sessão, não de um header.
 func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 	img, ok := s.imageFromPath(w, r)
 	if !ok {
@@ -178,16 +178,25 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Uma imagem reviewed tem o nome do arquivo amarrado aos metadados.
-	// Salvar rascunho nela deixaria nome e banco divergentes.
-	if img.Status == store.StatusReviewed && !req.Complete {
-		writeError(w, http.StatusConflict, "imagem já revisada: para editar, envie a anotação completa com \"complete\": true")
+	user := userFrom(r)
+	now := time.Now().UTC()
+
+	// Fila de trabalho: se outra pessoa está com a imagem, ninguém mais edita.
+	if img.ClaimedByOther(user, now) {
+		writeError(w, http.StatusConflict, fmt.Sprintf("imagem está sendo anotada por %s", img.ClaimedBy))
 		return
 	}
 
-	before := *img // cópia para o histórico e para desfazer
+	// Uma imagem verified tem o nome do arquivo amarrado aos metadados.
+	// Salvar rascunho nela deixaria nome e banco divergentes.
+	if img.Status == store.StatusVerified && !req.Complete {
+		writeError(w, http.StatusConflict, "imagem já verificada: para editar, envie a anotação completa com \"complete\": true")
+		return
+	}
+
+	before := *img // cópia para o histórico, para desfazer e para o optimistic locking
 	req.applyTo(img)
-	img.UpdatedAt = time.Now().UTC()
+	img.UpdatedAt = now
 
 	moved := false
 	if req.Complete {
@@ -196,7 +205,7 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, msg)
 			return
 		}
-		newPath := files.DatasetPath(name)
+		newPath := files.VerifiedPath(img.Package, name)
 		if newPath != img.Path {
 			if err := s.files.Move(img.Path, newPath); err != nil {
 				s.serverError(w, err)
@@ -206,22 +215,26 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 		}
 		img.Path = newPath
 		img.FileName = name
-		img.Status = store.StatusReviewed
+		img.Status = store.StatusVerified
 		img.PatternVersion = filename.CurrentVersion
+		img.ClaimedBy, img.ClaimedUntil = "", nil // verificada sai da fila
+	} else if img.ClaimedBy == user {
+		until := now.Add(claimLease) // salvar rascunho renova o prazo
+		img.ClaimedUntil = &until
 	}
 
-	if err := s.store.ReplaceImage(r.Context(), img); err != nil {
+	if err := s.store.ReplaceImage(r.Context(), img, before.UpdatedAt); err != nil {
 		if moved { // desfaz o move para disco e banco não divergirem
 			_ = s.files.Move(img.Path, before.Path)
+		}
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "a imagem foi alterada por outra pessoa enquanto você editava: recarregue")
+			return
 		}
 		s.serverError(w, err)
 		return
 	}
 
-	user := r.Header.Get("X-User")
-	if user == "" {
-		user = "anonymous"
-	}
 	if err := s.store.InsertHistory(r.Context(), diffHistory(&before, img, user)); err != nil {
 		// a anotação já foi salva; falha no histórico só é logada
 		s.logError(err)

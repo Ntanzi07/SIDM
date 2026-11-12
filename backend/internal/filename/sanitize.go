@@ -16,6 +16,12 @@ func SanitizeCamera(raw string) (string, error) {
 	return sanitize(raw, maxCameraLen, "câmera")
 }
 
+// SanitizePackage: o nome do pacote vira nome de PASTA no servidor
+// ("Noturnas Setembro" -> "Noturnas-Setembro"), por isso as mesmas regras.
+func SanitizePackage(raw string) (string, error) {
+	return sanitize(raw, maxPackageLen, "pacote")
+}
+
 // sanitize: espaços (um ou vários) viram um único "-"; depois valida.
 // Não "conserta" outros caracteres de propósito: melhor recusar "8003/MF"
 // do que adivinhar o que a pessoa quis dizer.

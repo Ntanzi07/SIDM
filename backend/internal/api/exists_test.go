@@ -18,7 +18,7 @@ func TestExists(t *testing.T) {
 
 	var resp existsResponse
 	decode(t, rec, &resp)
-	if len(resp.Existing) != 1 || resp.Existing[0].SHA1 != known || resp.Existing[0].Status != "pending" {
+	if len(resp.Existing) != 1 || resp.Existing[0].SHA1 != known || resp.Existing[0].Status != "pending" || resp.Existing[0].Package != testPkg {
 		t.Errorf("existing = %+v", resp.Existing)
 	}
 	if len(resp.Missing) != 1 || resp.Missing[0] != unknown {

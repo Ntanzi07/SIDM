@@ -27,20 +27,34 @@ func (s *Store) FindImage(ctx context.Context, sha1 string) (*Image, error) {
 	return &img, nil
 }
 
-// ReplaceImage grava o documento inteiro por cima do atual.
-func (s *Store) ReplaceImage(ctx context.Context, img *Image) error {
-	res, err := s.db.Collection("images").ReplaceOne(ctx, bson.D{{Key: "_id", Value: img.SHA1}}, img)
+// ErrConflict indica que o documento mudou desde que foi lido.
+var ErrConflict = errors.New("alterado por outra pessoa")
+
+// ReplaceImage grava o documento inteiro por cima do atual, MAS só se ele
+// ainda estiver como foi lido (updated_at igual a prevUpdatedAt).
+//
+// Isso é "optimistic locking": em vez de travar a imagem enquanto alguém
+// edita, deixamos todo mundo ler, e na hora de gravar conferimos se ninguém
+// gravou no meio. Se gravou, devolvemos ErrConflict e o front recarrega.
+func (s *Store) ReplaceImage(ctx context.Context, img *Image, prevUpdatedAt time.Time) error {
+	filter := bson.D{{Key: "_id", Value: img.SHA1}, {Key: "updated_at", Value: prevUpdatedAt}}
+	res, err := s.db.Collection("images").ReplaceOne(ctx, filter, img)
 	if err != nil {
 		return fmt.Errorf("atualizar imagem %s: %w", img.SHA1, err)
 	}
 	if res.MatchedCount == 0 {
-		return ErrNotFound
+		// Não achou com aquele updated_at: ou a imagem sumiu, ou mudou.
+		if _, err := s.FindImage(ctx, img.SHA1); errors.Is(err, ErrNotFound) {
+			return ErrNotFound
+		}
+		return ErrConflict
 	}
 	return nil
 }
 
 // ImageFilter: campos vazios são ignorados.
 type ImageFilter struct {
+	Package      string
 	Status       string
 	Equipment    string
 	Camera       string
@@ -61,6 +75,7 @@ func (f ImageFilter) toBSON() bson.D {
 			filter = append(filter, bson.E{Key: field, Value: value})
 		}
 	}
+	add("package", f.Package)
 	add("status", f.Status)
 	add("equipment", f.Equipment)
 	add("camera", f.Camera)
@@ -88,7 +103,7 @@ func (f ImageFilter) toBSON() bson.D {
 }
 
 // ListImages devolve uma página de resultados e o total que bate com o filtro.
-// Ordem: mais antigas primeiro (a fila de anotação segue a ordem de chegada).
+// Ordem: a mesma da fila de trabalho (queued_at), mais antigas primeiro.
 func (s *Store) ListImages(ctx context.Context, f ImageFilter) ([]Image, int64, error) {
 	coll := s.db.Collection("images")
 	filter := f.toBSON()
@@ -99,7 +114,7 @@ func (s *Store) ListImages(ctx context.Context, f ImageFilter) ([]Image, int64, 
 	}
 
 	opts := options.Find().
-		SetSort(bson.D{{Key: "ingested_at", Value: 1}, {Key: "_id", Value: 1}}).
+		SetSort(bson.D{{Key: "queued_at", Value: 1}, {Key: "_id", Value: 1}}).
 		SetLimit(f.Limit).
 		SetSkip(f.Skip)
 
@@ -154,27 +169,34 @@ func (s *Store) activeNameExists(ctx context.Context, collection, name string) (
 	return n > 0, nil
 }
 
+// ExistingImage diz onde uma imagem já cadastrada está e em que estado.
+type ExistingImage struct {
+	Package string
+	Status  string
+}
+
 // ExistingImages recebe uma lista de sha1 e devolve quais já existem,
-// com o status de cada um. Uma consulta só ($in), não uma por hash.
-func (s *Store) ExistingImages(ctx context.Context, ids []string) (map[string]string, error) {
+// com pacote e status de cada um. Uma consulta só ($in), não uma por hash.
+func (s *Store) ExistingImages(ctx context.Context, ids []string) (map[string]ExistingImage, error) {
 	filter := bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}
-	opts := options.Find().SetProjection(bson.D{{Key: "status", Value: 1}}) // _id vem sempre
+	opts := options.Find().SetProjection(bson.D{{Key: "status", Value: 1}, {Key: "package", Value: 1}}) // _id vem sempre
 
 	cur, err := s.db.Collection("images").Find(ctx, filter, opts)
 	if err != nil {
 		return nil, fmt.Errorf("consultar hashes: %w", err)
 	}
 	var docs []struct {
-		ID     string `bson:"_id"`
-		Status string `bson:"status"`
+		ID      string `bson:"_id"`
+		Package string `bson:"package"`
+		Status  string `bson:"status"`
 	}
 	if err := cur.All(ctx, &docs); err != nil {
 		return nil, fmt.Errorf("ler hashes: %w", err)
 	}
 
-	found := make(map[string]string, len(docs))
+	found := make(map[string]ExistingImage, len(docs))
 	for _, d := range docs {
-		found[d.ID] = d.Status
+		found[d.ID] = ExistingImage{Package: d.Package, Status: d.Status}
 	}
 	return found, nil
 }

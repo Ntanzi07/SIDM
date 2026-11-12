@@ -7,22 +7,29 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
 	"SIDM/internal/store"
 )
 
-// Rotas planejadas:
-//   GET  /health          ok se o Mongo responde
-//   GET  /codes           tabelas para os dropdowns
-//   GET  /images          busca com filtros + paginação      [feito]
-//   GET  /images/{sha1}   detalhe de uma imagem              [feito]
-//   GET  /images/{sha1}/file  o arquivo da imagem            [feito]
-//   PUT  /images/{sha1}   salva anotação / conclui (reviewed) [feito]
-//   POST /images          upload para staging (pending)      [feito]
-//   POST /images/exists   checa hashes antes do upload       [feito]
-//   POST /export          gera zip em streaming das imagens selecionadas
+// Rotas:
+//   GET  /health               ok se o Mongo responde
+//   GET  /codes                tabelas para os dropdowns
+//   POST /equipments           cadastra equipamento {"name":...}
+//   POST /cameras              cadastra câmera {"name":...}
+//   POST /packages             cria pacote {"name":...}
+//   GET  /packages             pacotes com progresso (total/verified/pending/in_progress)
+//   POST /packages/{name}/next pega a próxima imagem da fila (X-User obrigatório)
+//   POST /images/{sha1}/release devolve a imagem para a fila
+//   POST /images/exists        checa hashes antes do upload
+//   POST /images?package=X     upload para o pacote X (pending)
+//   GET  /images               busca com filtros + paginação
+//   GET  /images/{sha1}        detalhe de uma imagem
+//   GET  /images/{sha1}/file   o arquivo da imagem
+//   PUT  /images/{sha1}        salva rascunho / verifica (renomeia para v2)
+//   POST /export               TODO: zip das imagens selecionadas
 
 // Store é tudo que a API precisa do banco.
 // A API depende desta interface, e não do *store.Store concreto: assim os
@@ -39,12 +46,18 @@ type Store interface {
 	EquipmentExists(ctx context.Context, name string) (bool, error)
 	CameraExists(ctx context.Context, name string) (bool, error)
 
+	CreatePackage(ctx context.Context, name, createdBy string) error
+	FindPackage(ctx context.Context, name string) (*store.Package, error)
+	ListPackages(ctx context.Context) ([]store.PackageSummary, error)
+
 	InsertImage(ctx context.Context, img *store.Image) error
 	DeleteImage(ctx context.Context, sha1 string) error
 	FindImage(ctx context.Context, sha1 string) (*store.Image, error)
-	ReplaceImage(ctx context.Context, img *store.Image) error
+	ReplaceImage(ctx context.Context, img *store.Image, prevUpdatedAt time.Time) error
+	ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*store.Image, error)
+	ReleaseClaim(ctx context.Context, sha1, user string) error
 	ListImages(ctx context.Context, f store.ImageFilter) ([]store.Image, int64, error)
-	ExistingImages(ctx context.Context, ids []string) (map[string]string, error)
+	ExistingImages(ctx context.Context, ids []string) (map[string]store.ExistingImage, error)
 	InsertHistory(ctx context.Context, entries []store.HistoryEntry) error
 }
 
@@ -64,6 +77,10 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /codes", s.handleCodes)
 	mux.HandleFunc("POST /equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment))
 	mux.HandleFunc("POST /cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera))
+	mux.HandleFunc("POST /packages", s.handleCreatePackage)
+	mux.HandleFunc("GET /packages", s.handleListPackages)
+	mux.HandleFunc("POST /packages/{name}/next", s.handleNext)
+	mux.HandleFunc("POST /images/{sha1}/release", s.handleRelease)
 	mux.HandleFunc("POST /images", s.handleUpload)
 	mux.HandleFunc("POST /images/exists", s.handleExists)
 	mux.HandleFunc("GET /images", s.handleListImages)
@@ -146,6 +163,15 @@ func (s *Server) handleCreateNamed(
 func (s *Server) serverError(w http.ResponseWriter, err error) {
 	log.Printf("erro interno: %v", err)
 	http.Error(w, "erro interno", http.StatusInternalServerError)
+}
+
+// userFrom diz quem está fazendo a ação.
+// TODO: quando tiver login, o usuário vem da sessão, não de um header.
+func userFrom(r *http.Request) string {
+	if u := r.Header.Get("X-User"); u != "" {
+		return u
+	}
+	return "anonymous"
 }
 
 func (s *Server) logError(err error) {

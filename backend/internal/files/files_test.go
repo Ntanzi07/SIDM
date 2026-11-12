@@ -20,7 +20,7 @@ func newStorage(t *testing.T) (*Storage, string) {
 
 func TestNewStorageCriaPastas(t *testing.T) {
 	_, root := newStorage(t)
-	for _, dir := range []string{"tmp", "staging", "dataset"} {
+	for _, dir := range []string{"tmp", "dataset"} {
 		info, err := os.Stat(filepath.Join(root, dir))
 		if err != nil || !info.IsDir() {
 			t.Errorf("pasta %s não criada: %v", dir, err)
@@ -35,7 +35,7 @@ func TestNewStorageIdempotente(t *testing.T) {
 	}
 }
 
-func TestReceiveAndStage(t *testing.T) {
+func TestReceiveAndStore(t *testing.T) {
 	st, _ := newStorage(t)
 
 	tmp, sum, size, err := st.Receive(strings.NewReader("hello"))
@@ -49,15 +49,17 @@ func TestReceiveAndStage(t *testing.T) {
 		t.Errorf("tamanho errado: %d", size)
 	}
 
-	if err := st.Stage(tmp, sum, ".jpg"); err != nil {
+	// Store cria a pasta do pacote se ela ainda não existir.
+	rel := PendingPath("pacote-1", sum, ".jpg")
+	if err := st.Store(tmp, rel); err != nil {
 		t.Fatal(err)
 	}
-	got, err := os.ReadFile(st.Abs(StagingPath(sum, ".jpg")))
+	got, err := os.ReadFile(st.Abs(rel))
 	if err != nil || string(got) != "hello" {
-		t.Errorf("conteúdo em staging errado: %q, %v", got, err)
+		t.Errorf("conteúdo errado: %q, %v", got, err)
 	}
 	if _, err := os.Stat(tmp); !os.IsNotExist(err) {
-		t.Error("temporário deveria ter sumido depois do Stage")
+		t.Error("temporário deveria ter sumido depois do Store")
 	}
 }
 
@@ -86,13 +88,26 @@ func TestDiscard(t *testing.T) {
 	}
 }
 
-func TestMove(t *testing.T) {
+func TestEnsurePackageDir(t *testing.T) {
+	st, root := newStorage(t)
+	if err := st.EnsurePackageDir("noturnas"); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "dataset", "noturnas")); err != nil || !info.IsDir() {
+		t.Errorf("pasta do pacote não criada: %v", err)
+	}
+	if err := st.EnsurePackageDir("noturnas"); err != nil {
+		t.Errorf("criar de novo não pode falhar: %v", err)
+	}
+}
+
+func TestMoveRenomeiaNaPastaDoPacote(t *testing.T) {
 	st, _ := newStorage(t)
 	tmp, sum, _, _ := st.Receive(strings.NewReader("conteudo"))
-	st.Stage(tmp, sum, ".jpg")
+	from := PendingPath("pacote-1", sum, ".jpg")
+	st.Store(tmp, from)
 
-	from := StagingPath(sum, ".jpg")
-	to := DatasetPath("nome-final.jpg")
+	to := VerifiedPath("pacote-1", "nome-v2.jpg")
 	if err := st.Move(from, to); err != nil {
 		t.Fatal(err)
 	}
@@ -100,25 +115,29 @@ func TestMove(t *testing.T) {
 		t.Error("arquivo não chegou no destino")
 	}
 	if _, err := os.Stat(st.Abs(from)); !os.IsNotExist(err) {
-		t.Error("arquivo continuou na origem")
+		t.Error("arquivo continuou com o nome antigo")
 	}
 
-	if err := st.Move("staging/nao-existe.jpg", to); err == nil {
+	if err := st.Move("dataset/pacote-1/nao-existe.jpg", to); err == nil {
 		t.Error("mover arquivo inexistente deveria dar erro")
 	}
 }
 
 func TestCaminhosRelativos(t *testing.T) {
 	// No banco os caminhos usam "/" em qualquer sistema operacional.
-	if got := StagingPath("abc", ".jpg"); got != "staging/abc.jpg" {
-		t.Errorf("StagingPath = %q", got)
+	cases := map[string]string{
+		PackageDir("p1"):                 "dataset/p1",
+		PendingPath("p1", "abc", ".jpg"): "dataset/p1/abc.jpg",
+		VerifiedPath("p1", "x.png"):      "dataset/p1/x.png",
 	}
-	if got := DatasetPath("x.png"); got != "dataset/x.png" {
-		t.Errorf("DatasetPath = %q", got)
+	for got, want := range cases {
+		if got != want {
+			t.Errorf("got %q, want %q", got, want)
+		}
 	}
 
 	st, root := newStorage(t)
-	if got, want := st.Abs("dataset/x.png"), filepath.Join(root, "dataset", "x.png"); got != want {
+	if got, want := st.Abs("dataset/p1/x.png"), filepath.Join(root, "dataset", "p1", "x.png"); got != want {
 		t.Errorf("Abs = %q, want %q", got, want)
 	}
 }

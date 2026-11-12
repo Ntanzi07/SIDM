@@ -43,7 +43,7 @@ func TestListImages(t *testing.T) {
 	env.seedPending(t, "um")
 	env.seedPending(t, "dois")
 
-	rec := env.do("GET", "/images?status=pending&equipment=8003-MF4739&plate=abc1d23&limit=9999&skip=-5", nil, nil)
+	rec := env.do("GET", "/images?package="+testPkg+"&status=pending&equipment=8003-MF4739&plate=abc1d23&limit=9999&skip=-5", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
 
 	var resp struct {
@@ -56,7 +56,7 @@ func TestListImages(t *testing.T) {
 	}
 
 	f := env.db.lastFilter
-	if f.Status != "pending" || f.Equipment != "8003-MF4739" {
+	if f.Package != testPkg || f.Status != "pending" || f.Equipment != "8003-MF4739" {
 		t.Errorf("filtro não repassado: %+v", f)
 	}
 	if f.Plate != "ABC1D23" {
@@ -144,8 +144,8 @@ func TestAnnotateRascunho(t *testing.T) {
 	if img.Status != store.StatusPending || img.DayTime != "night" {
 		t.Errorf("rascunho não salvo como pending: %+v", img)
 	}
-	if _, err := os.Stat(filepath.Join(env.root, "staging", sha+".jpg")); err != nil {
-		t.Error("rascunho não deveria mover o arquivo")
+	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+		t.Error("rascunho não deveria renomear o arquivo")
 	}
 }
 
@@ -164,10 +164,10 @@ func TestAnnotateCompleto(t *testing.T) {
 	if img.FileName != wantName {
 		t.Errorf("file_name:\ngot:  %s\nwant: %s", img.FileName, wantName)
 	}
-	if img.Status != store.StatusReviewed || img.PatternVersion != "v2" {
+	if img.Status != store.StatusVerified || img.PatternVersion != "v2" {
 		t.Errorf("status=%q version=%q", img.Status, img.PatternVersion)
 	}
-	if img.Path != "dataset/"+wantName {
+	if img.Path != "dataset/"+testPkg+"/"+wantName {
 		t.Errorf("path = %q", img.Path)
 	}
 	if img.Vehicles[0].Plate != "ABC1D23" {
@@ -177,11 +177,11 @@ func TestAnnotateCompleto(t *testing.T) {
 		t.Errorf("captured_at não convertido para UTC: %v", img.CapturedAt)
 	}
 
-	if _, err := os.Stat(filepath.Join(env.root, "dataset", wantName)); err != nil {
-		t.Error("arquivo não foi para dataset:", err)
+	if _, err := os.Stat(env.pkgFile(wantName)); err != nil {
+		t.Error("arquivo não foi renomeado na pasta do pacote:", err)
 	}
-	if _, err := os.Stat(filepath.Join(env.root, "staging", sha+".jpg")); !os.IsNotExist(err) {
-		t.Error("arquivo continuou em staging")
+	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); !os.IsNotExist(err) {
+		t.Error("o arquivo com nome de hash continuou existindo")
 	}
 
 	// histórico
@@ -194,12 +194,12 @@ func TestAnnotateCompleto(t *testing.T) {
 	if statusEntry == nil {
 		t.Fatal("histórico sem a mudança de status")
 	}
-	if statusEntry.Old != "pending" || statusEntry.New != "reviewed" || statusEntry.ChangedBy != "nathan" {
+	if statusEntry.Old != "pending" || statusEntry.New != "verified" || statusEntry.ChangedBy != "nathan" {
 		t.Errorf("histórico errado: %+v", *statusEntry)
 	}
 }
 
-func TestAnnotateEditarReviewed(t *testing.T) {
+func TestAnnotateEditarVerificada(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedPending(t, "conteudo")
 	assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody()), http.StatusOK)
@@ -208,7 +208,7 @@ func TestAnnotateEditarReviewed(t *testing.T) {
 		assertStatus(t, env.doJSON("PUT", "/images/"+sha, `{"day_time":"day"}`), http.StatusConflict)
 	})
 
-	t.Run("completo renomeia dentro de dataset", func(t *testing.T) {
+	t.Run("completo renomeia de novo na pasta do pacote", func(t *testing.T) {
 		before := env.db.images[sha].FileName
 		rec := env.doJSON("PUT", "/images/"+sha, completeBody(func(b map[string]any) { b["day_time"] = "day" }))
 		assertStatus(t, rec, http.StatusOK)
@@ -217,10 +217,10 @@ func TestAnnotateEditarReviewed(t *testing.T) {
 		if after == before || !strings.Contains(after, "-D-") {
 			t.Errorf("nome não atualizado: %s", after)
 		}
-		if _, err := os.Stat(filepath.Join(env.root, "dataset", before)); !os.IsNotExist(err) {
+		if _, err := os.Stat(env.pkgFile(before)); !os.IsNotExist(err) {
 			t.Error("nome antigo continuou existindo")
 		}
-		if _, err := os.Stat(filepath.Join(env.root, "dataset", after)); err != nil {
+		if _, err := os.Stat(env.pkgFile(after)); err != nil {
 			t.Error("arquivo com nome novo não existe")
 		}
 	})
@@ -257,26 +257,26 @@ func TestAnnotateInvalido(t *testing.T) {
 			if env.db.images[sha].Status != store.StatusPending {
 				t.Error("anotação inválida não pode mudar o status")
 			}
-			if _, err := os.Stat(filepath.Join(env.root, "staging", sha+".jpg")); err != nil {
-				t.Error("anotação inválida não pode mover o arquivo")
+			if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+				t.Error("anotação inválida não pode renomear o arquivo")
 			}
 		})
 	}
 }
 
-func TestAnnotateDesfazMoveSeBancoFalhar(t *testing.T) {
+func TestAnnotateDesfazRenameSeBancoFalhar(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedPending(t, "conteudo")
 	env.db.replaceErr = errBoom
 
 	assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody()), http.StatusInternalServerError)
 
-	if _, err := os.Stat(filepath.Join(env.root, "staging", sha+".jpg")); err != nil {
-		t.Error("o move deveria ter sido desfeito: arquivo sumiu de staging")
+	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+		t.Error("o rename deveria ter sido desfeito: arquivo com nome de hash sumiu")
 	}
-	dataset, _ := os.ReadDir(filepath.Join(env.root, "dataset"))
-	if len(dataset) != 0 {
-		t.Error("dataset deveria estar vazio")
+	entries, _ := os.ReadDir(filepath.Join(env.root, "dataset", testPkg))
+	if len(entries) != 1 {
+		t.Errorf("pasta do pacote deveria ter 1 arquivo, tem %d", len(entries))
 	}
 }
 

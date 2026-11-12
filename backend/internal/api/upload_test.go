@@ -32,10 +32,10 @@ func TestUploadResultados(t *testing.T) {
 		t.Errorf("sha1 errado: %+v", res[:2])
 	}
 
-	staging, _ := os.ReadDir(filepath.Join(env.root, "staging"))
+	inPkg, _ := os.ReadDir(filepath.Join(env.root, "dataset", testPkg))
 	tmp, _ := os.ReadDir(filepath.Join(env.root, "tmp"))
-	if len(staging) != 2 {
-		t.Errorf("staging com %d arquivos, want 2", len(staging))
+	if len(inPkg) != 2 {
+		t.Errorf("pasta do pacote com %d arquivos, want 2", len(inPkg))
 	}
 	if len(tmp) != 0 {
 		t.Errorf("sobrou lixo em tmp: %d arquivos", len(tmp))
@@ -53,7 +53,10 @@ func TestUploadGravaDocumentoPending(t *testing.T) {
 	if img.OriginalName != "original.jpg" || img.Ext != ".jpg" || img.Size != int64(len("conteudo")) {
 		t.Errorf("documento errado: %+v", img)
 	}
-	if img.Path != "staging/"+sha+".jpg" {
+	if img.Package != testPkg {
+		t.Errorf("package = %q", img.Package)
+	}
+	if img.Path != "dataset/"+testPkg+"/"+sha+".jpg" {
 		t.Errorf("path = %q", img.Path)
 	}
 	if img.IngestedAt.IsZero() {
@@ -100,9 +103,48 @@ func TestUploadNomeComCaminho(t *testing.T) {
 
 func TestUploadNaoMultipart(t *testing.T) {
 	env := newTestEnv(t)
-	rec := env.doJSON("POST", "/images", `{"files":[]}`)
+	rec := env.doJSON("POST", "/images?package="+testPkg, `{"files":[]}`)
 	assertStatus(t, rec, http.StatusBadRequest)
 	if !strings.Contains(errorMsg(t, rec), "multipart") {
 		t.Errorf("mensagem pouco clara: %q", errorMsg(t, rec))
 	}
+}
+
+func TestUploadRepetidaEmOutroPacoteEPulada(t *testing.T) {
+	env := newTestEnv(t)
+	env.db.packages["pacote-novo"] = store.Package{Name: "pacote-novo"}
+	shaA := env.seedPending(t, "imagem A") // já está no pacote-teste
+
+	res := env.uploadTo(t, "pacote-novo",
+		upFile{"a-de-novo.jpg", "imagem A"},
+		upFile{"nova.jpg", "imagem nova"},
+	)
+
+	if res[0].Status != "duplicate" || res[0].ExistingPackage != testPkg {
+		t.Errorf("repetida: %+v (want duplicate, existing_package=%s)", res[0], testPkg)
+	}
+	if res[1].Status != "created" {
+		t.Errorf("o resto do lote deveria seguir: %+v", res[1])
+	}
+
+	if env.db.images[shaA].Package != testPkg {
+		t.Error("a repetida não pode mudar de pacote")
+	}
+	novo, _ := os.ReadDir(filepath.Join(env.root, "dataset", "pacote-novo"))
+	if len(novo) != 1 {
+		t.Errorf("pacote-novo deveria ter só a imagem nova, tem %d arquivos", len(novo))
+	}
+}
+
+func TestUploadPacoteObrigatorio(t *testing.T) {
+	env := newTestEnv(t)
+
+	t.Run("sem pacote", func(t *testing.T) {
+		rec := env.do("POST", "/images", strings.NewReader(""), map[string]string{"Content-Type": "multipart/form-data; boundary=x"})
+		assertStatus(t, rec, http.StatusBadRequest)
+	})
+	t.Run("pacote inexistente", func(t *testing.T) {
+		rec := env.do("POST", "/images?package=nao-existe", strings.NewReader(""), map[string]string{"Content-Type": "multipart/form-data; boundary=x"})
+		assertStatus(t, rec, http.StatusNotFound)
+	})
 }

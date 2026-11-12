@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime/multipart"
@@ -20,19 +21,36 @@ import (
 const maxUploadBytes = 5 << 30 // 5 GB
 
 type uploadResult struct {
-	File      string `json:"file"`
-	SHA1      string `json:"sha1,omitempty"`
-	Status    string `json:"status"`              // created | duplicate | error
-	Prefilled bool   `json:"prefilled,omitempty"` // nome original já era v2 válido
-	Error     string `json:"error,omitempty"`
+	File            string `json:"file"`
+	SHA1            string `json:"sha1,omitempty"`
+	Status          string `json:"status"`                     // created | duplicate | error
+	ExistingPackage string `json:"existing_package,omitempty"` // duplicate: onde a imagem já está
+	Prefilled       bool   `json:"prefilled,omitempty"`        // nome original já era v2 válido
+	Error           string `json:"error,omitempty"`
 }
 
-// handleUpload recebe multipart/form-data com um ou mais campos "files".
+// handleUpload: POST /images?package=<nome>, multipart/form-data com um ou
+// mais campos "files". O pacote precisa existir (POST /packages antes).
+//
 // Usa MultipartReader (streaming): cada arquivo vai direto para o disco,
 // nada de carregar GBs na memória como faria o r.ParseMultipartForm.
-// Responde 200 com o resultado de CADA arquivo: um duplicado ou inválido
-// não derruba o lote inteiro.
+// Responde 200 com o resultado de CADA arquivo: uma imagem repetida (que já
+// está em outro pacote) é PULADA e o resto do lote segue normalmente.
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	pkg := r.URL.Query().Get("package")
+	if pkg == "" {
+		writeError(w, http.StatusBadRequest, "informe o pacote: POST /images?package=<nome>")
+		return
+	}
+	if _, err := s.store.FindPackage(r.Context(), pkg); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			writeError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe: crie antes com POST /packages", pkg))
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
 
 	mr, err := r.MultipartReader()
@@ -55,14 +73,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
-		results = append(results, s.ingestOne(r.Context(), part))
+		results = append(results, s.ingestOne(r.Context(), pkg, part))
 		part.Close()
 	}
 
 	writeJSON(w, http.StatusOK, results)
 }
 
-func (s *Server) ingestOne(ctx context.Context, part *multipart.Part) uploadResult {
+func (s *Server) ingestOne(ctx context.Context, pkg string, part *multipart.Part) uploadResult {
 	name := filepath.Base(part.FileName()) // nunca confie no caminho que vem do cliente
 	res := uploadResult{File: name}
 
@@ -83,11 +101,13 @@ func (s *Server) ingestOne(ctx context.Context, part *multipart.Part) uploadResu
 	now := time.Now().UTC()
 	img := &store.Image{
 		SHA1:         sum,
+		Package:      pkg,
 		Status:       store.StatusPending,
 		OriginalName: name,
-		Path:         files.StagingPath(sum, ext),
+		Path:         files.PendingPath(pkg, sum, ext),
 		Ext:          ext,
 		Size:         size,
+		QueuedAt:     now, // entra no fim da fila do pacote
 		IngestedAt:   now,
 		UpdatedAt:    now,
 	}
@@ -100,11 +120,14 @@ func (s *Server) ingestOne(ctx context.Context, part *multipart.Part) uploadResu
 	}
 
 	// Banco primeiro, disco depois: se o sha1 já existe, o Mongo recusa
-	// e o temporário é descartado sem nunca tocar em staging.
+	// e o temporário é descartado sem nunca tocar na pasta do pacote.
 	if err := s.store.InsertImage(ctx, img); err != nil {
 		s.files.Discard(tmp)
 		if errors.Is(err, store.ErrDuplicate) {
 			res.Status = "duplicate"
+			if existing, err := s.store.FindImage(ctx, sum); err == nil {
+				res.ExistingPackage = existing.Package
+			}
 			return res
 		}
 		log.Printf("upload %s: %v", name, err)
@@ -112,7 +135,7 @@ func (s *Server) ingestOne(ctx context.Context, part *multipart.Part) uploadResu
 		return res
 	}
 
-	if err := s.files.Stage(tmp, sum, ext); err != nil {
+	if err := s.files.Store(tmp, img.Path); err != nil {
 		// desfaz o registro para banco e disco não divergirem
 		_ = s.store.DeleteImage(context.Background(), sum)
 		s.files.Discard(tmp)

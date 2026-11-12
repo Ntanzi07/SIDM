@@ -61,7 +61,7 @@ func testStore(t *testing.T) *Store {
 	})
 
 	// Os mesmos índices únicos do mongo/init/01-init.js.
-	for _, coll := range []string{"equipments", "cameras"} {
+	for _, coll := range []string{"equipments", "cameras", "packages"} {
 		_, err := s.db.Collection(coll).Indexes().CreateOne(ctx, mongo.IndexModel{
 			Keys:    bson.D{{Key: "name", Value: 1}},
 			Options: options.Index().SetUnique(true),
@@ -158,11 +158,13 @@ func TestListaVaziaNaoENil(t *testing.T) {
 func newImage(sha string, ingested time.Time) *Image {
 	return &Image{
 		SHA1:         sha,
+		Package:      "pacote-1",
 		Status:       StatusPending,
 		OriginalName: sha + ".jpg",
-		Path:         "staging/" + sha + ".jpg",
+		Path:         "dataset/pacote-1/" + sha + ".jpg",
 		Ext:          ".jpg",
 		Size:         10,
+		QueuedAt:     ms(ingested),
 		IngestedAt:   ms(ingested),
 		UpdatedAt:    ms(ingested),
 	}
@@ -197,23 +199,31 @@ func TestImagensCRUD(t *testing.T) {
 
 	// Replace com anotação completa.
 	captured := ms(time.Date(2026, 9, 3, 11, 25, 23, 0, time.UTC))
-	got.Status = StatusReviewed
+	got.Status = StatusVerified
 	got.DayTime = "night"
 	got.CapturedAt = &captured
 	got.Vehicles = []Vehicle{{Plate: "ABC1D23", PlateType: "mercosul", PlateCategory: "private", Type: "truck", Color: "white"}}
-	if err := s.ReplaceImage(ctx, got); err != nil {
+	prev := got.UpdatedAt
+	got.UpdatedAt = ms(time.Now().Add(time.Second))
+	if err := s.ReplaceImage(ctx, got, prev); err != nil {
 		t.Fatal(err)
 	}
 
+	// Gravar de novo com o updated_at ANTIGO: alguém já gravou no meio.
+	if err := s.ReplaceImage(ctx, got, prev); !errors.Is(err, ErrConflict) {
+		t.Errorf("updated_at desatualizado: err = %v, want ErrConflict", err)
+	}
+
 	again, _ := s.FindImage(ctx, "aaaa")
-	if again.Status != StatusReviewed || again.DayTime != "night" || len(again.Vehicles) != 1 {
+	if again.Status != StatusVerified || again.DayTime != "night" || len(again.Vehicles) != 1 {
 		t.Errorf("Replace não persistiu: %+v", again)
 	}
 	if again.CapturedAt == nil || !again.CapturedAt.Equal(captured) {
 		t.Errorf("captured_at = %v, want %v", again.CapturedAt, captured)
 	}
 
-	if err := s.ReplaceImage(ctx, newImage("nao-existe", time.Now())); !errors.Is(err, ErrNotFound) {
+	ghost := newImage("nao-existe", time.Now())
+	if err := s.ReplaceImage(ctx, ghost, ghost.UpdatedAt); !errors.Is(err, ErrNotFound) {
 		t.Errorf("Replace de inexistente: err = %v, want ErrNotFound", err)
 	}
 
@@ -232,19 +242,20 @@ func TestListImagesFiltros(t *testing.T) {
 
 	// A: noturna, um caminhão branco.
 	a := newImage("a", base)
-	a.Status, a.DayTime, a.Equipment = StatusReviewed, "night", "8003-MF4739"
+	a.Status, a.DayTime, a.Equipment = StatusVerified, "night", "8003-MF4739"
 	a.Vehicles = []Vehicle{{Plate: "AAA1111", Type: "truck", Color: "white"}}
 
 	// B: noturna, caminhão PRETO + carro BRANCO (a pegadinha do $elemMatch).
 	b := newImage("b", base.Add(time.Minute))
-	b.Status, b.DayTime, b.Equipment = StatusReviewed, "night", "1000-AAA"
+	b.Status, b.DayTime, b.Equipment = StatusVerified, "night", "1000-AAA"
 	b.Vehicles = []Vehicle{
 		{Plate: "BBB2222", Type: "truck", Color: "black"},
 		{Plate: "CCC3333", Type: "car", Color: "white"},
 	}
 
-	// C: pending, sem anotação.
+	// C: pending, sem anotação, em outro pacote.
 	c := newImage("c", base.Add(2*time.Minute))
+	c.Package = "pacote-2"
 
 	for _, img := range []*Image{c, a, b} { // inseridas fora de ordem de propósito
 		if err := s.InsertImage(ctx, img); err != nil {
@@ -259,6 +270,7 @@ func TestListImagesFiltros(t *testing.T) {
 	}{
 		{"sem filtro, mais antigas primeiro", ImageFilter{}, "[a b c]"},
 		{"por status", ImageFilter{Status: StatusPending}, "[c]"},
+		{"por pacote", ImageFilter{Package: "pacote-1"}, "[a b]"},
 		{"por período", ImageFilter{DayTime: "night"}, "[a b]"},
 		{"por equipamento", ImageFilter{Equipment: "1000-AAA"}, "[b]"},
 		{"caminhão branco ($elemMatch)", ImageFilter{VehicleType: "truck", VehicleColor: "white"}, "[a]"},
@@ -312,15 +324,18 @@ func TestExistingImages(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
 	s.InsertImage(ctx, newImage("x1", time.Now()))
-	reviewed := newImage("x2", time.Now())
-	reviewed.Status = StatusReviewed
-	s.InsertImage(ctx, reviewed)
+	verified := newImage("x2", time.Now())
+	verified.Status = StatusVerified
+	verified.Package = "outro-pacote"
+	s.InsertImage(ctx, verified)
 
 	found, err := s.ExistingImages(ctx, []string{"x1", "x2", "x3"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(found) != 2 || found["x1"] != StatusPending || found["x2"] != StatusReviewed {
+	want1 := ExistingImage{Package: "pacote-1", Status: StatusPending}
+	want2 := ExistingImage{Package: "outro-pacote", Status: StatusVerified}
+	if len(found) != 2 || found["x1"] != want1 || found["x2"] != want2 {
 		t.Errorf("ExistingImages = %v", found)
 	}
 	if _, ok := found["x3"]; ok {
@@ -339,7 +354,7 @@ func TestInsertHistory(t *testing.T) {
 	now := ms(time.Now())
 	err := s.InsertHistory(ctx, []HistoryEntry{
 		{ImageID: "a", Field: "day_time", Old: "day", New: "night", ChangedBy: "nathan", ChangedAt: now},
-		{ImageID: "a", Field: "status", Old: "pending", New: "reviewed", ChangedBy: "nathan", ChangedAt: now},
+		{ImageID: "a", Field: "status", Old: "pending", New: "verified", ChangedBy: "nathan", ChangedAt: now},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -351,5 +366,234 @@ func TestInsertHistory(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("histórico com %d entradas, want 2", n)
+	}
+}
+
+func TestPacotes(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	if err := s.CreatePackage(ctx, "antigo", "nathan"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond) // created_at diferente para testar a ordem
+	if err := s.CreatePackage(ctx, "novo", "maria"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if err := s.CreatePackage(ctx, "vazio", "nathan"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreatePackage(ctx, "antigo", "outro"); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicado: err = %v, want ErrDuplicate", err)
+	}
+
+	p, err := s.FindPackage(ctx, "novo")
+	if err != nil || p.CreatedBy != "maria" {
+		t.Errorf("FindPackage = %+v, %v", p, err)
+	}
+	if _, err := s.FindPackage(ctx, "nao-existe"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("inexistente: err = %v, want ErrNotFound", err)
+	}
+
+	// antigo: 2 verificadas + 1 pendente. novo: 1 pendente. vazio: nada.
+	for i, st := range []string{StatusVerified, StatusVerified, StatusPending} {
+		img := newImage(fmt.Sprintf("antigo-%d", i), time.Now())
+		img.Package, img.Status = "antigo", st
+		s.InsertImage(ctx, img)
+	}
+	img := newImage("novo-0", time.Now())
+	img.Package = "novo"
+	s.InsertImage(ctx, img)
+
+	pkgs, err := s.ListPackages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]PackageSummary{}
+	var order []string
+	for _, p := range pkgs {
+		got[p.Name] = p
+		order = append(order, p.Name)
+	}
+
+	if fmt.Sprint(order) != "[vazio novo antigo]" {
+		t.Errorf("ordem = %v, want mais novos primeiro", order)
+	}
+	check := func(name string, total, verified, pending int64) {
+		t.Helper()
+		p := got[name]
+		if p.Total != total || p.Verified != verified || p.Pending != pending {
+			t.Errorf("%s: total=%d verified=%d pending=%d; want %d/%d/%d",
+				name, p.Total, p.Verified, p.Pending, total, verified, pending)
+		}
+	}
+	check("antigo", 3, 2, 1)
+	check("novo", 1, 0, 1)
+	check("vazio", 0, 0, 0)
+
+	if got["antigo"].CreatedBy != "nathan" {
+		t.Error("o resumo deveria trazer os dados do pacote (inline)")
+	}
+}
+
+func TestClaimNextOrdemPularERecarregar(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range []string{"q1", "q2", "q3"} {
+		s.InsertImage(ctx, newImage(id, base.Add(time.Duration(i)*time.Minute)))
+	}
+	now := ms(time.Now())
+	lease := 15 * time.Minute
+
+	next := func(user, skip string) string {
+		t.Helper()
+		img, err := s.ClaimNext(ctx, "pacote-1", user, skip, lease, now)
+		if errors.Is(err, ErrNotFound) {
+			return "<vazia>"
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if img.ClaimedBy != user || img.ClaimedUntil == nil || !img.ClaimedUntil.Equal(now.Add(lease)) {
+			t.Errorf("imagem %s não veio reservada para %s: %+v", img.SHA1, user, img)
+		}
+		return img.SHA1
+	}
+
+	if got := next("nathan", ""); got != "q1" {
+		t.Errorf("primeira = %s, want q1", got)
+	}
+	if got := next("nathan", ""); got != "q1" {
+		t.Errorf("recarregar = %s, want q1 de novo", got)
+	}
+	if got := next("maria", ""); got != "q2" {
+		t.Errorf("maria = %s, want q2 (q1 está com nathan)", got)
+	}
+	if got := next("nathan", "q1"); got != "q3" {
+		t.Errorf("nathan pulando q1 = %s, want q3", got)
+	}
+	if got := next("joao", ""); got != "q1" {
+		t.Errorf("joao = %s, want q1 (pulada, voltou livre no fim da fila)", got)
+	}
+	if got := next("ana", ""); got != "<vazia>" {
+		t.Errorf("ana = %s, want fila vazia (todas reservadas)", got)
+	}
+
+	// Prazo vencido: a imagem volta para a fila.
+	later := now.Add(lease + time.Second)
+	img, err := s.ClaimNext(ctx, "pacote-1", "ana", "", lease, later)
+	if err != nil {
+		t.Fatalf("com prazos vencidos, ana deveria receber uma imagem: %v", err)
+	}
+	if img.ClaimedBy != "ana" {
+		t.Errorf("claimed_by = %q", img.ClaimedBy)
+	}
+}
+
+func TestClaimNextOutroPacoteEVerificadas(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	other := newImage("outro", time.Now())
+	other.Package = "pacote-2"
+	done := newImage("feita", time.Now())
+	done.Status = StatusVerified
+	s.InsertImage(ctx, other)
+	s.InsertImage(ctx, done)
+
+	if _, err := s.ClaimNext(ctx, "pacote-1", "nathan", "", time.Minute, time.Now()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("só há imagem de outro pacote e verificada: err = %v, want ErrNotFound", err)
+	}
+}
+
+// O teste mais importante da fila: muita gente clicando "próxima" AO MESMO
+// TEMPO nunca pode receber a mesma imagem.
+func TestClaimNextConcorrente(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	const images, users = 5, 20
+
+	for i := 0; i < images; i++ {
+		s.InsertImage(ctx, newImage(fmt.Sprintf("c%d", i), time.Now()))
+	}
+
+	type result struct {
+		sha string
+		err error
+	}
+	results := make(chan result, users)
+	start := make(chan struct{})
+	for u := 0; u < users; u++ {
+		go func(user string) {
+			<-start // todos largam juntos
+			img, err := s.ClaimNext(ctx, "pacote-1", user, "", time.Minute, time.Now())
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			results <- result{sha: img.SHA1}
+		}(fmt.Sprintf("user-%d", u))
+	}
+	close(start)
+
+	seen := map[string]bool{}
+	empty := 0
+	for u := 0; u < users; u++ {
+		r := <-results
+		switch {
+		case errors.Is(r.err, ErrNotFound):
+			empty++
+		case r.err != nil:
+			t.Fatal(r.err)
+		case seen[r.sha]:
+			t.Fatalf("a imagem %s foi entregue para duas pessoas", r.sha)
+		default:
+			seen[r.sha] = true
+		}
+	}
+	if len(seen) != images || empty != users-images {
+		t.Errorf("%d imagens entregues e %d filas vazias; want %d e %d", len(seen), empty, images, users-images)
+	}
+}
+
+func TestReleaseClaim(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	s.InsertImage(ctx, newImage("r1", time.Now()))
+	s.ClaimNext(ctx, "pacote-1", "nathan", "", time.Hour, time.Now())
+
+	s.ReleaseClaim(ctx, "r1", "maria") // não é dela: não pode liberar
+	if img, _ := s.FindImage(ctx, "r1"); img.ClaimedBy != "nathan" {
+		t.Fatal("maria liberou a imagem do nathan")
+	}
+
+	if err := s.ReleaseClaim(ctx, "r1", "nathan"); err != nil {
+		t.Fatal(err)
+	}
+	img, _ := s.FindImage(ctx, "r1")
+	if img.ClaimedBy != "" || img.ClaimedUntil != nil {
+		t.Errorf("release não limpou: %+v", img)
+	}
+}
+
+func TestPacotesInProgress(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	s.CreatePackage(ctx, "pacote-1", "nathan")
+	for _, id := range []string{"p1", "p2", "p3"} {
+		s.InsertImage(ctx, newImage(id, time.Now()))
+	}
+	s.ClaimNext(ctx, "pacote-1", "nathan", "", time.Hour, time.Now())
+	s.ClaimNext(ctx, "pacote-1", "maria", "", time.Hour, time.Now())
+	s.ClaimNext(ctx, "pacote-1", "joao", "", -time.Minute, time.Now()) // já nasce vencido
+
+	pkgs, err := s.ListPackages(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pkgs[0].InProgress != 2 || pkgs[0].Pending != 3 {
+		t.Errorf("in_progress=%d pending=%d; want 2 e 3", pkgs[0].InProgress, pkgs[0].Pending)
 	}
 }

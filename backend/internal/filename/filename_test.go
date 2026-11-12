@@ -232,3 +232,15 @@ func TestCodigosSemSeparadores(t *testing.T) {
 		}
 	}
 }
+
+func TestSanitizePackage(t *testing.T) {
+	got, err := SanitizePackage("  Noturnas   Setembro 2026 ")
+	if err != nil || got != "Noturnas-Setembro-2026" {
+		t.Errorf("SanitizePackage = %q, %v", got, err)
+	}
+	for _, bad := range []string{"", "../etc", "pacote/sub", "pacote_1", strings.Repeat("a", 49)} {
+		if _, err := SanitizePackage(bad); err == nil {
+			t.Errorf("SanitizePackage(%q): esperava erro", bad)
+		}
+	}
+}

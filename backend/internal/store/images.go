@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	StatusPending  = "pending"  // em staging, aguardando anotação
-	StatusReviewed = "reviewed" // anotada, em dataset com nome v2
+	StatusPending  = "pending"  // no pacote com nome = hash, aguardando verificação
+	StatusVerified = "verified" // anotada e conferida, renomeada para o padrão v2
 )
 
 type Vehicle struct {
@@ -27,9 +27,10 @@ type Vehicle struct {
 // a não ser que o nome original já viesse no padrão v2 (pré-preenchido).
 type Image struct {
 	SHA1         string `bson:"_id" json:"sha1"`
+	Package      string `bson:"package" json:"package"` // cada imagem pertence a UM pacote
 	Status       string `bson:"status" json:"status"`
 	OriginalName string `bson:"original_name" json:"original_name"`
-	FileName     string `bson:"file_name,omitempty" json:"file_name,omitempty"` // nome v2, quando reviewed
+	FileName     string `bson:"file_name,omitempty" json:"file_name,omitempty"` // nome v2, quando verified
 	Path         string `bson:"path" json:"path"`                               // relativo a IMAGES_DIR
 	Ext          string `bson:"ext" json:"ext"`
 	Size         int64  `bson:"size" json:"size"`
@@ -47,8 +48,22 @@ type Image struct {
 	CapturedAt     *time.Time `bson:"captured_at,omitempty" json:"captured_at,omitempty"` // ponteiro: pending não tem data
 	Vehicles       []Vehicle  `bson:"vehicles,omitempty" json:"vehicles,omitempty"`
 
+	// Fila de trabalho: quem está com a imagem e até quando (ver ClaimNext).
+	// Sem claimed_until, ou com ele no passado, a imagem está livre.
+	ClaimedBy    string     `bson:"claimed_by,omitempty" json:"claimed_by,omitempty"`
+	ClaimedUntil *time.Time `bson:"claimed_until,omitempty" json:"claimed_until,omitempty"`
+	// QueuedAt define a ordem da fila. Começa igual ao ingested_at; quando
+	// alguém pula a imagem, vira "agora" e ela vai para o fim da fila.
+	QueuedAt time.Time `bson:"queued_at" json:"queued_at"`
+
 	IngestedAt time.Time `bson:"ingested_at" json:"ingested_at"`
 	UpdatedAt  time.Time `bson:"updated_at" json:"updated_at"`
+}
+
+// ClaimedByOther diz se outra pessoa está com a imagem agora.
+func (img *Image) ClaimedByOther(user string, now time.Time) bool {
+	return img.ClaimedBy != "" && img.ClaimedBy != user &&
+		img.ClaimedUntil != nil && img.ClaimedUntil.After(now)
 }
 
 // InsertImage grava uma imagem nova. Retorna ErrDuplicate se o sha1 já existe:

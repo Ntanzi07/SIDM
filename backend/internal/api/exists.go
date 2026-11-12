@@ -15,12 +15,13 @@ type existsRequest struct {
 }
 
 type existingImage struct {
-	SHA1   string `json:"sha1"`
-	Status string `json:"status"`
+	SHA1    string `json:"sha1"`
+	Package string `json:"package"` // em qual pacote ela já está
+	Status  string `json:"status"`
 }
 
 type existsResponse struct {
-	Existing []existingImage `json:"existing"` // já estão no sistema: não precisa subir
+	Existing []existingImage `json:"existing"` // já estão no sistema: o front pula essas
 	Missing  []string        `json:"missing"`  // não existem: o front sobe só esses
 }
 
@@ -70,8 +71,8 @@ func (s *Server) handleExists(w http.ResponseWriter, r *http.Request) {
 
 	resp := existsResponse{Existing: []existingImage{}, Missing: []string{}}
 	for _, id := range ids {
-		if status, ok := found[id]; ok {
-			resp.Existing = append(resp.Existing, existingImage{SHA1: id, Status: status})
+		if e, ok := found[id]; ok {
+			resp.Existing = append(resp.Existing, existingImage{SHA1: id, Package: e.Package, Status: e.Status})
 		} else {
 			resp.Missing = append(resp.Missing, id)
 		}

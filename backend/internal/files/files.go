@@ -1,12 +1,15 @@
 // Package files cuida das imagens no disco:
 //
-//	<root>/tmp/      uploads em andamento
-//	<root>/staging/  <sha1>.<ext>             aguardando anotação (pending)
-//	<root>/dataset/  <nome v2 completo>.<ext> anotadas (reviewed)
+//	<root>/tmp/                         uploads em andamento
+//	<root>/dataset/<pacote>/<sha1>.jpg  pendente (ainda não verificada)
+//	<root>/dataset/<pacote>/<nome v2>   verificada
 //
-// tmp fica dentro de root de propósito: assim o os.Rename de tmp para
-// staging é no mesmo disco, ou seja, instantâneo e atômico (nunca existe
-// um arquivo "pela metade" em staging).
+// Cada imagem pertence a UM pacote, então a pasta do pacote mostra
+// exatamente o que ele contém.
+//
+// tmp fica dentro de root de propósito: assim o os.Rename de tmp para a
+// pasta do pacote é no mesmo disco, ou seja, instantâneo e atômico (nunca
+// existe um arquivo "pela metade" no dataset).
 package files
 
 import (
@@ -23,9 +26,9 @@ type Storage struct {
 	root string
 }
 
-// NewStorage cria as pastas necessárias (se ainda não existirem).
+// NewStorage cria as pastas base (se ainda não existirem).
 func NewStorage(root string) (*Storage, error) {
-	for _, dir := range []string{"tmp", "staging", "dataset"} {
+	for _, dir := range []string{"tmp", "dataset"} {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
 			return nil, fmt.Errorf("criar pasta %s: %w", dir, err)
 		}
@@ -58,30 +61,46 @@ func (st *Storage) Receive(r io.Reader) (tmpPath, sum string, size int64, err er
 	return f.Name(), hex.EncodeToString(h.Sum(nil)), size, nil
 }
 
-// StagingPath é o caminho RELATIVO (com "/", igual em Windows e Linux)
-// que vai salvo no banco.
-func StagingPath(sum, ext string) string {
-	return path.Join("staging", sum+ext)
+// PackageDir é a pasta RELATIVA de um pacote.
+func PackageDir(pkg string) string {
+	return path.Join("dataset", pkg)
 }
 
-// DatasetPath é o caminho relativo de uma imagem anotada.
-func DatasetPath(fileName string) string {
-	return path.Join("dataset", fileName)
+// PendingPath é onde fica uma imagem ainda não verificada (nome = só o hash).
+// Caminhos relativos usam "/" em qualquer sistema: é assim que vão para o banco.
+func PendingPath(pkg, sum, ext string) string {
+	return path.Join(PackageDir(pkg), sum+ext)
 }
 
-// Move move um arquivo entre dois caminhos relativos (ex: staging -> dataset).
-func (st *Storage) Move(fromRel, toRel string) error {
-	if err := os.Rename(st.Abs(fromRel), st.Abs(toRel)); err != nil {
-		return fmt.Errorf("mover %s -> %s: %w", fromRel, toRel, err)
+// VerifiedPath é onde fica uma imagem verificada (nome v2 completo).
+func VerifiedPath(pkg, fileName string) string {
+	return path.Join(PackageDir(pkg), fileName)
+}
+
+// EnsurePackageDir cria a pasta do pacote, se ainda não existir.
+func (st *Storage) EnsurePackageDir(pkg string) error {
+	if err := os.MkdirAll(st.Abs(PackageDir(pkg)), 0o755); err != nil {
+		return fmt.Errorf("criar pasta do pacote %s: %w", pkg, err)
 	}
 	return nil
 }
 
-// Stage move o temporário para staging/<sha1>.<ext>.
-func (st *Storage) Stage(tmpPath, sum, ext string) error {
-	dst := st.Abs(StagingPath(sum, ext))
+// Store move o temporário para o caminho relativo final (criando a pasta).
+func (st *Storage) Store(tmpPath, rel string) error {
+	dst := st.Abs(rel)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("criar pasta de %s: %w", rel, err)
+	}
 	if err := os.Rename(tmpPath, dst); err != nil {
-		return fmt.Errorf("mover para staging: %w", err)
+		return fmt.Errorf("guardar %s: %w", rel, err)
+	}
+	return nil
+}
+
+// Move move um arquivo entre dois caminhos relativos (ex: renomear para v2).
+func (st *Storage) Move(fromRel, toRel string) error {
+	if err := os.Rename(st.Abs(fromRel), st.Abs(toRel)); err != nil {
+		return fmt.Errorf("mover %s -> %s: %w", fromRel, toRel, err)
 	}
 	return nil
 }

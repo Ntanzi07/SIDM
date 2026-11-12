@@ -59,6 +59,7 @@ var conditionCodes = map[string]string{
 const (
 	maxEquipmentLen = 16
 	maxCameraLen    = 32
+	maxPackageLen   = 48 // vira nome de pasta: não entra no nome do arquivo
 )
 
 // --- Atributos do veículo ---
