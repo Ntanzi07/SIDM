@@ -1,24 +1,43 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net/http"
 	"os"
+	"time"
+
+	"SIDM/internal/api"
+	"SIDM/internal/store"
 )
 
 // Ponto de entrada do servidor SIDM.
-// TODO: carregar config, conectar no Mongo (internal/store) e registrar as rotas (internal/api).
 func main() {
-	addr := os.Getenv("HTTP_ADDR")
-	if addr == "" {
-		addr = ":8080"
-	}
+	addr := getenv("HTTP_ADDR", ":8080")
+	mongoURI := getenv("MONGO_URI", "mongodb://localhost:27017")
+	mongoDB := getenv("MONGO_DB", "sidm")
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("ok"))
-	})
+	// Conexão com timeout: se o Mongo não responder em 10s, o servidor nem sobe.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	s, err := store.New(ctx, mongoURI, mongoDB)
+	if err != nil {
+		log.Fatalf("falha ao conectar no Mongo: %v", err)
+	}
+	defer s.Close(context.Background())
+	log.Printf("conectado ao Mongo (%s)", mongoDB)
+
+	srv := api.New(s)
 
 	log.Printf("SIDM ouvindo em %s", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
+}
+
+// getenv retorna a variável de ambiente ou o valor padrão se estiver vazia.
+func getenv(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

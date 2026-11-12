@@ -1,8 +1,6 @@
 package filename
 
-// Tabelas de códigos do padrão de nome v2.
-// Regra de ouro: um código existente NUNCA muda de significado.
-// Pode adicionar códigos novos, nunca reaproveitar os antigos.
+import "maps"
 
 // --- Atributos da imagem ---
 
@@ -39,7 +37,7 @@ var imageRangeCodes = map[string]string{
 	"A": "wide",   // Amplo (n placas/img)
 }
 
-// TODO: confirmar com o time o significado de "S" (na tabela está "Sem avarias").
+// TODO: confirmar o significado de "S" (na tabela está "Sem avarias").
 var weatherCodes = map[string]string{
 	"S": "clear",
 	"C": "rain",
@@ -58,10 +56,10 @@ var conditionCodes = map[string]string{
 	"09": "multiple_plates",
 }
 
-// TODO: cadastrar os modelos reais de câmera usados pela Splice.
-var cameraCodes = map[string]string{
-	"C01": "modelo-exemplo",
-}
+const (
+	maxEquipmentLen = 16
+	maxCameraLen    = 32
+)
 
 // --- Atributos do veículo ---
 
@@ -90,24 +88,48 @@ var vehicleTypeCodes = map[string]string{
 
 // Cores alinhadas com a lista do Renavam.
 var colorCodes = map[string]string{
-	"YLW": "yellow",  // Amarela
-	"BLU": "blue",    // Azul
-	"BGE": "beige",   // Bege
-	"WHT": "white",   // Branca
-	"GRY": "gray",    // Cinza
-	"GLD": "golden",  // Dourada
-	"MRN": "maroon",  // Grená
-	"ORG": "orange",  // Laranja
-	"BRN": "brown",   // Marrom
-	"SLV": "silver",  // Prata
-	"BLK": "black",   // Preta
-	"PNK": "pink",    // Rosa
-	"PRP": "purple",  // Roxa
-	"GRN": "green",   // Verde
-	"RED": "red",     // Vermelha
+	"YLW": "yellow",     // Amarela
+	"BLU": "blue",       // Azul
+	"BGE": "beige",      // Bege
+	"WHT": "white",      // Branca
+	"GRY": "gray",       // Cinza
+	"GLD": "golden",     // Dourada
+	"MRN": "maroon",     // Grená
+	"ORG": "orange",     // Laranja
+	"BRN": "brown",      // Marrom
+	"SLV": "silver",     // Prata
+	"BLK": "black",      // Preta
+	"PNK": "pink",       // Rosa
+	"PRP": "purple",     // Roxa
+	"GRN": "green",      // Verde
+	"RED": "red",        // Vermelha
 	"MLT": "multicolor", // Fantasia
 }
 
 // TODO (seu): o Format() vai precisar do caminho inverso ("front" -> "F").
 // Escreva uma função que recebe um map e devolve o map invertido,
 // em vez de duplicar cada tabela na mão.
+
+// Codes retorna uma CÓPIA de todas as tabelas do padrão, indexadas pelo
+// nome do campo (o mesmo usado no Mongo). Cópia porque map em Go é
+// referência: quem alterar o retorno não pode estragar o parser.
+func Codes() map[string]map[string]string {
+	tables := map[string]map[string]string{
+		"direction":      directionCodes,
+		"resolution":     resolutionCodes,
+		"capture_angle":  captureAngleCodes,
+		"day_time":       dayTimeCodes,
+		"image_range":    imageRangeCodes,
+		"weather":        weatherCodes,
+		"conditions":     conditionCodes,
+		"plate_type":     plateTypeCodes,
+		"plate_category": plateCategoryCodes,
+		"vehicle_type":   vehicleTypeCodes,
+		"vehicle_color":  colorCodes,
+	}
+	out := make(map[string]map[string]string, len(tables))
+	for field, table := range tables {
+		out[field] = maps.Clone(table)
+	}
+	return out
+}
