@@ -21,15 +21,39 @@ import (
 //   GET  /images/{sha1}/file  o arquivo da imagem            [feito]
 //   PUT  /images/{sha1}   salva anotação / conclui (reviewed) [feito]
 //   POST /images          upload para staging (pending)      [feito]
-//   POST /images/exists   checa hashes antes do upload (evita duplicata)
+//   POST /images/exists   checa hashes antes do upload       [feito]
 //   POST /export          gera zip em streaming das imagens selecionadas
 
+// Store é tudo que a API precisa do banco.
+// A API depende desta interface, e não do *store.Store concreto: assim os
+// testes usam um banco em memória (ver api_test.go) e não precisam de Mongo.
+// O *store.Store satisfaz a interface sem declarar nada (interfaces em Go
+// são implícitas): basta ter os métodos.
+type Store interface {
+	Ping(ctx context.Context) error
+
+	ListEquipments(ctx context.Context) ([]string, error)
+	ListCameras(ctx context.Context) ([]string, error)
+	CreateEquipment(ctx context.Context, name string) error
+	CreateCamera(ctx context.Context, name string) error
+	EquipmentExists(ctx context.Context, name string) (bool, error)
+	CameraExists(ctx context.Context, name string) (bool, error)
+
+	InsertImage(ctx context.Context, img *store.Image) error
+	DeleteImage(ctx context.Context, sha1 string) error
+	FindImage(ctx context.Context, sha1 string) (*store.Image, error)
+	ReplaceImage(ctx context.Context, img *store.Image) error
+	ListImages(ctx context.Context, f store.ImageFilter) ([]store.Image, int64, error)
+	ExistingImages(ctx context.Context, ids []string) (map[string]string, error)
+	InsertHistory(ctx context.Context, entries []store.HistoryEntry) error
+}
+
 type Server struct {
-	store *store.Store
+	store Store
 	files *files.Storage
 }
 
-func New(s *store.Store, fs *files.Storage) *Server {
+func New(s Store, fs *files.Storage) *Server {
 	return &Server{store: s, files: fs}
 }
 
@@ -41,6 +65,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment))
 	mux.HandleFunc("POST /cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera))
 	mux.HandleFunc("POST /images", s.handleUpload)
+	mux.HandleFunc("POST /images/exists", s.handleExists)
 	mux.HandleFunc("GET /images", s.handleListImages)
 	mux.HandleFunc("GET /images/{sha1}", s.handleGetImage)
 	mux.HandleFunc("GET /images/{sha1}/file", s.handleImageFile)

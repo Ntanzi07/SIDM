@@ -153,3 +153,28 @@ func (s *Store) activeNameExists(ctx context.Context, collection, name string) (
 	}
 	return n > 0, nil
 }
+
+// ExistingImages recebe uma lista de sha1 e devolve quais já existem,
+// com o status de cada um. Uma consulta só ($in), não uma por hash.
+func (s *Store) ExistingImages(ctx context.Context, ids []string) (map[string]string, error) {
+	filter := bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids}}}}
+	opts := options.Find().SetProjection(bson.D{{Key: "status", Value: 1}}) // _id vem sempre
+
+	cur, err := s.db.Collection("images").Find(ctx, filter, opts)
+	if err != nil {
+		return nil, fmt.Errorf("consultar hashes: %w", err)
+	}
+	var docs []struct {
+		ID     string `bson:"_id"`
+		Status string `bson:"status"`
+	}
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("ler hashes: %w", err)
+	}
+
+	found := make(map[string]string, len(docs))
+	for _, d := range docs {
+		found[d.ID] = d.Status
+	}
+	return found, nil
+}

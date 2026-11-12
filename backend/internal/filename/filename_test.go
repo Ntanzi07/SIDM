@@ -2,6 +2,7 @@ package filename
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -118,6 +119,116 @@ func TestSanitize(t *testing.T) {
 	for _, in := range bad {
 		if _, err := SanitizeEquipment(in); err == nil {
 			t.Errorf("SanitizeEquipment(%q): esperava erro", in)
+		}
+	}
+}
+
+func TestIsAllowedExt(t *testing.T) {
+	for ext, want := range map[string]bool{
+		".jpg": true, ".JPG": true, ".jpeg": true, ".png": true,
+		".gif": false, ".txt": false, "": false,
+	} {
+		if got := IsAllowedExt(ext); got != want {
+			t.Errorf("IsAllowedExt(%q) = %v, want %v", ext, got, want)
+		}
+	}
+}
+
+func TestParseSHA1Maiusculo(t *testing.T) {
+	upper := strings.ToUpper(validName[:40]) + validName[40:]
+	m, err := Parse(upper)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.SHA1 != validName[:40] {
+		t.Errorf("sha1 deveria ser normalizado para minúsculo: %s", m.SHA1)
+	}
+}
+
+func TestParseExtensaoInvalida(t *testing.T) {
+	name := strings.TrimSuffix(validName, ".jpg") + ".gif"
+	if _, err := Parse(name); err == nil {
+		t.Error("esperava erro para .gif")
+	}
+}
+
+func TestFormatErros(t *testing.T) {
+	base, err := Parse(validName)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cases := map[string]func(m *ImageMeta){
+		"sem condições": func(m *ImageMeta) { m.Conditions = nil },
+		"sem veículos":  func(m *ImageMeta) { m.Vehicles = nil },
+		"placa inválida": func(m *ImageMeta) {
+			m.Vehicles = []Vehicle{{Plate: "AB-12", PlateType: "br", PlateCategory: "private", Type: "car", Color: "red"}}
+		},
+		"cor desconhecida":     func(m *ImageMeta) { m.Vehicles[0].Color = "roxo-neon" },
+		"equipamento com _":    func(m *ImageMeta) { m.Equipment = "8003_MF" },
+		"sha1 inválido":        func(m *ImageMeta) { m.SHA1 = "xyz" },
+		"condição inexistente": func(m *ImageMeta) { m.Conditions = []string{"no_damage", "aliens"} },
+	}
+	for name, mod := range cases {
+		t.Run(name, func(t *testing.T) {
+			m := base
+			m.Vehicles = append([]Vehicle(nil), base.Vehicles...) // cópia: não estragar o base
+			mod(&m)
+			if _, err := Format(m); err == nil {
+				t.Error("esperava erro")
+			}
+		})
+	}
+}
+
+func TestFormatConverteParaUTC(t *testing.T) {
+	m, _ := Parse(validName)
+	saoPaulo := time.FixedZone("BRT", -3*60*60)
+	m.CapturedAt = time.Date(2026, 11, 3, 19, 14, 0, 0, saoPaulo) // = 22:14 UTC
+
+	got, err := Format(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "_20261103T221400Z_") {
+		t.Errorf("data não convertida para UTC: %s", got)
+	}
+}
+
+func TestCodesRetornaCopia(t *testing.T) {
+	c := Codes()
+	c["day_time"]["X"] = "estragado"
+	delete(c["direction"], "F")
+
+	if _, ok := dayTimeCodes["X"]; ok {
+		t.Error("alterar o retorno de Codes() alterou a tabela original")
+	}
+	if _, err := Parse(validName); err != nil {
+		t.Errorf("parser quebrou depois de mexerem no retorno de Codes(): %v", err)
+	}
+}
+
+func TestTabelasSemValoresRepetidos(t *testing.T) {
+	// Se dois códigos tivessem o mesmo valor, o Format (que usa a tabela
+	// invertida) não saberia qual código escrever.
+	for field, table := range Codes() {
+		seen := map[string]string{}
+		for code, value := range table {
+			if other, ok := seen[value]; ok {
+				t.Errorf("%s: códigos %q e %q têm o mesmo valor %q", field, code, other, value)
+			}
+			seen[value] = code
+		}
+	}
+}
+
+func TestCodigosSemSeparadores(t *testing.T) {
+	// Um código com "_", "-" ou "." quebraria o split do Parse.
+	for field, table := range Codes() {
+		for code := range table {
+			if strings.ContainsAny(code, "_-.") {
+				t.Errorf("%s: código %q contém separador", field, code)
+			}
 		}
 	}
 }
