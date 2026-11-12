@@ -2,7 +2,10 @@ module SIDM
 
 go 1.27
 
-require go.mongodb.org/mongo-driver/v2 v2.10.0
+require (
+	github.com/joho/godotenv v1.5.1
+	go.mongodb.org/mongo-driver/v2 v2.10.0
+)
 
 require (
 	github.com/klauspost/compress v1.20.3 // indirect

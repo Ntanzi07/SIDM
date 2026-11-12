@@ -72,3 +72,52 @@ func TestParseInvalid(t *testing.T) {
 		})
 	}
 }
+
+func TestRoundTrip(t *testing.T) {
+	names := []string{
+		validName,
+		"02d9314a6112e8b95f97415dc96e5bf0682f3a3f_v2_8003-MF4739_hikvision-233_F-09-S-N-A-C_03.05_20261103T221400Z_ABC1D23-M-8-C-BLK.KOY7386-B-1-T-WHT.jpg",
+	}
+	for _, name := range names {
+		m, err := Parse(name)
+		if err != nil {
+			t.Fatalf("Parse(%q): %v", name, err)
+		}
+		got, err := Format(m)
+		if err != nil {
+			t.Fatalf("Format: %v", err)
+		}
+		if got+".jpg" != name {
+			t.Errorf("round-trip mudou o nome:\ngot:  %s\nwant: %s", got+".jpg", name)
+		}
+	}
+}
+
+func TestFormatInvalid(t *testing.T) {
+	m, _ := Parse(validName)
+	m.DayTime = "afternoon"
+	if _, err := Format(m); err == nil {
+		t.Error("esperava erro para período desconhecido")
+	}
+}
+
+func TestSanitize(t *testing.T) {
+	ok := map[string]string{
+		"8003 MF4739":     "8003-MF4739",
+		"  8003   MF4739": "8003-MF4739",
+		"8003-MF4739":     "8003-MF4739",
+	}
+	for in, want := range ok {
+		got, err := SanitizeEquipment(in)
+		if err != nil || got != want {
+			t.Errorf("SanitizeEquipment(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+
+	bad := []string{"", "   ", "8003_MF4739", "8003/MF4739", "-8003", "8003--MF", "nome-de-equipamento-longo-demais"}
+	for _, in := range bad {
+		if _, err := SanitizeEquipment(in); err == nil {
+			t.Errorf("SanitizeEquipment(%q): esperava erro", in)
+		}
+	}
+}

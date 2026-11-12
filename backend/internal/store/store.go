@@ -2,12 +2,17 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
+
+// ErrDuplicate indica que o nome já existe no cadastro (índice único).
+var ErrDuplicate = errors.New("já cadastrado")
 
 // Acesso ao MongoDB: collections images, image_history, cameras e equipments.
 type Store struct {
@@ -76,4 +81,29 @@ func (s *Store) listActiveNames(ctx context.Context, collection string) ([]strin
 		names = append(names, d.Name)
 	}
 	return names, nil
+}
+
+// CreateEquipment cadastra um equipamento (nome já sanitizado).
+func (s *Store) CreateEquipment(ctx context.Context, name string) error {
+	return s.createNamed(ctx, "equipments", name)
+}
+
+// CreateCamera cadastra uma câmera (nome já sanitizado).
+func (s *Store) CreateCamera(ctx context.Context, name string) error {
+	return s.createNamed(ctx, "cameras", name)
+}
+
+func (s *Store) createNamed(ctx context.Context, collection, name string) error {
+	_, err := s.db.Collection(collection).InsertOne(ctx, bson.D{
+		{Key: "name", Value: name},
+		{Key: "active", Value: true},
+		{Key: "created_at", Value: time.Now().UTC()},
+	})
+	if mongo.IsDuplicateKeyError(err) {
+		return ErrDuplicate // quem garante isso é o índice único do 01-init.js
+	}
+	if err != nil {
+		return fmt.Errorf("inserir em %s: %w", collection, err)
+	}
+	return nil
 }
