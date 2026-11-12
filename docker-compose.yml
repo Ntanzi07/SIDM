@@ -1,0 +1,34 @@
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      - ./mongo/init:/docker-entrypoint-initdb.d:ro
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      HTTP_ADDR: ":8080"
+      MONGO_URI: "mongodb://mongo:27017"
+      MONGO_DB: "sidm"
+      IMAGES_DIR: "/data/images"
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${IMAGES_HOST_DIR:-./data/images}:/data/images
+
+  # frontend:
+  #   build: ./frontend
+  #   ports:
+  #     - "3000:80"
+  #   depends_on:
+  #     - backend
+
+volumes:
+  mongo-data:
