@@ -1,8 +1,7 @@
 # --- build ---
 FROM golang:1.27-alpine AS build
 WORKDIR /src
-COPY go.mod ./
-# COPY go.sum ./   # descomente quando tiver dependências
+COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -o /sidm ./cmd/server
