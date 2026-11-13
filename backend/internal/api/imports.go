@@ -214,6 +214,7 @@ type importReport struct {
 
 	importer.Report // linhas lidas, valores sem tradução, erros de data...
 
+	WithoutINI      int      `json:"without_ini"`      // perfil de INI: imagens pendentes sem INI embutido
 	Matched         int      `json:"matched"`          // linhas que acharam a imagem
 	NotFound        []string `json:"not_found"`        // chaves sem imagem no pacote (até 100)
 	NotFoundCount   int      `json:"not_found_count"`  //
@@ -241,7 +242,8 @@ type RowName struct {
 }
 
 // POST /packages/{name}/import?profile=X&dry_run=true&overwrite=false
-// (multipart, campo "file")
+// (multipart, campo "file"; com perfil do tipo jpeg-ini, SEM arquivo: usa o
+// INI já guardado de cada imagem pendente do pacote)
 //
 // Casa cada linha do CSV com uma imagem do pacote e preenche o RASCUNHO.
 // Nunca verifica: uma pessoa continua conferindo pela fila.
@@ -274,42 +276,53 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	table, ok := s.readImportFile(w, r, profile.Reader)
-	if !ok {
-		return
-	}
-	if len(table.Rows) > 0 && !hasColumn(table, profile.Match.Column) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf(
-			"o CSV não tem a coluna %q que o perfil usa para achar a imagem (colunas: %s)",
-			profile.Match.Column, strings.Join(table.Columns, ", ")))
-		return
-	}
-
-	records, transformRep := importer.Transform(profile, table)
 	rep := importReport{
 		DryRun: dryRun, Package: pkg, Profile: profile.Name, Overwrite: overwrite,
-		Report:   transformRep,
+		Report:   importer.Report{Unmapped: map[string]map[string]int{}, Errors: []importer.RowError{}},
 		NotFound: []string{}, Ambiguous: []string{},
 		NewEquipments: []string{}, NewCameras: []string{}, InvalidNames: []RowName{},
 	}
 
-	// Busca todas as imagens de uma vez (em lotes), não uma consulta por linha.
-	keys := make([]string, len(records))
-	for i, rec := range records {
-		keys[i] = rec.Key
-	}
-	imgs, err := s.store.FindImagesByKeys(r.Context(), pkg, profile.Match.By, keys)
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	byKey := map[string][]store.Image{}
-	for _, img := range imgs {
-		k := img.OriginalName
-		if profile.Match.By == importer.MatchBySHA1 {
-			k = img.SHA1
+	var records []importer.Record
+	var byKey map[string][]store.Image
+
+	if profile.Reader.Type == importer.ReaderJPEGINI {
+		// Perfil de INI: sem arquivo; usa o INI já guardado de cada imagem pendente.
+		if records, byKey, ok = s.iniRecords(w, r, pkg, profile, &rep); !ok {
+			return
 		}
-		byKey[k] = append(byKey[k], img)
+	} else {
+		table, ok := s.readImportFile(w, r, profile.Reader)
+		if !ok {
+			return
+		}
+		if len(table.Rows) > 0 && !hasColumn(table, profile.Match.Column) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"o CSV não tem a coluna %q que o perfil usa para achar a imagem (colunas: %s)",
+				profile.Match.Column, strings.Join(table.Columns, ", ")))
+			return
+		}
+
+		records, rep.Report = importer.Transform(profile, table)
+
+		// Busca todas as imagens de uma vez (em lotes), não uma consulta por linha.
+		keys := make([]string, len(records))
+		for i, rec := range records {
+			keys[i] = rec.Key
+		}
+		imgs, err := s.store.FindImagesByKeys(r.Context(), pkg, profile.Match.By, keys)
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+		byKey = map[string][]store.Image{}
+		for _, img := range imgs {
+			k := img.OriginalName
+			if profile.Match.By == importer.MatchBySHA1 {
+				k = img.SHA1
+			}
+			byKey[k] = append(byKey[k], img)
+		}
 	}
 
 	user := userFrom(r)

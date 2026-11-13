@@ -95,10 +95,10 @@ func TestValidateErros(t *testing.T) {
 
 func TestValidateJuntaTodosOsErros(t *testing.T) {
 	p := sampleProfile()
-	p.Reader.Type = "xlsx"
 	p.Match.By = "x"
+	p.Reader.Encoding = "utf-16"
 	err := p.Validate()
-	if err == nil || !strings.Contains(err.Error(), "reader.type") || !strings.Contains(err.Error(), "match.by") {
+	if err == nil || !strings.Contains(err.Error(), "reader.encoding") || !strings.Contains(err.Error(), "match.by") {
 		t.Errorf("deveria listar os dois erros de uma vez: %v", err)
 	}
 }

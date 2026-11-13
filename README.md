@@ -7,8 +7,9 @@ imagem (equipamento, câmera, ângulo, clima, veículos, placas...), confere e
 **verifica**. A imagem verificada ganha um nome autodescritivo no padrão v2, e
 os metadados ficam no MongoDB, pesquisáveis por qualquer campo.
 
-Metadados que já existem em outro sistema (um CSV exportado, por exemplo) podem
-ser **importados** para pré-preencher as anotações.
+Metadados que já existem em outro lugar podem pré-preencher as anotações:
+um **CSV** exportado de outro sistema, ou o **INI que o equipamento grava dentro
+do próprio JPEG**.
 
 > **v1 interna:** não há login ainda. O usuário é informado no header `X-User`.
 > Rode apenas na rede interna.
@@ -22,8 +23,8 @@ ser **importados** para pré-preencher as anotações.
 ```
  1. criar pacote         2. upload                3. (opcional) import de CSV         4. fila de anotação          5. verificar
  POST /packages  ──▶  POST /images?package=X ──▶  POST /packages/X/import  ──▶  POST /packages/X/next  ──▶  PUT /images/{sha1}
-                      (pending, nome = hash)     (pré-preenche os rascunhos)    (cada pessoa pega uma)      {"complete": true}
-                                                                                                            (renomeia para v2)
+                      (pending, nome = hash;     (pré-preenche os rascunhos)    (cada pessoa pega uma)      {"complete": true}
+                       guarda o INI embutido)                                                               (renomeia para v2)
 ```
 
 - **Pacote:** um lote de imagens enviado junto. Cada pacote é uma pasta no servidor,
@@ -36,8 +37,9 @@ ser **importados** para pré-preencher as anotações.
   equipamento e câmera, renomeia para o padrão v2 e marca `verified`.
 - **Fila compartilhada:** várias pessoas anotam o mesmo pacote ao mesmo tempo, e cada
   uma pega "a próxima". Ninguém recebe a mesma imagem (veja [Fila de trabalho](#fila-de-trabalho)).
-- **Import:** um CSV preenche os rascunhos automaticamente, mas **nunca verifica**.
-  Uma pessoa continua conferindo pela fila (veja [Import de CSV](#import-de-csv)).
+- **Import:** um CSV ou o INI embutido na imagem preenchem os rascunhos automaticamente,
+  mas **nunca verificam**. Uma pessoa continua conferindo pela fila
+  (veja [Import de CSV](#import-de-csv) e [INI embutido no JPEG](#ini-embutido-no-jpeg)).
 - **Histórico:** toda alteração de campo vai para `image_history` (quem, o quê, quando).
 
 ### Status de uma imagem
@@ -69,7 +71,7 @@ SIDM/
     └── internal/
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
-        ├── importer/       leitura de CSV e perfis de import (sem banco, sem HTTP)
+        ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
         ├── store/          Mongo: imagens, pacotes, fila, cadastros, perfis, histórico
         └── api/            handlers HTTP (dependem da interface Store) + openapi.yaml
 ```
@@ -116,9 +118,9 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 | `GET /packages?q=noturnas` | pacotes (mais novos primeiro) com progresso: `total`, `verified`, `pending`, `in_progress` |
 | `POST /packages` | cria pacote `{"name": "Noturnas Setembro"}` → `Noturnas-Setembro` |
 | `POST /packages/{name}/next` | pega a próxima imagem da fila (`X-User` obrigatório; corpo opcional `{"skip": "<sha1>"}`) |
-| `POST /packages/{name}/import` | importa um CSV para os rascunhos (ensaio por padrão) |
+| `POST /packages/{name}/import` | importa um CSV (ou aplica um perfil de INI, sem arquivo) para os rascunhos; ensaio por padrão |
 | `GET /images` | busca com filtros e paginação (veja abaixo) |
-| `POST /images?package=X` | upload multipart (campo `files`, vários arquivos) |
+| `POST /images?package=X` | upload multipart (campo `files`, vários arquivos); `&profile=` aplica um perfil de INI |
 | `POST /images/exists` | `{"sha1s": [...]}` → quais já existem (e em que pacote) e quais faltam |
 | `GET /images/{sha1}` | detalhe de uma imagem (inclui o rascunho salvo) |
 | `PUT /images/{sha1}` | salva o rascunho, ou verifica com `"complete": true` |
@@ -225,12 +227,18 @@ importado direto, só escolhendo o perfil.
 
 | Parte | O que faz |
 |---|---|
-| `reader` | `type: "csv"`, `delimiter` (padrão `,`) e `encoding` (`utf-8` ou `latin1`). O BOM do Excel é removido. |
-| `match` | a coluna que identifica a imagem, comparada com o nome original (`original_name`) ou com o hash (`sha1`) |
+| `reader` | `type: "csv"`, com `delimiter` (padrão `,`) e `encoding` (`utf-8` ou `latin1`; o BOM do Excel é removido). Ou `type: "jpeg-ini"` (veja [INI embutido no JPEG](#ini-embutido-no-jpeg)). |
+| `match` | só no CSV: a coluna que identifica a imagem, comparada com o nome original (`original_name`) ou com o hash (`sha1`) |
 | `fields` | campos da imagem: `equipment`, `camera`, `direction`, `resolution`, `capture_angle`, `day_time`, `image_range`, `weather`, `conditions`, `captured_at` |
-| `vehicles` | `mode: "row"` (uma linha por veículo, agrupadas pela imagem) ou `"columns"` (`Placa{n}` na mesma linha, com `max`) |
+| `vehicles` | `mode: "single"` (um veículo por imagem), `"row"` (uma linha por veículo, agrupadas pela imagem) ou `"columns"` (`Placa{n}` na mesma linha, com `max`) |
 
-Cada campo usa `column` (valor de uma coluna) **ou** `value` (valor fixo para o arquivo todo), mais:
+Cada campo usa **um** de:
+- `column`: o valor de uma coluna (no INI, `"Secao.Chave"`);
+- `value`: um valor fixo para o arquivo todo;
+- `template`: junta várias colunas, como `"{Metrologico.Data} {Metrologico.Hora}"`. Se alguma
+  coluna citada estiver vazia, o campo fica vazio, em vez de um valor pela metade.
+
+E pode ter ainda:
 - `map`: traduz o valor de origem para o nosso (ignora maiúscula);
 - `split`: separa uma lista numa célula só (só em `conditions`);
 - `date_format` + `timezone`: o formato da data no layout do Go, e o fuso em que ela foi escrita (só em `captured_at`).
@@ -251,6 +259,67 @@ Cada campo usa `column` (valor de uma coluna) **ou** `value` (valor fixo para o 
 
 > **Separador na URL:** use o nome (`semicolon`, `tab`, `pipe`, `comma`). Um `;` cru na
 > query string é descartado pelo Go.
+
+---
+
+## INI embutido no JPEG
+
+Equipamentos de fiscalização gravam um **INI depois do fim do JPEG**. Visualizadores
+ignoram o que vem depois do fim da imagem, então o arquivo abre normal e o texto fica
+"escondido" no mesmo arquivo:
+
+```
+FF D8 ... (imagem) ... FF D9
+[Metrologico]
+Data=18/09/2026
+Hora=10:32:28
+...
+[NMetrologico]
+Equip = MFR1-0001
+Placa = GGB5H24
+```
+
+| Momento | O que acontece |
+|---|---|
+| **Todo upload** | se o JPEG tem INI, ele é **guardado no banco** (campo `ini` da imagem), na ordem original. Não precisa de perfil. |
+| **Upload com `?profile=`** | além de guardar, um perfil do tipo `jpeg-ini` **pré-preenche o rascunho**. Equipamento e câmera novos são cadastrados sozinhos. |
+| **Import com perfil de INI** | `POST /packages/X/import?profile=Y` **sem arquivo**: aplica o perfil no INI já guardado das imagens pendentes. Serve para um perfil criado ou corrigido depois do upload. Ensaio por padrão, como no CSV. |
+
+**O arquivo nunca é alterado.** O INI desses equipamentos costuma ser **assinado
+digitalmente** (campos `Assinatura` e `Hash`), e qualquer mudança nos bytes invalida a
+assinatura. O SIDM só renomeia o arquivo: nunca recomprime, limpa ou reescreve.
+A `Assinatura` também **não** vai para o banco, porque só faz sentido junto do arquivo original.
+
+### Exemplo de perfil de INI
+
+```json
+{
+  "name": "ini-mfr1",
+  "reader": { "type": "jpeg-ini" },
+  "fields": {
+    "equipment":   { "column": "NMetrologico.Equip" },
+    "captured_at": { "template": "{Metrologico.Data} {Metrologico.Hora}.{Metrologico.Milisegundo}",
+                     "date_format": "02/01/2006 15:04:05.000",
+                     "timezone": "America/Sao_Paulo" }
+  },
+  "vehicles": { "mode": "single", "fields": {
+    "plate": { "column": "NMetrologico.Placa" },
+    "type":  { "column": "NMetrologico.TipoVeiculo", "map": { "AUTOMOVEL": "car" } }
+  }}
+}
+```
+
+- As chaves são `"Secao.Chave"`. Uma chave que aparece em duas seções (como `Hora`)
+  não colide: vira `Metrologico.Hora` e `NMetrologico.Hora`.
+- O leitor limpa os espaços em volta do `=` (`Placa = GGB5H24`) e os que sobram nos
+  valores (`AUTOMOVEL           `). INI gravado em Latin-1 também funciona.
+- O INI não tem `match`: a imagem é a própria origem dos dados.
+- Para descobrir as chaves de um equipamento novo, suba uma foto e abra o
+  `GET /images/{sha1}`: o campo `ini` lista tudo.
+
+**Avisos no upload:** um valor sem tradução no perfil, ou uma data num formato
+inesperado, **não** impede o upload. O resultado da imagem traz um `warnings`
+explicando o problema, e o campo fica vazio.
 
 ---
 
@@ -339,6 +408,9 @@ Os testes do `store` usam o usuário root do `.env` e um banco descartável
 Sem Mongo rodando, eles aparecem como `SKIP`. Entre eles está um teste de concorrência:
 20 pessoas pedindo "próxima" ao mesmo tempo, sem nenhuma imagem repetida.
 
+Os testes do INI usam um JPEG **sintético**, montado no próprio teste: nenhuma foto real
+(com placa) fica no repositório.
+
 O `TestTodaRotaEstaDocumentada` falha se uma rota existir no código e não no
 `openapi.yaml` (ou o contrário). **Toda rota nova precisa entrar na documentação.**
 
@@ -361,6 +433,9 @@ go tool cover -html=cover.out
 - **Perfis de import como dados:** um formato de CSV novo é configuração, não código.
   O perfil é guardado no Mongo como o próprio texto JSON, para qualquer valor do CSV
   (com `.` ou `$`) funcionar como chave do `map`.
+- **O arquivo original é intocável:** o INI dos equipamentos é assinado, então o SIDM
+  só renomeia. O INI vai para o banco como uma **lista** de `{section, key, value}`, e
+  não como mapa, para manter a ordem e para chaves com `.` ou `$` não serem problema.
 - **Banco e disco nunca divergem:** quando uma operação mexe nos dois e a segunda parte
   falha, a primeira é desfeita.
 - **Menor privilégio:** o backend usa o `sidm_app`, que só tem `readWrite` no banco `sidm`.
@@ -380,4 +455,8 @@ go tool cover -html=cover.out
 - [ ] Graceful shutdown
 - [ ] Validador `$jsonSchema` no Mongo
 - [ ] Regra para veículo com placa ilegível
-- [ ] Leitores de INI e EXIF para o import
+- [ ] Detectar o perfil de INI sozinho, pelo modelo do equipamento (`Metrologico.Modelo`)
+- [ ] `/imports/inspect` aceitar um JPEG e mostrar as chaves do INI
+- [ ] Descriptografia de imagens criptografadas (aguardando o formato)
+- [ ] Caixa da placa (`OCRPosicaoLeitura`) e marcações próprias, com export para o RF-DETR (COCO, 70/15/15)
+- [ ] Leitor de EXIF para o import

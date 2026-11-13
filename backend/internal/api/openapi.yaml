@@ -177,6 +177,9 @@ paths:
         (nunca verifica). Equipamentos e câmeras novos são cadastrados.
 
         **O padrão é ensaio**: só grava com `dry_run=false`.
+
+        Com um perfil do tipo `jpeg-ini`, **não mande arquivo**: o import usa o INI
+        já guardado de cada imagem pendente do pacote.
       parameters:
         - $ref: "#/components/parameters/PackageName"
         - $ref: "#/components/parameters/XUser"
@@ -191,7 +194,15 @@ paths:
           in: query
           description: "false: só preenche campos vazios. true: o CSV substitui o rascunho."
           schema: { type: boolean, default: false }
-      requestBody: { $ref: "#/components/requestBodies/CSVFile" }
+      requestBody:
+        required: false
+        description: O CSV (não precisa com perfil jpeg-ini).
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file: { type: string, format: binary }
       responses:
         "200":
           description: Relatório do import.
@@ -242,10 +253,18 @@ paths:
       description: |
         Imagem repetida (mesmo conteúdo) que já está em outro pacote é **pulada**,
         e o resto do lote segue.
+
+        O INI que o equipamento grava **dentro** do JPEG é sempre guardado no banco
+        (menos a assinatura). Com `profile` (do tipo `jpeg-ini`), ele também
+        pré-preenche o rascunho. O arquivo nunca é alterado.
       parameters:
         - name: package
           in: query
           required: true
+          schema: { type: string }
+        - name: profile
+          in: query
+          description: Perfil do tipo jpeg-ini, opcional.
           schema: { type: string }
       requestBody:
         required: true
@@ -619,11 +638,22 @@ components:
         vehicles:
           type: array
           items: { $ref: "#/components/schemas/Vehicle" }
+        ini:
+          type: array
+          description: O INI embutido no arquivo, na ordem original (sem a assinatura).
+          items: { $ref: "#/components/schemas/INIEntry" }
         claimed_by: { type: string, description: Quem está anotando agora. }
         claimed_until: { type: string, format: date-time }
         queued_at: { type: string, format: date-time }
         ingested_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+
+    INIEntry:
+      type: object
+      properties:
+        section: { type: string, example: NMetrologico }
+        key: { type: string, example: Placa }
+        value: { type: string, example: GGB5H24 }
 
     AnnotationRequest:
       type: object
@@ -682,15 +712,24 @@ components:
         sha1: { type: string }
         status: { type: string, enum: [created, duplicate, error] }
         existing_package: { type: string, description: "Se duplicate: onde ela já está." }
-        prefilled: { type: boolean }
+        ini: { type: boolean, description: O arquivo tinha INI embutido. }
+        prefilled: { type: boolean, description: "Nome v2 válido ou perfil de INI aplicado." }
+        warnings:
+          type: array
+          items: { type: string }
+          description: Ex. valor do INI sem tradução no perfil. Não impede o upload.
         error: { type: string }
 
     FieldRule:
       type: object
-      description: Use `column` OU `value`.
+      description: Use `column`, `value` OU `template`.
       properties:
-        column: { type: string }
+        column: { type: string, description: "No CSV, o nome da coluna. No INI, \"Secao.Chave\"." }
         value: { type: string, description: Valor fixo para o arquivo todo. }
+        template:
+          type: string
+          description: Junta colunas. Se alguma estiver vazia, o resultado é vazio.
+          example: "{Metrologico.Data} {Metrologico.Hora}.{Metrologico.Milisegundo}"
         map:
           type: object
           description: Valor de origem → nosso valor. Ignora maiúscula.
@@ -708,11 +747,12 @@ components:
         reader:
           type: object
           properties:
-            type: { type: string, enum: [csv] }
+            type: { type: string, enum: [csv, jpeg-ini] }
             delimiter: { type: string, example: ";" }
             encoding: { type: string, enum: [utf-8, latin1] }
         match:
           type: object
+          description: Só no CSV (no INI a imagem é a própria origem).
           properties:
             column: { type: string, example: imagem_nome }
             by: { type: string, enum: [original_name, sha1] }
@@ -723,7 +763,7 @@ components:
         vehicles:
           type: object
           properties:
-            mode: { type: string, enum: [row, columns] }
+            mode: { type: string, enum: [single, row, columns], description: "single: um veículo por imagem (o caso do INI)." }
             max: { type: integer, description: Só no modo columns. }
             fields:
               type: object
@@ -776,11 +816,13 @@ components:
             additionalProperties: { type: integer }
           example: { weather: { Garoa: 12 } }
         missing_key: { type: integer }
+        without_ini: { type: integer, description: "Perfil jpeg-ini: imagens pendentes sem INI embutido." }
         errors:
           type: array
           items:
             type: object
             properties:
+              key: { type: string, description: "No import de INI: o sha1 da imagem." }
               line: { type: integer }
               field: { type: string }
               error: { type: string }

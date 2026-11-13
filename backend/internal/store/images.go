@@ -7,6 +7,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
+
+	"SIDM/internal/importer"
 )
 
 const (
@@ -47,6 +49,11 @@ type Image struct {
 	Conditions     []string   `bson:"conditions,omitempty" json:"conditions,omitempty"`
 	CapturedAt     *time.Time `bson:"captured_at,omitempty" json:"captured_at,omitempty"` // ponteiro: pending não tem data
 	Vehicles       []Vehicle  `bson:"vehicles,omitempty" json:"vehicles,omitempty"`
+
+	// INI: os metadados que o equipamento gravou DENTRO do arquivo (depois do
+	// fim do JPEG). Cópia para busca e para os perfis de import; o arquivo
+	// original continua intacto no disco. A assinatura não é guardada.
+	INI []importer.INIEntry `bson:"ini,omitempty" json:"ini,omitempty"`
 
 	// Fila de trabalho: quem está com a imagem e até quando (ver ClaimNext).
 	// Sem claimed_until, ou com ele no passado, a imagem está livre.

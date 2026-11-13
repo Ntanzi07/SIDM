@@ -14,6 +14,7 @@ import (
 
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
+	"SIDM/internal/importer"
 	"SIDM/internal/store"
 )
 
@@ -21,16 +22,21 @@ import (
 const maxUploadBytes = 5 << 30 // 5 GB
 
 type uploadResult struct {
-	File            string `json:"file"`
-	SHA1            string `json:"sha1,omitempty"`
-	Status          string `json:"status"`                     // created | duplicate | error
-	ExistingPackage string `json:"existing_package,omitempty"` // duplicate: onde a imagem já está
-	Prefilled       bool   `json:"prefilled,omitempty"`        // nome original já era v2 válido
-	Error           string `json:"error,omitempty"`
+	File            string   `json:"file"`
+	SHA1            string   `json:"sha1,omitempty"`
+	Status          string   `json:"status"`                     // created | duplicate | error
+	ExistingPackage string   `json:"existing_package,omitempty"` // duplicate: onde a imagem já está
+	INI             bool     `json:"ini,omitempty"`              // o arquivo tinha INI embutido
+	Prefilled       bool     `json:"prefilled,omitempty"`        // nome v2 válido ou perfil de INI aplicado
+	Warnings        []string `json:"warnings,omitempty"`         // ex: data do INI em formato inesperado
+	Error           string   `json:"error,omitempty"`
 }
 
-// handleUpload: POST /images?package=<nome>, multipart/form-data com um ou
-// mais campos "files". O pacote precisa existir (POST /packages antes).
+// handleUpload: POST /images?package=<nome>[&profile=<perfil jpeg-ini>],
+// multipart/form-data com um ou mais campos "files". O pacote precisa existir.
+//
+// Todo INI embutido no JPEG é guardado no banco. Com ?profile=, o perfil
+// (do tipo jpeg-ini) também pré-preenche o rascunho de cada imagem.
 //
 // Usa MultipartReader (streaming): cada arquivo vai direto para o disco,
 // nada de carregar GBs na memória como faria o r.ParseMultipartForm.
@@ -49,6 +55,21 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		s.serverError(w, err)
 		return
+	}
+
+	var profile *importer.Profile
+	if name := r.URL.Query().Get("profile"); name != "" {
+		p, ok := s.profileByName(w, r, name)
+		if !ok {
+			return
+		}
+		if p.Reader.Type != importer.ReaderJPEGINI {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"o perfil %q é do tipo %q: no upload só vale perfil %q (CSV é com POST /packages/%s/import)",
+				p.Name, p.Reader.Type, importer.ReaderJPEGINI, pkg))
+			return
+		}
+		profile = p
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
@@ -73,14 +94,14 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
-		results = append(results, s.ingestOne(r.Context(), pkg, part))
+		results = append(results, s.ingestOne(r.Context(), pkg, profile, part))
 		part.Close()
 	}
 
 	writeJSON(w, http.StatusOK, results)
 }
 
-func (s *Server) ingestOne(ctx context.Context, pkg string, part *multipart.Part) uploadResult {
+func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Profile, part *multipart.Part) uploadResult {
 	name := filepath.Base(part.FileName()) // nunca confie no caminho que vem do cliente
 	res := uploadResult{File: name}
 
@@ -117,6 +138,20 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, part *multipart.Part
 	if meta, err := filename.Parse(name); err == nil && meta.SHA1 == sum {
 		applyMeta(img, meta)
 		res.Prefilled = true
+	}
+
+	// INI embutido: lido do temporário (o arquivo em si nunca é alterado).
+	if entries := readEmbeddedINI(tmp, size); len(entries) > 0 {
+		img.INI = entries
+		res.INI = true
+		if profile != nil {
+			ann, rep := annotationFromINI(profile, sum, entries)
+			ann.Equipment, ann.Camera, res.Warnings = s.sanitizeAndRegister(ctx, ann.Equipment, ann.Camera)
+			res.Warnings = append(res.Warnings, reportWarnings(rep)...)
+			if mergeAnnotation(img, ann, false) {
+				res.Prefilled = true
+			}
+		}
 	}
 
 	// Banco primeiro, disco depois: se o sha1 já existe, o Mongo recusa

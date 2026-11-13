@@ -2,6 +2,7 @@ package importer
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,6 +57,7 @@ type Report struct {
 }
 
 type RowError struct {
+	Key   string `json:"key,omitempty"` // no import de INI: o sha1 da imagem
 	Line  int    `json:"line"`
 	Field string `json:"field"`
 	Error string `json:"error"`
@@ -105,16 +107,40 @@ type transformer struct {
 	rep *Report
 }
 
-// raw lê o valor bruto de uma regra: a coluna (com {n} trocado) ou o valor fixo.
+// raw lê o valor bruto de uma regra: o valor fixo, a coluna, ou o template
+// (sempre com {n} trocado pelo número do veículo, no modo "columns").
 func (tr *transformer) raw(row Row, rule FieldRule, n int) string {
 	if rule.Value != "" {
 		return rule.Value
 	}
-	col := rule.Column
-	if n > 0 {
-		col = strings.ReplaceAll(col, "{n}", strconv.Itoa(n))
+	num := func(s string) string {
+		if n > 0 {
+			return strings.ReplaceAll(s, "{n}", strconv.Itoa(n))
+		}
+		return s
 	}
-	return strings.TrimSpace(row.Values[col])
+	if rule.Template != "" {
+		return fillTemplate(num(rule.Template), row.Values)
+	}
+	return strings.TrimSpace(row.Values[num(rule.Column)])
+}
+
+var placeholderRe = regexp.MustCompile(`\{([^{}]+)\}`)
+
+// fillTemplate troca cada {coluna} pelo valor. Coluna vazia: resultado vazio.
+func fillTemplate(tpl string, values map[string]string) string {
+	missing := false
+	out := placeholderRe.ReplaceAllStringFunc(tpl, func(m string) string {
+		v := strings.TrimSpace(values[m[1:len(m)-1]])
+		if v == "" {
+			missing = true
+		}
+		return v
+	})
+	if missing {
+		return ""
+	}
+	return strings.TrimSpace(out)
 }
 
 // translate passa o valor pelo Map. Sem Map, o valor vai como está.
@@ -194,7 +220,7 @@ func (tr *transformer) vehicles(row Row) []Vehicle {
 	if v == nil {
 		return nil
 	}
-	if v.Mode == VehiclesPerRow {
+	if v.Mode == VehiclesPerRow || v.Mode == VehiclesSingle {
 		if veh, ok := tr.vehicle(row, 0); ok {
 			return []Vehicle{veh}
 		}

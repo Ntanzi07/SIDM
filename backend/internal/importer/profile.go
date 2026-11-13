@@ -56,10 +56,15 @@ const (
 )
 
 // FieldRule: de onde vem um campo e como transformar o valor.
-// Exatamente um de Column ou Value.
+// Exatamente um de Column, Value ou Template.
 type FieldRule struct {
 	Column string `json:"column,omitempty" bson:"column,omitempty"` // valor vem desta coluna
 	Value  string `json:"value,omitempty" bson:"value,omitempty"`   // valor fixo para o arquivo todo
+
+	// Template junta várias colunas: "{Metrologico.Data} {Metrologico.Hora}".
+	// Se alguma coluna citada estiver vazia, o resultado é vazio (campo não
+	// preenchido), em vez de um valor pela metade.
+	Template string `json:"template,omitempty" bson:"template,omitempty"`
 
 	// Map traduz o valor de origem para o nosso ("N" -> "night").
 	// A comparação ignora maiúscula e espaços nas pontas.
@@ -74,8 +79,9 @@ type FieldRule struct {
 	Timezone   string `json:"timezone,omitempty" bson:"timezone,omitempty"`
 }
 
-// VehicleRules: como achar os veículos no arquivo. Dois jeitos:
+// VehicleRules: como achar os veículos no arquivo. Três jeitos:
 //
+//	"single":  um veículo só por imagem (é o caso do INI: "Placa = ...").
 //	"row":     cada LINHA é um veículo; linhas da mesma imagem são agrupadas.
 //	"columns": colunas numeradas na mesma linha (Placa1, Placa2...). Os nomes
 //	           de coluna usam "{n}" no lugar do número: "Placa{n}".
@@ -86,6 +92,7 @@ type VehicleRules struct {
 }
 
 const (
+	VehiclesSingle     = "single"
 	VehiclesPerRow     = "row"
 	VehiclesPerColumns = "columns"
 )
@@ -118,8 +125,22 @@ func (p *Profile) Validate() error {
 
 	switch p.Reader.Type {
 	case "csv":
+		if p.Match.Column == "" {
+			add("match.column: obrigatório (a coluna que identifica a imagem)")
+		}
+		if p.Match.By != MatchByOriginalName && p.Match.By != MatchBySHA1 {
+			add("match.by: use %q ou %q", MatchByOriginalName, MatchBySHA1)
+		}
+	case ReaderJPEGINI:
+		// O INI está DENTRO da imagem: não há o que casar.
+		if p.Match != (MatchConfig{}) {
+			add("match: não se usa com %q (o INI já está dentro da própria imagem)", ReaderJPEGINI)
+		}
+		if p.Vehicles != nil && p.Vehicles.Mode == VehiclesPerRow {
+			add("vehicles.mode: com %q use \"single\" (o INI é uma linha só por imagem)", ReaderJPEGINI)
+		}
 	default:
-		add("reader.type: %q não suportado (use \"csv\")", p.Reader.Type)
+		add("reader.type: %q não suportado (use \"csv\" ou %q)", p.Reader.Type, ReaderJPEGINI)
 	}
 	if d := p.Reader.Delimiter; d != "" && len([]rune(d)) != 1 {
 		add("reader.delimiter: deve ser um caractere só (ex: \";\")")
@@ -128,13 +149,6 @@ func (p *Profile) Validate() error {
 	case "", "utf-8", "utf8", "latin1", "iso-8859-1":
 	default:
 		add("reader.encoding: %q não suportado (use \"utf-8\" ou \"latin1\")", p.Reader.Encoding)
-	}
-
-	if p.Match.Column == "" {
-		add("match.column: obrigatório (a coluna que identifica a imagem)")
-	}
-	if p.Match.By != MatchByOriginalName && p.Match.By != MatchBySHA1 {
-		add("match.by: use %q ou %q", MatchByOriginalName, MatchBySHA1)
 	}
 
 	if len(p.Fields) == 0 && p.Vehicles == nil {
@@ -150,13 +164,13 @@ func (p *Profile) Validate() error {
 
 	if v := p.Vehicles; v != nil {
 		switch v.Mode {
-		case VehiclesPerRow:
+		case VehiclesSingle, VehiclesPerRow:
 		case VehiclesPerColumns:
 			if v.Max < 1 || v.Max > 20 {
 				add("vehicles.max: entre 1 e 20 no modo \"columns\"")
 			}
 		default:
-			add("vehicles.mode: use %q ou %q", VehiclesPerRow, VehiclesPerColumns)
+			add("vehicles.mode: use %q, %q ou %q", VehiclesSingle, VehiclesPerRow, VehiclesPerColumns)
 		}
 		if _, ok := v.Fields["plate"]; !ok {
 			add("vehicles.fields.plate: obrigatório (é o que diz que o veículo existe)")
@@ -166,7 +180,7 @@ func (p *Profile) Validate() error {
 				add("vehicles.fields.%s: campo desconhecido (válidos: %s)", name, strings.Join(vehicleFields, ", "))
 				continue
 			}
-			if v.Mode == VehiclesPerColumns && rule.Column != "" && !strings.Contains(rule.Column, "{n}") {
+			if v.Mode == VehiclesPerColumns && rule.Column+rule.Template != "" && !strings.Contains(rule.Column+rule.Template, "{n}") {
 				add("vehicles.fields.%s.column: no modo \"columns\" use \"{n}\" no nome (ex: \"Placa{n}\")", name)
 			}
 			validateRule(add, "vehicles.fields."+name, name, rule)
@@ -181,8 +195,17 @@ func (p *Profile) Validate() error {
 }
 
 func validateRule(add func(string, ...any), path, field string, r FieldRule) {
-	if (r.Column == "") == (r.Value == "") {
-		add("%s: use \"column\" OU \"value\" (exatamente um)", path)
+	set := 0
+	for _, v := range []string{r.Column, r.Value, r.Template} {
+		if v != "" {
+			set++
+		}
+	}
+	if set != 1 {
+		add("%s: use \"column\", \"value\" OU \"template\" (exatamente um)", path)
+	}
+	if r.Template != "" && !strings.Contains(r.Template, "{") {
+		add("%s.template: cite as colunas entre chaves, ex: \"{Secao.Data} {Secao.Hora}\"", path)
 	}
 	if r.Split != "" && field != "conditions" {
 		add("%s.split: só faz sentido em conditions", path)

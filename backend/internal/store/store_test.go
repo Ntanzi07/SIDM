@@ -772,3 +772,33 @@ func TestFindImagesByKeys(t *testing.T) {
 		t.Errorf("2500 chaves: %s, %v", shas(got), err)
 	}
 }
+
+func TestImagemComINI(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	img := newImage("com-ini", time.Now())
+	img.INI = []importer.INIEntry{
+		{Section: "Metrologico", Key: "Data", Value: "18/09/2026"},
+		{Section: "NMetrologico", Key: "Placa", Value: "GGB5H24"},
+		{Section: "NMetrologico", Key: "Chave.Com.Ponto", Value: "$valor"}, // nada disso quebra no Mongo
+	}
+	if err := s.InsertImage(ctx, img); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.FindImage(ctx, "com-ini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.INI) != 3 || got.INI[1] != img.INI[1] || got.INI[2] != img.INI[2] {
+		t.Errorf("INI voltou diferente (ou fora de ordem): %+v", got.INI)
+	}
+
+	// Sem INI, o campo nem aparece no documento (omitempty).
+	s.InsertImage(ctx, newImage("sem-ini", time.Now()))
+	n, _ := s.db.Collection("images").CountDocuments(ctx, bson.D{{Key: "ini", Value: bson.D{{Key: "$exists", Value: true}}}})
+	if n != 1 {
+		t.Errorf("%d documentos com o campo ini, want 1", n)
+	}
+}

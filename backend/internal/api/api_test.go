@@ -445,6 +445,12 @@ func (e *testEnv) upload(t *testing.T, fs ...upFile) []uploadResult {
 // uploadTo manda arquivos como multipart no campo "files" para um pacote.
 func (e *testEnv) uploadTo(t *testing.T, pkg string, fs ...upFile) []uploadResult {
 	t.Helper()
+	return e.uploadToWithQuery(t, pkg, "", fs...)
+}
+
+// uploadToWithQuery é o uploadTo com parâmetros extras na URL (ex: "&profile=x").
+func (e *testEnv) uploadToWithQuery(t *testing.T, pkg, extra string, fs ...upFile) []uploadResult {
+	t.Helper()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
 	for _, f := range fs {
@@ -456,7 +462,7 @@ func (e *testEnv) uploadTo(t *testing.T, pkg string, fs ...upFile) []uploadResul
 	}
 	mw.Close()
 
-	rec := e.do("POST", "/images?package="+pkg, &body, map[string]string{"Content-Type": mw.FormDataContentType()})
+	rec := e.do("POST", "/images?package="+pkg+extra, &body, map[string]string{"Content-Type": mw.FormDataContentType()})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload: status %d: %s", rec.Code, rec.Body.String())
 	}
