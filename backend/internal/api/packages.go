@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"SIDM/internal/filename"
 	"SIDM/internal/store"
@@ -47,12 +48,22 @@ func (s *Server) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"name": name})
 }
 
-// GET /packages: todos os pacotes com o progresso (total, verified, pending).
+// GET /packages?q=noturnas&limit=20&skip=0
+// Pacotes (mais novos primeiro) com o progresso de cada um.
 func (s *Server) handleListPackages(w http.ResponseWriter, r *http.Request) {
-	pkgs, err := s.store.ListPackages(r.Context())
+	q := r.URL.Query()
+	query := strings.TrimSpace(q.Get("q"))
+	if len(query) > 64 {
+		writeError(w, http.StatusBadRequest, "busca longa demais (máx. 64 caracteres)")
+		return
+	}
+
+	pkgs, total, err := s.store.ListPackages(r.Context(), query,
+		intParam(q, "limit", 20, 1, 100),
+		intParam(q, "skip", 0, 0, 1<<31))
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, pkgs)
+	writeJSON(w, http.StatusOK, page[store.PackageSummary]{Total: total, Items: pkgs})
 }

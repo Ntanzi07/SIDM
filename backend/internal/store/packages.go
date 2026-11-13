@@ -56,28 +56,52 @@ func (s *Store) FindPackage(ctx context.Context, name string) (*Package, error) 
 	return &p, nil
 }
 
-// ListPackages devolve todos os pacotes (mais novos primeiro) com o progresso.
+// ListPackages devolve uma página de pacotes (mais novos primeiro) com o
+// progresso de cada um. q filtra por nome (contém, sem diferenciar maiúscula).
 //
-// O progresso vem de UMA agregação sobre images, agrupando por pacote e status:
+// O progresso vem de UMA agregação sobre images, só dos pacotes desta página,
+// agrupando por pacote e status:
 //
-//	{ _id: { package: "p1", status: "pending" },  n: 12 }
-//	{ _id: { package: "p1", status: "verified" }, n: 30 }
+//	{ _id: { package: "p1", status: "pending" },  n: 12, claimed: 2 }
+//	{ _id: { package: "p1", status: "verified" }, n: 30, claimed: 0 }
 //
 // e depois juntamos com a lista de pacotes (pacote vazio aparece com zeros).
-func (s *Store) ListPackages(ctx context.Context) ([]PackageSummary, error) {
-	cur, err := s.db.Collection("packages").Find(ctx, bson.D{},
-		options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}))
+func (s *Store) ListPackages(ctx context.Context, q string, limit, skip int64) ([]PackageSummary, int64, error) {
+	coll := s.db.Collection("packages")
+	filter := bson.D{}
+	if q != "" {
+		filter = append(filter, nameContains(q))
+	}
+
+	total, err := coll.CountDocuments(ctx, filter)
 	if err != nil {
-		return nil, fmt.Errorf("listar pacotes: %w", err)
+		return nil, 0, fmt.Errorf("contar pacotes: %w", err)
+	}
+
+	cur, err := coll.Find(ctx, filter, options.Find().
+		SetSort(bson.D{{Key: "created_at", Value: -1}, {Key: "name", Value: 1}}).
+		SetLimit(limit).
+		SetSkip(skip))
+	if err != nil {
+		return nil, 0, fmt.Errorf("listar pacotes: %w", err)
 	}
 	var pkgs []Package
 	if err := cur.All(ctx, &pkgs); err != nil {
-		return nil, fmt.Errorf("ler pacotes: %w", err)
+		return nil, 0, fmt.Errorf("ler pacotes: %w", err)
+	}
+	if len(pkgs) == 0 {
+		return []PackageSummary{}, total, nil
+	}
+
+	names := make([]string, len(pkgs))
+	for i, p := range pkgs {
+		names[i] = p.Name
 	}
 
 	// claimed: conta 1 se claimed_until > agora (campo ausente nunca é > data).
 	now := time.Now().UTC()
 	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.D{{Key: "package", Value: bson.D{{Key: "$in", Value: names}}}}}},
 		{{Key: "$group", Value: bson.D{
 			{Key: "_id", Value: bson.D{{Key: "package", Value: "$package"}, {Key: "status", Value: "$status"}}},
 			{Key: "n", Value: bson.D{{Key: "$sum", Value: 1}}},
@@ -88,7 +112,7 @@ func (s *Store) ListPackages(ctx context.Context) ([]PackageSummary, error) {
 	}
 	agg, err := s.db.Collection("images").Aggregate(ctx, pipeline)
 	if err != nil {
-		return nil, fmt.Errorf("progresso dos pacotes: %w", err)
+		return nil, 0, fmt.Errorf("progresso dos pacotes: %w", err)
 	}
 	var groups []struct {
 		ID struct {
@@ -99,7 +123,7 @@ func (s *Store) ListPackages(ctx context.Context) ([]PackageSummary, error) {
 		Claimed int64 `bson:"claimed"`
 	}
 	if err := agg.All(ctx, &groups); err != nil {
-		return nil, fmt.Errorf("ler progresso: %w", err)
+		return nil, 0, fmt.Errorf("ler progresso: %w", err)
 	}
 
 	type counts struct{ verified, pending, inProgress int64 }
@@ -128,5 +152,5 @@ func (s *Store) ListPackages(ctx context.Context) ([]PackageSummary, error) {
 		}
 		out = append(out, sum)
 	}
-	return out, nil
+	return out, total, nil
 }

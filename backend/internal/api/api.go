@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"SIDM/internal/filename"
@@ -16,20 +17,25 @@ import (
 
 // Rotas:
 //   GET  /health               ok se o Mongo responde
-//   GET  /codes                tabelas para os dropdowns
+//   GET  /codes                tabelas fixas do padrão (para os dropdowns)
+//   GET  /equipments?q=&limit= busca equipamentos (autocomplete), paginado
+//   GET  /cameras?q=&limit=    busca câmeras (autocomplete), paginado
 //   POST /equipments           cadastra equipamento {"name":...}
 //   POST /cameras              cadastra câmera {"name":...}
 //   POST /packages             cria pacote {"name":...}
-//   GET  /packages             pacotes com progresso (total/verified/pending/in_progress)
+//   GET  /packages?q=&limit=   pacotes com progresso, paginado
 //   POST /packages/{name}/next pega a próxima imagem da fila (X-User obrigatório)
 //   POST /images/{sha1}/release devolve a imagem para a fila
 //   POST /images/exists        checa hashes antes do upload
 //   POST /images?package=X     upload para o pacote X (pending)
-//   GET  /images               busca com filtros + paginação
+//   GET  /images               busca com filtros, paginado
 //   GET  /images/{sha1}        detalhe de uma imagem
 //   GET  /images/{sha1}/file   o arquivo da imagem
 //   PUT  /images/{sha1}        salva rascunho / verifica (renomeia para v2)
 //   POST /export               TODO: zip das imagens selecionadas
+//
+// Toda listagem responde no mesmo formato: {"total": N, "items": [...]},
+// com ?limit= e ?skip= para paginar.
 
 // Store é tudo que a API precisa do banco.
 // A API depende desta interface, e não do *store.Store concreto: assim os
@@ -39,8 +45,8 @@ import (
 type Store interface {
 	Ping(ctx context.Context) error
 
-	ListEquipments(ctx context.Context) ([]string, error)
-	ListCameras(ctx context.Context) ([]string, error)
+	SearchEquipments(ctx context.Context, q string, limit, skip int64) ([]string, int64, error)
+	SearchCameras(ctx context.Context, q string, limit, skip int64) ([]string, int64, error)
 	CreateEquipment(ctx context.Context, name string) error
 	CreateCamera(ctx context.Context, name string) error
 	EquipmentExists(ctx context.Context, name string) (bool, error)
@@ -48,7 +54,7 @@ type Store interface {
 
 	CreatePackage(ctx context.Context, name, createdBy string) error
 	FindPackage(ctx context.Context, name string) (*store.Package, error)
-	ListPackages(ctx context.Context) ([]store.PackageSummary, error)
+	ListPackages(ctx context.Context, q string, limit, skip int64) ([]store.PackageSummary, int64, error)
 
 	InsertImage(ctx context.Context, img *store.Image) error
 	DeleteImage(ctx context.Context, sha1 string) error
@@ -75,6 +81,8 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /codes", s.handleCodes)
+	mux.HandleFunc("GET /equipments", s.handleSearchNames(s.store.SearchEquipments))
+	mux.HandleFunc("GET /cameras", s.handleSearchNames(s.store.SearchCameras))
 	mux.HandleFunc("POST /equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment))
 	mux.HandleFunc("POST /cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera))
 	mux.HandleFunc("POST /packages", s.handleCreatePackage)
@@ -99,27 +107,51 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
-// handleCodes junta as tabelas fixas do padrão (Go) com os cadastros (Mongo).
+// handleCodes devolve as tabelas fixas do padrão v2 (direção, clima, cor...).
+// Equipamentos e câmeras NÃO vêm aqui: podem ser milhares, então têm busca
+// própria e paginada (GET /equipments e GET /cameras).
 func (s *Server) handleCodes(w http.ResponseWriter, r *http.Request) {
-	resp := map[string]any{}
-	for field, table := range filename.Codes() {
-		resp[field] = table
-	}
+	writeJSON(w, http.StatusOK, filename.Codes())
+}
 
-	equipments, err := s.store.ListEquipments(r.Context())
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	cameras, err := s.store.ListCameras(r.Context())
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	resp["equipments"] = equipments
-	resp["cameras"] = cameras
+// page é o formato padrão de toda listagem.
+type page[T any] struct {
+	Total int64 `json:"total"`
+	Items []T   `json:"items"`
+}
 
-	writeJSON(w, http.StatusOK, resp)
+type nameItem struct {
+	Name string `json:"name"`
+}
+
+// handleSearchNames: GET /equipments?q=mf47&limit=10&skip=0
+// Pensado para autocomplete: o front chama a cada letra digitada (com
+// debounce) e mostra as primeiras opções. Sem q, lista todos em ordem.
+func (s *Server) handleSearchNames(
+	search func(ctx context.Context, q string, limit, skip int64) ([]string, int64, error),
+) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		query := strings.TrimSpace(q.Get("q"))
+		if len(query) > 64 {
+			writeError(w, http.StatusBadRequest, "busca longa demais (máx. 64 caracteres)")
+			return
+		}
+
+		names, total, err := search(r.Context(), query,
+			intParam(q, "limit", 10, 1, 50),
+			intParam(q, "skip", 0, 0, 1<<31))
+		if err != nil {
+			s.serverError(w, err)
+			return
+		}
+
+		items := make([]nameItem, len(names))
+		for i, n := range names {
+			items[i] = nameItem{Name: n}
+		}
+		writeJSON(w, http.StatusOK, page[nameItem]{Total: total, Items: items})
+	}
 }
 
 // handleCreateNamed serve para equipamentos e câmeras: o fluxo é o mesmo,

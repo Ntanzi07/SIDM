@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -47,32 +48,55 @@ func (s *Store) Close(ctx context.Context) error {
 	return s.client.Disconnect(ctx)
 }
 
-// ListEquipments retorna os nomes dos equipamentos ativos, em ordem alfabética.
-func (s *Store) ListEquipments(ctx context.Context) ([]string, error) {
-	return s.listActiveNames(ctx, "equipments")
+// SearchEquipments busca equipamentos ativos cujo nome CONTÉM q (sem
+// diferenciar maiúscula), em ordem alfabética, paginado. q vazio = todos.
+// Feito para autocomplete: "mf47" encontra "8003-MF4739".
+func (s *Store) SearchEquipments(ctx context.Context, q string, limit, skip int64) ([]string, int64, error) {
+	return s.searchActiveNames(ctx, "equipments", q, limit, skip)
 }
 
-// ListCameras retorna os nomes das câmeras ativas, em ordem alfabética.
-func (s *Store) ListCameras(ctx context.Context) ([]string, error) {
-	return s.listActiveNames(ctx, "cameras")
+// SearchCameras faz o mesmo para câmeras.
+func (s *Store) SearchCameras(ctx context.Context, q string, limit, skip int64) ([]string, int64, error) {
+	return s.searchActiveNames(ctx, "cameras", q, limit, skip)
 }
 
-func (s *Store) listActiveNames(ctx context.Context, collection string) ([]string, error) {
+// nameContains monta o filtro "name contém q, ignorando maiúscula".
+//
+// regexp.QuoteMeta é OBRIGATÓRIO: o texto vem do usuário, e sem escapar,
+// alguém digitando ".*" ou "(a+)+$" estaria mandando uma regex para o
+// Mongo (resultado errado, ou uma regex lenta de propósito travando o banco).
+func nameContains(q string) bson.E {
+	return bson.E{Key: "name", Value: bson.Regex{Pattern: regexp.QuoteMeta(q), Options: "i"}}
+}
+
+func (s *Store) searchActiveNames(ctx context.Context, collection, q string, limit, skip int64) ([]string, int64, error) {
+	coll := s.db.Collection(collection)
 	filter := bson.D{{Key: "active", Value: true}}
+	if q != "" {
+		filter = append(filter, nameContains(q))
+	}
+
+	total, err := coll.CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("contar %s: %w", collection, err)
+	}
+
 	opts := options.Find().
 		SetProjection(bson.D{{Key: "name", Value: 1}}). // só traz o campo name
-		SetSort(bson.D{{Key: "name", Value: 1}})
+		SetSort(bson.D{{Key: "name", Value: 1}}).
+		SetLimit(limit).
+		SetSkip(skip)
 
-	cur, err := s.db.Collection(collection).Find(ctx, filter, opts)
+	cur, err := coll.Find(ctx, filter, opts)
 	if err != nil {
-		return nil, fmt.Errorf("listar %s: %w", collection, err)
+		return nil, 0, fmt.Errorf("listar %s: %w", collection, err)
 	}
 
 	var docs []struct {
 		Name string `bson:"name"`
 	}
 	if err := cur.All(ctx, &docs); err != nil { // All já fecha o cursor
-		return nil, fmt.Errorf("ler %s: %w", collection, err)
+		return nil, 0, fmt.Errorf("ler %s: %w", collection, err)
 	}
 
 	// make com len 0 (e não nil) para o JSON sair [] em vez de null
@@ -80,7 +104,7 @@ func (s *Store) listActiveNames(ctx context.Context, collection string) ([]strin
 	for _, d := range docs {
 		names = append(names, d.Name)
 	}
-	return names, nil
+	return names, total, nil
 }
 
 // CreateEquipment cadastra um equipamento (nome já sanitizado).

@@ -97,11 +97,13 @@ SIDM/
 | Rota | O que faz |
 |---|---|
 | `GET /health` | `ok` se o Mongo responde |
-| `GET /codes` | tabelas para os dropdowns, mais equipamentos e câmeras cadastrados |
+| `GET /codes` | tabelas fixas do padrão (direção, clima, cor...) para os dropdowns |
+| `GET /equipments?q=mf47` | busca equipamentos para o autocomplete (contém, ignora maiúscula) |
+| `GET /cameras?q=hik` | busca câmeras para o autocomplete |
 | `POST /equipments` | cadastra equipamento `{"name": "8003 MF4739"}` → `8003-MF4739` |
 | `POST /cameras` | cadastra câmera `{"name": "hikvision 233"}` → `hikvision-233` |
 | `POST /packages` | cria pacote `{"name": "Noturnas Setembro"}` → `Noturnas-Setembro` |
-| `GET /packages` | pacotes com progresso: `total`, `verified`, `pending`, `in_progress` |
+| `GET /packages?q=noturnas` | pacotes (mais novos primeiro) com progresso: `total`, `verified`, `pending`, `in_progress` |
 | `POST /packages/{name}/next` | pega a próxima imagem da fila (`X-User` obrigatório; corpo opcional `{"skip": "<sha1>"}`) |
 | `POST /images/exists` | `{"sha1s": [...]}` → quais já existem (e em que pacote) e quais faltam |
 | `POST /images?package=X` | upload multipart (campo `files`, vários arquivos) |
@@ -110,6 +112,27 @@ SIDM/
 | `GET /images/{sha1}/file` | o arquivo da imagem |
 | `PUT /images/{sha1}` | salva o rascunho, ou verifica com `"complete": true` |
 | `POST /images/{sha1}/release` | devolve a imagem para a fila |
+
+### Paginação
+
+Toda listagem responde no mesmo formato, e aceita `?limit=` e `?skip=`:
+```json
+{ "total": 1000, "items": [ ... ] }
+```
+
+| Rota | `limit` padrão | `limit` máximo |
+|---|---|---|
+| `GET /images` | 50 | 500 |
+| `GET /packages` | 20 | 100 |
+| `GET /equipments`, `GET /cameras` | 10 | 50 |
+
+O `total` é o número de resultados **com o filtro aplicado**, para o front montar
+"página 3 de 20" ou "e mais 35 resultados".
+
+**Autocomplete:** o front chama `GET /equipments?q=<o que foi digitado>` com debounce
+(uns 300 ms depois da última tecla) e mostra os 10 primeiros. A busca é "contém":
+`mf47` encontra `8003-MF4739`. O texto é escapado antes de virar regex no Mongo, então
+caracteres como `.` e `*` são tratados como texto comum.
 
 **Filtros do `GET /images`:** `package`, `status`, `equipment`, `camera`, `day_time`,
 `weather`, `direction`, `vehicle_type`, `vehicle_color`, `plate`, `limit` (padrão 50,

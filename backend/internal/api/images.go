@@ -66,7 +66,7 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": total, "items": items})
+	writeJSON(w, http.StatusOK, page[store.Image]{Total: total, Items: items})
 }
 
 // intParam lê um número da query string, com padrão e limites.

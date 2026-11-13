@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -27,6 +28,11 @@ import (
 	"SIDM/internal/store"
 )
 
+type searchCall struct {
+	q           string
+	limit, skip int64
+}
+
 // memStore guarda tudo em maps. Os campos *Err permitem simular falhas do banco.
 type memStore struct {
 	mu sync.Mutex
@@ -37,6 +43,7 @@ type memStore struct {
 	images     map[string]store.Image
 	history    []store.HistoryEntry
 	lastFilter store.ImageFilter
+	lastSearch searchCall
 
 	pingErr       error
 	listErr       error
@@ -55,26 +62,42 @@ func newMemStore() *memStore {
 
 func (m *memStore) Ping(ctx context.Context) error { return m.pingErr }
 
-func (m *memStore) ListEquipments(ctx context.Context) ([]string, error) {
-	return m.names(m.equipments)
+func (m *memStore) SearchEquipments(ctx context.Context, q string, limit, skip int64) ([]string, int64, error) {
+	return m.search(m.equipments, q, limit, skip)
 }
 
-func (m *memStore) ListCameras(ctx context.Context) ([]string, error) {
-	return m.names(m.cameras)
+func (m *memStore) SearchCameras(ctx context.Context, q string, limit, skip int64) ([]string, int64, error) {
+	return m.search(m.cameras, q, limit, skip)
 }
 
-func (m *memStore) names(set map[string]bool) ([]string, error) {
+// search imita o store de verdade: contém, sem diferenciar maiúscula,
+// em ordem alfabética, paginado.
+func (m *memStore) search(set map[string]bool, q string, limit, skip int64) ([]string, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lastSearch = searchCall{q: q, limit: limit, skip: skip}
 	if m.listErr != nil {
-		return nil, m.listErr
+		return nil, 0, m.listErr
 	}
-	out := []string{}
+	all := []string{}
 	for n := range set {
-		out = append(out, n)
+		if strings.Contains(strings.ToLower(n), strings.ToLower(q)) {
+			all = append(all, n)
+		}
 	}
-	sort.Strings(out)
-	return out, nil
+	sort.Strings(all)
+	return paginate(all, limit, skip), int64(len(all)), nil
+}
+
+func paginate[T any](all []T, limit, skip int64) []T {
+	if skip >= int64(len(all)) {
+		return []T{}
+	}
+	end := skip + limit
+	if end > int64(len(all)) {
+		end = int64(len(all))
+	}
+	return all[skip:end]
 }
 
 func (m *memStore) CreateEquipment(ctx context.Context, name string) error {
@@ -127,14 +150,18 @@ func (m *memStore) FindPackage(ctx context.Context, name string) (*store.Package
 	return &p, nil
 }
 
-func (m *memStore) ListPackages(ctx context.Context) ([]store.PackageSummary, error) {
+func (m *memStore) ListPackages(ctx context.Context, q string, limit, skip int64) ([]store.PackageSummary, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.lastSearch = searchCall{q: q, limit: limit, skip: skip}
 	if m.listErr != nil {
-		return nil, m.listErr
+		return nil, 0, m.listErr
 	}
 	out := []store.PackageSummary{}
 	for _, p := range m.packages {
+		if !strings.Contains(strings.ToLower(p.Name), strings.ToLower(q)) {
+			continue
+		}
 		sum := store.PackageSummary{Package: p}
 		for _, img := range m.images {
 			if img.Package != p.Name {
@@ -153,7 +180,7 @@ func (m *memStore) ListPackages(ctx context.Context) ([]store.PackageSummary, er
 		out = append(out, sum)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
+	return paginate(out, limit, skip), int64(len(out)), nil
 }
 
 func (m *memStore) InsertImage(ctx context.Context, img *store.Image) error {
@@ -425,30 +452,101 @@ func TestCodes(t *testing.T) {
 	rec := env.do("GET", "/codes", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
 
-	var resp map[string]json.RawMessage
+	var resp map[string]map[string]string
 	decode(t, rec, &resp)
 
 	for _, field := range []string{
 		"direction", "resolution", "capture_angle", "day_time", "image_range", "weather",
 		"conditions", "plate_type", "plate_category", "vehicle_type", "vehicle_color",
-		"equipments", "cameras",
 	} {
-		if _, ok := resp[field]; !ok {
-			t.Errorf("faltou %q na resposta", field)
+		if len(resp[field]) == 0 {
+			t.Errorf("faltou a tabela %q", field)
 		}
 	}
-
-	var eqs []string
-	json.Unmarshal(resp["equipments"], &eqs)
-	if len(eqs) != 1 || eqs[0] != "8003-MF4739" {
-		t.Errorf("equipments = %v", eqs)
+	if resp["day_time"]["D"] != "day" {
+		t.Errorf("day_time = %v", resp["day_time"])
+	}
+	if _, ok := resp["equipments"]; ok {
+		t.Error("equipamentos não devem vir no /codes: têm busca própria e paginada")
 	}
 }
 
-func TestCodesBancoFora(t *testing.T) {
+// ---------- busca de equipamentos e câmeras (autocomplete) ----------
+
+type namePage struct {
+	Total int64      `json:"total"`
+	Items []nameItem `json:"items"`
+}
+
+func TestSearchEquipments(t *testing.T) {
+	env := newTestEnv(t)
+	for _, n := range []string{"8004-MF1234", "8005-MF4700", "9000-ABC", "7000-mf9999"} {
+		env.db.equipments[n] = true
+	}
+
+	cases := []struct {
+		name      string
+		query     string
+		wantTotal int64
+		wantNames string
+	}{
+		{"sem busca: todos em ordem", "", 5, "[7000-mf9999 8003-MF4739 8004-MF1234 8005-MF4700 9000-ABC]"},
+		{"contém, no meio do nome", "?q=mf47", 2, "[8003-MF4739 8005-MF4700]"},
+		{"ignora maiúscula", "?q=MF9", 1, "[7000-mf9999]"},
+		{"nada encontrado", "?q=xyz", 0, "[]"},
+		{"limit", "?limit=2", 5, "[7000-mf9999 8003-MF4739]"},
+		{"segunda página", "?limit=2&skip=2", 5, "[8004-MF1234 8005-MF4700]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := env.do("GET", "/equipments"+tc.query, nil, nil)
+			assertStatus(t, rec, http.StatusOK)
+			var p namePage
+			decode(t, rec, &p)
+
+			names := make([]string, len(p.Items))
+			for i, it := range p.Items {
+				names[i] = it.Name
+			}
+			if p.Total != tc.wantTotal || fmt.Sprint(names) != tc.wantNames {
+				t.Errorf("total=%d items=%v; want %d %s", p.Total, names, tc.wantTotal, tc.wantNames)
+			}
+		})
+	}
+}
+
+func TestSearchLimites(t *testing.T) {
+	env := newTestEnv(t)
+
+	env.do("GET", "/cameras", nil, nil)
+	if env.db.lastSearch.limit != 10 {
+		t.Errorf("limit padrão = %d, want 10 (as primeiras opções do autocomplete)", env.db.lastSearch.limit)
+	}
+	env.do("GET", "/cameras?limit=9999", nil, nil)
+	if env.db.lastSearch.limit != 50 {
+		t.Errorf("limit máximo = %d, want 50", env.db.lastSearch.limit)
+	}
+	env.do("GET", "/cameras?q=%20%20hik%20%20", nil, nil)
+	if env.db.lastSearch.q != "hik" {
+		t.Errorf("busca deveria ignorar espaços nas pontas: %q", env.db.lastSearch.q)
+	}
+
+	long := strings.Repeat("a", 65)
+	assertStatus(t, env.do("GET", "/cameras?q="+long, nil, nil), http.StatusBadRequest)
+}
+
+func TestSearchVaziaRetornaArray(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.do("GET", "/cameras?q=nada", nil, nil)
+	if !strings.Contains(rec.Body.String(), `"items":[]`) {
+		t.Errorf("sem resultados deve ser [] e não null: %s", rec.Body.String())
+	}
+}
+
+func TestSearchBancoFora(t *testing.T) {
 	env := newTestEnv(t)
 	env.db.listErr = errBoom
-	rec := env.do("GET", "/codes", nil, nil)
+	rec := env.do("GET", "/equipments?q=80", nil, nil)
 	assertStatus(t, rec, http.StatusInternalServerError)
 	if strings.Contains(rec.Body.String(), "banco caiu") {
 		t.Error("detalhe interno do erro vazou para o cliente")
@@ -546,13 +644,36 @@ func TestListPackagesComProgresso(t *testing.T) {
 	rec := env.do("GET", "/packages", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
 
-	var pkgs []store.PackageSummary
-	decode(t, rec, &pkgs)
-	if len(pkgs) != 1 {
-		t.Fatalf("pacotes = %+v", pkgs)
+	var resp page[store.PackageSummary]
+	decode(t, rec, &resp)
+	if resp.Total != 1 || len(resp.Items) != 1 {
+		t.Fatalf("pacotes = %+v", resp)
 	}
-	p := pkgs[0]
+	p := resp.Items[0]
 	if p.Name != testPkg || p.Total != 3 || p.Verified != 1 || p.Pending != 2 {
 		t.Errorf("progresso errado: %+v (want total 3, verified 1, pending 2)", p)
+	}
+}
+
+func TestListPackagesBuscaEPaginacao(t *testing.T) {
+	env := newTestEnv(t)
+	for _, n := range []string{"Noturnas-Setembro", "Noturnas-Outubro", "Diurnas-2026"} {
+		env.db.packages[n] = store.Package{Name: n}
+	}
+
+	var resp page[store.PackageSummary]
+	decode(t, env.do("GET", "/packages?q=noturnas", nil, nil), &resp)
+	if resp.Total != 2 || len(resp.Items) != 2 {
+		t.Errorf("busca por 'noturnas': total=%d items=%d, want 2", resp.Total, len(resp.Items))
+	}
+
+	decode(t, env.do("GET", "/packages?limit=1&skip=1", nil, nil), &resp)
+	if resp.Total != 4 || len(resp.Items) != 1 {
+		t.Errorf("paginação: total=%d items=%d, want 4 e 1", resp.Total, len(resp.Items))
+	}
+
+	env.do("GET", "/packages", nil, nil)
+	if env.db.lastSearch.limit != 20 {
+		t.Errorf("limit padrão = %d, want 20", env.db.lastSearch.limit)
 	}
 }

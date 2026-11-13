@@ -116,12 +116,12 @@ func TestCadastro(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	names, err := s.ListEquipments(ctx)
+	names, total, err := s.SearchEquipments(ctx, "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if fmt.Sprint(names) != "[1000-AAA 8003-MF4739]" {
-		t.Errorf("ListEquipments = %v (esperava só ativos, em ordem alfabética)", names)
+	if fmt.Sprint(names) != "[1000-AAA 8003-MF4739]" || total != 2 {
+		t.Errorf("SearchEquipments = %v (total %d); esperava só ativos, em ordem alfabética", names, total)
 	}
 
 	if ok, _ := s.EquipmentExists(ctx, "8003-MF4739"); !ok {
@@ -135,9 +135,9 @@ func TestCadastro(t *testing.T) {
 	if err := s.CreateCamera(ctx, "hikvision-233"); err != nil {
 		t.Fatal(err)
 	}
-	cams, _ := s.ListCameras(ctx)
+	cams, _, _ := s.SearchCameras(ctx, "", 10, 0)
 	if len(cams) != 1 || cams[0] != "hikvision-233" {
-		t.Errorf("ListCameras = %v", cams)
+		t.Errorf("SearchCameras = %v", cams)
 	}
 	if ok, _ := s.CameraExists(ctx, "8003-MF4739"); ok {
 		t.Error("equipamento não pode ser encontrado como câmera")
@@ -146,7 +146,7 @@ func TestCadastro(t *testing.T) {
 
 func TestListaVaziaNaoENil(t *testing.T) {
 	s := testStore(t)
-	names, err := s.ListCameras(context.Background())
+	names, _, err := s.SearchCameras(context.Background(), "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -406,9 +406,12 @@ func TestPacotes(t *testing.T) {
 	img.Package = "novo"
 	s.InsertImage(ctx, img)
 
-	pkgs, err := s.ListPackages(ctx)
+	pkgs, total, err := s.ListPackages(ctx, "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if total != 3 {
+		t.Errorf("total = %d, want 3", total)
 	}
 	got := map[string]PackageSummary{}
 	var order []string
@@ -589,11 +592,76 @@ func TestPacotesInProgress(t *testing.T) {
 	s.ClaimNext(ctx, "pacote-1", "maria", "", time.Hour, time.Now())
 	s.ClaimNext(ctx, "pacote-1", "joao", "", -time.Minute, time.Now()) // já nasce vencido
 
-	pkgs, err := s.ListPackages(ctx)
+	pkgs, _, err := s.ListPackages(ctx, "", 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if pkgs[0].InProgress != 2 || pkgs[0].Pending != 3 {
 		t.Errorf("in_progress=%d pending=%d; want 2 e 3", pkgs[0].InProgress, pkgs[0].Pending)
+	}
+}
+
+func TestSearchEquipments(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	for _, n := range []string{"8003-MF4739", "8005-MF4700", "9000-ABC", "7000-mf9999", "1.2-ponto"} {
+		if err := s.CreateEquipment(ctx, n); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cases := []struct {
+		q         string
+		limit     int64
+		skip      int64
+		want      string
+		wantTotal int64
+	}{
+		{"mf47", 10, 0, "[8003-MF4739 8005-MF4700]", 2}, // contém, no meio do nome
+		{"MF9", 10, 0, "[7000-mf9999]", 1},              // sem diferenciar maiúscula
+		{"", 2, 0, "[1.2-ponto 7000-mf9999]", 5},        // sem busca, paginado
+		{"", 2, 4, "[9000-ABC]", 5},                     // última página
+		{"xyz", 10, 0, "[]", 0},                         // nada
+		{".", 10, 0, "[1.2-ponto]", 1},                  // "." é literal, não "qualquer caractere"
+		{".*", 10, 0, "[]", 0},                          // regex do usuário é escapada
+		{"(a+)+$", 10, 0, "[]", 0},                      // nem regex maliciosa passa
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("q=%q limit=%d skip=%d", tc.q, tc.limit, tc.skip), func(t *testing.T) {
+			names, total, err := s.SearchEquipments(ctx, tc.q, tc.limit, tc.skip)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if fmt.Sprint(names) != tc.want || total != tc.wantTotal {
+				t.Errorf("got %v (total %d), want %s (total %d)", names, total, tc.want, tc.wantTotal)
+			}
+		})
+	}
+}
+
+func TestListPackagesBuscaEPaginacao(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	for _, n := range []string{"Noturnas-Setembro", "Diurnas-2026", "Noturnas-Outubro"} {
+		s.CreatePackage(ctx, n, "nathan")
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	pkgs, total, err := s.ListPackages(ctx, "noturnas", 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if total != 2 || len(pkgs) != 2 || pkgs[0].Name != "Noturnas-Outubro" {
+		t.Errorf("busca: total=%d %+v; want 2, mais novo primeiro", total, pkgs)
+	}
+
+	pkgs, total, _ = s.ListPackages(ctx, "", 1, 1)
+	if total != 3 || len(pkgs) != 1 || pkgs[0].Name != "Diurnas-2026" {
+		t.Errorf("página 2 de 1: total=%d %+v", total, pkgs)
+	}
+
+	pkgs, total, _ = s.ListPackages(ctx, "nada", 10, 0)
+	if total != 0 || pkgs == nil {
+		t.Errorf("sem resultados: total=%d pkgs=%v (deve ser [] e não nil)", total, pkgs)
 	}
 }
