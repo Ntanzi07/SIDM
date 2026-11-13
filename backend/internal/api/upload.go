@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -8,10 +9,12 @@ import (
 	"log"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"SIDM/internal/crypt"
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
 	"SIDM/internal/importer"
@@ -26,6 +29,7 @@ type uploadResult struct {
 	SHA1            string   `json:"sha1,omitempty"`
 	Status          string   `json:"status"`                     // created | duplicate | error
 	ExistingPackage string   `json:"existing_package,omitempty"` // duplicate: onde a imagem já está
+	Decrypted       string   `json:"decrypted,omitempty"`        // formato de criptografia que foi aberto (ex: rc4-legacy)
 	INI             bool     `json:"ini,omitempty"`              // o arquivo tinha INI embutido
 	Prefilled       bool     `json:"prefilled,omitempty"`        // nome v2 válido ou perfil de INI aplicado
 	Warnings        []string `json:"warnings,omitempty"`         // ex: data do INI em formato inesperado
@@ -106,15 +110,20 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 	res := uploadResult{File: name}
 
 	ext := strings.ToLower(filepath.Ext(name))
-	if !filename.IsAllowedExt(ext) {
-		res.Status, res.Error = "error", "extensão não suportada: "+ext
-		return res
-	}
 
 	tmp, sum, size, err := s.files.Receive(part)
 	if err != nil {
 		log.Printf("upload %s: %v", name, err)
 		res.Status, res.Error = "error", "falha ao gravar o arquivo"
+		return res
+	}
+
+	// Arquivo criptografado pelo equipamento? Abre ANTES de tudo: o hash, o
+	// INI e o arquivo guardado são os do original (o que foi assinado).
+	tmp, sum, size, ext, err = s.openIfEncrypted(tmp, sum, size, ext, &res)
+	if err != nil {
+		s.files.Discard(tmp)
+		res.Status, res.Error = "error", err.Error()
 		return res
 	}
 	res.SHA1 = sum
@@ -128,6 +137,7 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 		Path:         files.PendingPath(pkg, sum, ext),
 		Ext:          ext,
 		Size:         size,
+		Encryption:   res.Decrypted,
 		QueuedAt:     now, // entra no fim da fila do pacote
 		IngestedAt:   now,
 		UpdatedAt:    now,
@@ -203,4 +213,70 @@ func applyMeta(img *store.Image, m filename.ImageMeta) {
 			Type: v.Type, Color: v.Color,
 		})
 	}
+}
+
+// openIfEncrypted confere se o arquivo recebido é criptografado e, se for,
+// troca o temporário pelo arquivo aberto (com o novo sha1 e tamanho).
+//
+// Regras:
+//   - JPEG aberto: segue, exigindo extensão permitida.
+//   - RC4 legado: abre; a extensão vira ".jpg" se a original não for de imagem
+//     (os equipamentos usam extensões próprias para o arquivo criptografado).
+//   - PGP: recusa, com uma mensagem clara (ainda não suportado).
+//   - qualquer outro conteúdo: segue as regras de antes (só a extensão importa).
+func (s *Server) openIfEncrypted(tmp, sum string, size int64, ext string, res *uploadResult) (string, string, int64, string, error) {
+	head, err := readHead(tmp, 3)
+	if err == nil && crypt.IsJPEG(head) {
+		if !filename.IsAllowedExt(ext) {
+			return tmp, sum, size, ext, fmt.Errorf("extensão não suportada: %s", ext)
+		}
+		return tmp, sum, size, ext, nil
+	}
+	if size > maxINIScanBytes {
+		return tmp, sum, size, ext, fmt.Errorf("arquivo grande demais para verificar a criptografia (máx. %d MB)", maxINIScanBytes>>20)
+	}
+
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		return tmp, sum, size, ext, fmt.Errorf("falha ao ler o arquivo")
+	}
+	plain, format, err := crypt.Open(data)
+	switch {
+	case errors.Is(err, crypt.ErrPGPUnsupported):
+		return tmp, sum, size, ext, err
+	case errors.Is(err, crypt.ErrNotEncrypted):
+		if !filename.IsAllowedExt(ext) {
+			return tmp, sum, size, ext, fmt.Errorf("extensão não suportada: %s", ext)
+		}
+		return tmp, sum, size, ext, nil
+	case err != nil:
+		return tmp, sum, size, ext, err
+	}
+
+	// Troca o temporário criptografado pelo aberto.
+	newTmp, newSum, newSize, err := s.files.Receive(bytes.NewReader(plain))
+	if err != nil {
+		return tmp, sum, size, ext, fmt.Errorf("falha ao gravar o arquivo aberto")
+	}
+	s.files.Discard(tmp)
+	if !filename.IsAllowedExt(ext) {
+		ext = ".jpg"
+	}
+	res.Decrypted = format
+	return newTmp, newSum, newSize, ext, nil
+}
+
+// readHead lê só os primeiros n bytes de um arquivo.
+func readHead(path string, n int) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	buf := make([]byte, n)
+	k, err := io.ReadFull(f, buf)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+		return nil, err
+	}
+	return buf[:k], nil
 }

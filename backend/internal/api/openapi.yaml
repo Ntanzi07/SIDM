@@ -257,6 +257,10 @@ paths:
         O INI que o equipamento grava **dentro** do JPEG é sempre guardado no banco
         (menos a assinatura). Com `profile` (do tipo `jpeg-ini`), ele também
         pré-preenche o rascunho. O arquivo nunca é alterado.
+
+        **Arquivos criptografados** pelo equipamento são abertos sozinhos: o
+        formato RC4 legado (qualquer extensão; vira `.jpg`). O hash, o INI e o
+        arquivo guardado são os do original aberto. O formato PGP ainda é recusado.
       parameters:
         - name: package
           in: query
@@ -622,6 +626,7 @@ components:
         path: { type: string, description: Relativo à pasta de imagens do servidor. }
         ext: { type: string }
         size: { type: integer }
+        encryption: { type: string, description: "Se o arquivo chegou criptografado, o formato aberto (ex. rc4-legacy)." }
         pattern_version: { type: string }
         equipment: { type: string }
         camera: { type: string }
@@ -712,6 +717,7 @@ components:
         sha1: { type: string }
         status: { type: string, enum: [created, duplicate, error] }
         existing_package: { type: string, description: "Se duplicate: onde ela já está." }
+        decrypted: { type: string, description: "Formato de criptografia que foi aberto (ex. rc4-legacy)." }
         ini: { type: boolean, description: O arquivo tinha INI embutido. }
         prefilled: { type: boolean, description: "Nome v2 válido ou perfil de INI aplicado." }
         warnings:

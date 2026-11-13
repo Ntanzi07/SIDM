@@ -72,6 +72,7 @@ SIDM/
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
+        ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── store/          Mongo: imagens, pacotes, fila, cadastros, perfis, histórico
         └── api/            handlers HTTP (dependem da interface Store) + openapi.yaml
 ```
@@ -323,6 +324,29 @@ explicando o problema, e o campo fica vazio.
 
 ---
 
+## Imagens criptografadas
+
+O upload **detecta e abre sozinho** os arquivos criptografados pelos equipamentos:
+
+| O arquivo... | O SIDM faz |
+|---|---|
+| começa com `FF D8` (JPEG aberto) | segue normal |
+| vira JPEG com o **RC4 legado** | descriptografa e segue com o arquivo aberto (`"decrypted": "rc4-legacy"`) |
+| nenhum dos casos | segue as regras de antes (só a extensão importa) |
+
+- O **RC4 legado** usa uma chave fixa (o SHA-256 de um byte zero), igual ao pacote `crypto`
+  do equipamento. Não precisa de segredo. O arquivo criptografado pode ter **qualquer
+  extensão**: depois de aberto, ele vira `.jpg`.
+- O **hash, o INI e o arquivo guardado** são os do original **aberto**. A mesma foto,
+  criptografada ou não, é a mesma imagem (duplicata). O que fica no disco é o JPEG+INI
+  original, byte a byte, então a assinatura continua válida.
+- O campo `encryption` da imagem registra que ela chegou criptografada.
+- **No front:** o `POST /images/exists` compara o hash do arquivo que o navegador tem.
+  Para um arquivo criptografado, esse hash é o da versão fechada, então ele não detecta a
+  duplicata antes do upload. O servidor detecta depois, de qualquer jeito.
+
+---
+
 ## Rodando
 
 ### 1. Configuração
@@ -433,6 +457,9 @@ go tool cover -html=cover.out
 - **Perfis de import como dados:** um formato de CSV novo é configuração, não código.
   O perfil é guardado no Mongo como o próprio texto JSON, para qualquer valor do CSV
   (com `.` ou `$`) funcionar como chave do `map`.
+- **Criptografia aberta na entrada:** o arquivo criptografado é aberto no upload e guardado
+  aberto. Assim o hash, a detecção de duplicata e a leitura do INI funcionam igual para
+  todos os arquivos.
 - **O arquivo original é intocável:** o INI dos equipamentos é assinado, então o SIDM
   só renomeia. O INI vai para o banco como uma **lista** de `{section, key, value}`, e
   não como mapa, para manter a ordem e para chaves com `.` ou `$` não serem problema.
@@ -457,6 +484,5 @@ go tool cover -html=cover.out
 - [ ] Regra para veículo com placa ilegível
 - [ ] Detectar o perfil de INI sozinho, pelo modelo do equipamento (`Metrologico.Modelo`)
 - [ ] `/imports/inspect` aceitar um JPEG e mostrar as chaves do INI
-- [ ] Descriptografia de imagens criptografadas (aguardando o formato)
 - [ ] Caixa da placa (`OCRPosicaoLeitura`) e marcações próprias, com export para o RF-DETR (COCO, 70/15/15)
 - [ ] Leitor de EXIF para o import

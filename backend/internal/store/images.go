@@ -36,6 +36,9 @@ type Image struct {
 	Path         string `bson:"path" json:"path"`                               // relativo a IMAGES_DIR
 	Ext          string `bson:"ext" json:"ext"`
 	Size         int64  `bson:"size" json:"size"`
+	// Encryption: se o arquivo chegou criptografado, qual formato foi aberto
+	// (ex: "rc4-legacy"). O que fica no disco é sempre o original aberto.
+	Encryption string `bson:"encryption,omitempty" json:"encryption,omitempty"`
 
 	PatternVersion string     `bson:"pattern_version,omitempty" json:"pattern_version,omitempty"`
 	Equipment      string     `bson:"equipment,omitempty" json:"equipment,omitempty"`
