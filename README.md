@@ -7,18 +7,23 @@ imagem (equipamento, câmera, ângulo, clima, veículos, placas...), confere e
 **verifica**. A imagem verificada ganha um nome autodescritivo no padrão v2, e
 os metadados ficam no MongoDB, pesquisáveis por qualquer campo.
 
+Metadados que já existem em outro sistema (um CSV exportado, por exemplo) podem
+ser **importados** para pré-preencher as anotações.
+
 > **v1 interna:** não há login ainda. O usuário é informado no header `X-User`.
 > Rode apenas na rede interna.
+
+**Documentação interativa da API:** com o servidor rodando, abra `http://localhost:8080/docs`.
 
 ---
 
 ## Como funciona
 
 ```
- 1. criar pacote         2. upload               3. fila de anotação              4. verificar
- POST /packages  ──▶  POST /images?package=X ──▶  POST /packages/X/next  ──▶  PUT /images/{sha1}
-                      (pending, nome = hash)     (cada pessoa pega uma)       {"complete": true}
-                                                                              (renomeia para v2)
+ 1. criar pacote         2. upload                3. (opcional) import de CSV         4. fila de anotação          5. verificar
+ POST /packages  ──▶  POST /images?package=X ──▶  POST /packages/X/import  ──▶  POST /packages/X/next  ──▶  PUT /images/{sha1}
+                      (pending, nome = hash)     (pré-preenche os rascunhos)    (cada pessoa pega uma)      {"complete": true}
+                                                                                                            (renomeia para v2)
 ```
 
 - **Pacote:** um lote de imagens enviado junto. Cada pacote é uma pasta no servidor,
@@ -31,6 +36,8 @@ os metadados ficam no MongoDB, pesquisáveis por qualquer campo.
   equipamento e câmera, renomeia para o padrão v2 e marca `verified`.
 - **Fila compartilhada:** várias pessoas anotam o mesmo pacote ao mesmo tempo, e cada
   uma pega "a próxima". Ninguém recebe a mesma imagem (veja [Fila de trabalho](#fila-de-trabalho)).
+- **Import:** um CSV preenche os rascunhos automaticamente, mas **nunca verifica**.
+  Uma pessoa continua conferindo pela fila (veja [Import de CSV](#import-de-csv)).
 - **Histórico:** toda alteração de campo vai para `image_history` (quem, o quê, quando).
 
 ### Status de uma imagem
@@ -62,8 +69,9 @@ SIDM/
     └── internal/
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
-        ├── store/          Mongo: imagens, pacotes, fila, cadastros, histórico
-        └── api/            handlers HTTP (dependem da interface Store)
+        ├── importer/       leitura de CSV e perfis de import (sem banco, sem HTTP)
+        ├── store/          Mongo: imagens, pacotes, fila, cadastros, perfis, histórico
+        └── api/            handlers HTTP (dependem da interface Store) + openapi.yaml
 ```
 
 ---
@@ -94,24 +102,52 @@ SIDM/
 
 ## API
 
+A referência completa, com exemplos e o "Try it out", está em **`/docs`** (Swagger UI).
+A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no binário.
+
 | Rota | O que faz |
 |---|---|
 | `GET /health` | `ok` se o Mongo responde |
 | `GET /codes` | tabelas fixas do padrão (direção, clima, cor...) para os dropdowns |
 | `GET /equipments?q=mf47` | busca equipamentos para o autocomplete (contém, ignora maiúscula) |
-| `GET /cameras?q=hik` | busca câmeras para o autocomplete |
 | `POST /equipments` | cadastra equipamento `{"name": "8003 MF4739"}` → `8003-MF4739` |
+| `GET /cameras?q=hik` | busca câmeras para o autocomplete |
 | `POST /cameras` | cadastra câmera `{"name": "hikvision 233"}` → `hikvision-233` |
-| `POST /packages` | cria pacote `{"name": "Noturnas Setembro"}` → `Noturnas-Setembro` |
 | `GET /packages?q=noturnas` | pacotes (mais novos primeiro) com progresso: `total`, `verified`, `pending`, `in_progress` |
+| `POST /packages` | cria pacote `{"name": "Noturnas Setembro"}` → `Noturnas-Setembro` |
 | `POST /packages/{name}/next` | pega a próxima imagem da fila (`X-User` obrigatório; corpo opcional `{"skip": "<sha1>"}`) |
-| `POST /images/exists` | `{"sha1s": [...]}` → quais já existem (e em que pacote) e quais faltam |
-| `POST /images?package=X` | upload multipart (campo `files`, vários arquivos) |
+| `POST /packages/{name}/import` | importa um CSV para os rascunhos (ensaio por padrão) |
 | `GET /images` | busca com filtros e paginação (veja abaixo) |
+| `POST /images?package=X` | upload multipart (campo `files`, vários arquivos) |
+| `POST /images/exists` | `{"sha1s": [...]}` → quais já existem (e em que pacote) e quais faltam |
 | `GET /images/{sha1}` | detalhe de uma imagem (inclui o rascunho salvo) |
-| `GET /images/{sha1}/file` | o arquivo da imagem |
 | `PUT /images/{sha1}` | salva o rascunho, ou verifica com `"complete": true` |
+| `GET /images/{sha1}/file` | o arquivo da imagem |
 | `POST /images/{sha1}/release` | devolve a imagem para a fila |
+| `POST /imports/inspect` | "raio-x" de um CSV: colunas, exemplos e valores distintos |
+| `GET /import-profiles` | lista os perfis de import |
+| `POST /import-profiles` | cria um perfil de import |
+| `GET /import-profiles/{name}` | um perfil |
+| `PUT /import-profiles/{name}` | atualiza um perfil |
+| `GET /docs` | documentação interativa (Swagger UI) |
+| `GET /openapi.yaml` | a especificação OpenAPI |
+
+**Filtros do `GET /images`:** `package`, `status`, `equipment`, `camera`, `day_time`,
+`weather`, `direction`, `vehicle_type`, `vehicle_color` e `plate`. Os filtros de veículo
+valem para o **mesmo** veículo (`$elemMatch`): "caminhão branco" não traz uma imagem com
+um caminhão preto e um carro branco.
+
+**Códigos de resposta mais comuns:**
+
+| Código | Quando |
+|---|---|
+| `400` | dado inválido; a mensagem diz o quê |
+| `404` | imagem, pacote ou perfil não existe |
+| `409` | duplicado, imagem com outra pessoa, editada no meio, ou rascunho em imagem já verificada |
+| `413` | arquivo de import maior que 20 MB |
+| `204` | fila vazia (`/next`) |
+
+Todo erro responde no formato `{"error": "mensagem"}`.
 
 ### Paginação
 
@@ -123,7 +159,7 @@ Toda listagem responde no mesmo formato, e aceita `?limit=` e `?skip=`:
 | Rota | `limit` padrão | `limit` máximo |
 |---|---|---|
 | `GET /images` | 50 | 500 |
-| `GET /packages` | 20 | 100 |
+| `GET /packages`, `GET /import-profiles` | 20 | 100 |
 | `GET /equipments`, `GET /cameras` | 10 | 50 |
 
 O `total` é o número de resultados **com o filtro aplicado**, para o front montar
@@ -134,25 +170,12 @@ O `total` é o número de resultados **com o filtro aplicado**, para o front mon
 `mf47` encontra `8003-MF4739`. O texto é escapado antes de virar regex no Mongo, então
 caracteres como `.` e `*` são tratados como texto comum.
 
-**Filtros do `GET /images`:** `package`, `status`, `equipment`, `camera`, `day_time`,
-`weather`, `direction`, `vehicle_type`, `vehicle_color`, `plate`, `limit` (padrão 50,
-máx. 500) e `skip`. Os filtros de veículo valem para o **mesmo** veículo (`$elemMatch`):
-"caminhão branco" não traz uma imagem com um caminhão preto e um carro branco.
-
-**Códigos de resposta mais comuns:**
-
-| Código | Quando |
-|---|---|
-| `400` | dado inválido; a mensagem diz o quê |
-| `404` | imagem ou pacote não existe |
-| `409` | duplicado, imagem com outra pessoa, editada no meio, ou rascunho em imagem já verificada |
-| `204` | fila vazia (`/next`) |
-
 ### Fila de trabalho
 
 - `next` entrega a imagem pendente livre mais antiga e a reserva para o usuário por **15 minutos**.
 - Recarregar a página devolve a **mesma** imagem.
-- Pular (`skip`) manda a imagem para o fim da fila.
+- Pular (`skip`) manda a imagem para o fim da fila. A imagem pulada nunca volta na hora,
+  a não ser que seja a única pendente que sobrou.
 - Salvar rascunho renova o prazo, e verificar tira a imagem da fila.
 - Se a pessoa sumir, o prazo vence e a imagem volta para a fila sozinha.
 - Outra pessoa não consegue editar uma imagem reservada (`409`).
@@ -160,6 +183,74 @@ máx. 500) e `skip`. Os filtros de veículo valem para o **mesmo** veículo (`$e
   nunca recebem a mesma imagem.
 - Toda gravação usa **optimistic locking** pelo `updated_at`: se alguém gravou no meio,
   volta `409` e nada é perdido.
+
+---
+
+## Import de CSV
+
+Um CSV novo **não exige código novo**: exige um **perfil**. O perfil é um JSON que diz
+como ler o arquivo, qual coluna identifica a imagem e como traduzir cada valor.
+
+```
+1. INSPECIONAR    POST /imports/inspect?delimiter=semicolon          → colunas, exemplos, valores distintos
+2. CRIAR PERFIL   POST /import-profiles                              → validado antes de salvar
+3. ENSAIAR        POST /packages/X/import?profile=Y                  → relatório; NADA é gravado
+4. AJUSTAR        PUT  /import-profiles/Y                            → ex: adicionar "Garoa" no map
+5. APLICAR        POST /packages/X/import?profile=Y&dry_run=false    → preenche os rascunhos
+```
+
+O perfil é criado **uma vez por formato** de CSV. Depois, todo CSV daquele formato é
+importado direto, só escolhendo o perfil.
+
+### Exemplo de perfil
+
+```json
+{
+  "name": "csv-pg-veiculos",
+  "reader": { "type": "csv", "delimiter": ";" },
+  "match": { "column": "imagem_nome", "by": "original_name" },
+  "fields": {
+    "equipment":   { "column": "dados_imagem_num_serie" },
+    "captured_at": { "column": "dados_imagem_data_infracao",
+                     "date_format": "2006-01-02 15:04:05.000",
+                     "timezone": "America/Sao_Paulo" }
+  },
+  "vehicles": { "mode": "row", "fields": {
+    "plate": { "column": "Placa Digitada" },
+    "type":  { "column": "dados_imagem_classificacao",
+               "map": { "AUTOMOVEL": "car", "CAMINHAO": "truck", "MOTOCICLETA": "motorcycle", "ONIBUS": "bus" } }
+  }}
+}
+```
+
+| Parte | O que faz |
+|---|---|
+| `reader` | `type: "csv"`, `delimiter` (padrão `,`) e `encoding` (`utf-8` ou `latin1`). O BOM do Excel é removido. |
+| `match` | a coluna que identifica a imagem, comparada com o nome original (`original_name`) ou com o hash (`sha1`) |
+| `fields` | campos da imagem: `equipment`, `camera`, `direction`, `resolution`, `capture_angle`, `day_time`, `image_range`, `weather`, `conditions`, `captured_at` |
+| `vehicles` | `mode: "row"` (uma linha por veículo, agrupadas pela imagem) ou `"columns"` (`Placa{n}` na mesma linha, com `max`) |
+
+Cada campo usa `column` (valor de uma coluna) **ou** `value` (valor fixo para o arquivo todo), mais:
+- `map`: traduz o valor de origem para o nosso (ignora maiúscula);
+- `split`: separa uma lista numa célula só (só em `conditions`);
+- `date_format` + `timezone`: o formato da data no layout do Go, e o fuso em que ela foi escrita (só em `captured_at`).
+
+### Regras do import
+
+- **O padrão é ensaio:** só grava com `dry_run=false`.
+- **Nunca verifica:** só preenche o rascunho. A imagem continua `pending`.
+- **Respeita quem já anotou:** só preenche campos vazios. Para substituir, use `overwrite=true`.
+- **Pula** imagens verificadas, imagens que alguém está anotando agora, e nomes originais
+  repetidos no pacote (não dá para saber qual é qual).
+- **Cadastra equipamentos e câmeras novos** automaticamente ao aplicar, com o nome sanitizado.
+  No ensaio, eles só aparecem listados em `new_equipments` / `new_cameras`.
+  Um nome impossível de sanitizar (ex: `8003/MF`) não é cadastrado e aparece em `invalid_names`.
+- **O histórico registra a origem:** `nathan via import:csv-pg-veiculos`.
+- Valor sem tradução **não quebra nada**: o campo fica vazio e o valor aparece em `unmapped`
+  no relatório, com a contagem. É a lista do que falta adicionar no perfil.
+
+> **Separador na URL:** use o nome (`semicolon`, `tab`, `pipe`, `comma`). Um `;` cru na
+> query string é descartado pelo Go.
 
 ---
 
@@ -192,7 +283,18 @@ go run ./cmd/server
 O `go run` lê o `.env` da raiz sozinho e monta a URI do Mongo com o `sidm_app`.
 As imagens ficam em `SIDM/data/images`.
 
-> Variáveis setadas no terminal (`$env:HTTP_ADDR=...`) têm prioridade sobre o `.env`.
+Se a porta 8080 estiver ocupada, coloque no `.env`:
+```env
+HTTP_ADDR=:8081
+```
+Isso só vale para o `go run`: no Docker, o `docker-compose.yml` fixa a porta interna,
+e a porta exposta vem do `BACKEND_PORT`.
+
+> Variáveis setadas no terminal (`$env:HTTP_ADDR=...`) têm prioridade sobre o `.env`,
+> e valem até a janela do PowerShell ser fechada.
+>
+> Se a 8080 estiver ocupada pelo próprio `sidm-backend` (aparece no `docker ps`),
+> pare só ele com `docker compose stop backend`.
 
 **Tudo no Docker:**
 ```powershell
@@ -215,6 +317,8 @@ Invoke-RestMethod -Method Post -Uri http://localhost:8080/packages/pacote-8003/n
 Invoke-RestMethod http://localhost:8080/packages
 ```
 
+Ou use o **`/docs`**: dá para fazer tudo isso pelo navegador, inclusive o upload.
+
 ---
 
 ## Testes
@@ -226,13 +330,17 @@ go test ./... -cover
 
 | Pacote | Tipo |
 |---|---|
-| `filename`, `files`, `cmd/server` | unitários |
+| `filename`, `files`, `importer`, `cmd/server` | unitários |
 | `api` | handlers testados com um banco em memória (`memStore`), sem Docker |
 | `store` | **integração** com o Mongo de verdade |
 
 Os testes do `store` usam o usuário root do `.env` e um banco descartável
 (`sidm_test_<timestamp>`), apagado no fim. O banco `sidm` nunca é tocado.
-Sem Mongo rodando, eles aparecem como `SKIP`.
+Sem Mongo rodando, eles aparecem como `SKIP`. Entre eles está um teste de concorrência:
+20 pessoas pedindo "próxima" ao mesmo tempo, sem nenhuma imagem repetida.
+
+O `TestTodaRotaEstaDocumentada` falha se uma rota existir no código e não no
+`openapi.yaml` (ou o contrário). **Toda rota nova precisa entrar na documentação.**
 
 Para ver a cobertura linha por linha:
 ```powershell
@@ -250,19 +358,26 @@ go tool cover -html=cover.out
   buscar. O `Format()` mantém os dois sincronizados.
 - **Códigos fixos no Go, cadastros no Mongo:** o padrão só muda com revisão e deploy, mas
   um equipamento novo entra sem deploy.
+- **Perfis de import como dados:** um formato de CSV novo é configuração, não código.
+  O perfil é guardado no Mongo como o próprio texto JSON, para qualquer valor do CSV
+  (com `.` ou `$`) funcionar como chave do `map`.
 - **Banco e disco nunca divergem:** quando uma operação mexe nos dois e a segunda parte
   falha, a primeira é desfeita.
 - **Menor privilégio:** o backend usa o `sidm_app`, que só tem `readWrite` no banco `sidm`.
 - **Erros internos não vazam:** o cliente recebe "erro interno", e o detalhe vai para o log.
 - **A API depende de uma interface:** os handlers são testados sem banco.
+- **Documentação escrita à mão e conferida por teste:** o `openapi.yaml` é um arquivo só,
+  fácil de revisar, e o teste impede que ele fique para trás.
 
 ---
 
 ## Próximos passos
 
-- [ ] **Frontend** (React): upload de pacote, anotação com a fila, busca
+- [ ] **Frontend** (React): pacotes, upload, anotação com a fila, busca, import
 - [ ] **Export** (`POST /export`): zip das imagens filtradas ou de um pacote
 - [ ] **Login próprio** (usuário + senha bcrypt + sessão) no lugar do `X-User`
+- [ ] Embutir o Swagger UI no binário (hoje vem de um CDN; não abre em rede sem internet)
 - [ ] Graceful shutdown
 - [ ] Validador `$jsonSchema` no Mongo
-- [ ] Pré-preenchimento a partir dos nomes originais, quando houver padrão
+- [ ] Regra para veículo com placa ilegível
+- [ ] Leitores de INI e EXIF para o import
