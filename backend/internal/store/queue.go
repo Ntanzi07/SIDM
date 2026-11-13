@@ -72,13 +72,29 @@ func (s *Store) ClaimNext(ctx context.Context, pkg, user, skip string, lease tim
 		SetSort(bson.D{{Key: "queued_at", Value: 1}, {Key: "_id", Value: 1}}).
 		SetReturnDocument(options.After) // devolve o documento JÁ marcado
 
+	// Quem pulou não pode receber de volta a imagem que acabou de pular.
+	// Não dá para confiar só no queued_at: duas ações no mesmo milissegundo
+	// (o relógio do Windows tem resolução de alguns ms) empatam, e o
+	// desempate pelo _id podia devolver justo a imagem pulada.
+	// Se ela for a única pendente livre, aí sim ela volta.
+	if skip != "" {
+		notSkipped := append(bson.D{{Key: "_id", Value: bson.D{{Key: "$ne", Value: skip}}}}, free...)
+		img, err := claimOne(ctx, coll, notSkipped, claim, opts)
+		if !errors.Is(err, ErrNotFound) {
+			return img, err
+		}
+	}
+	return claimOne(ctx, coll, free, claim, opts)
+}
+
+func claimOne(ctx context.Context, coll *mongo.Collection, filter, update bson.D, opts *options.FindOneAndUpdateOptionsBuilder) (*Image, error) {
 	var img Image
-	err = coll.FindOneAndUpdate(ctx, free, claim, opts).Decode(&img)
+	err := coll.FindOneAndUpdate(ctx, filter, update, opts).Decode(&img)
 	if errors.Is(err, mongo.ErrNoDocuments) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
-		return nil, fmt.Errorf("pegar próxima imagem de %s: %w", pkg, err)
+		return nil, fmt.Errorf("pegar próxima imagem: %w", err)
 	}
 	return &img, nil
 }

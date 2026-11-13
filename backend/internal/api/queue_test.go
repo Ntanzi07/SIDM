@@ -83,6 +83,39 @@ func TestNextPularMandaParaOFimDaFila(t *testing.T) {
 	}
 }
 
+// Reproduz o que aconteceu no Windows: todos os "pular" no MESMO instante
+// (relógio com resolução de ms). A imagem pulada nunca pode voltar na hora.
+func TestNextPularComRelogioEmpatado(t *testing.T) {
+	env := newTestEnv(t)
+	shas := env.seedQueue(t, "a", "b")
+	same := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, sha := range shas {
+		img := env.db.images[sha]
+		img.QueuedAt = same
+		env.db.images[sha] = img
+	}
+
+	first, _ := env.next(t, "nathan", "")
+	second, _ := env.next(t, "nathan", `{"skip":"`+first.SHA1+`"}`)
+	if second.SHA1 == first.SHA1 {
+		t.Fatal("a imagem pulada voltou na hora")
+	}
+	third, _ := env.next(t, "nathan", `{"skip":"`+second.SHA1+`"}`)
+	if third.SHA1 != first.SHA1 {
+		t.Errorf("depois de pular a segunda, deveria voltar a primeira: %s", third.SHA1)
+	}
+}
+
+func TestNextPularAUnicaDevolveElaMesma(t *testing.T) {
+	env := newTestEnv(t)
+	shas := env.seedQueue(t, "única")
+	env.next(t, "nathan", "")
+	got, code := env.next(t, "nathan", `{"skip":"`+shas[0]+`"}`)
+	if code != http.StatusOK || got.SHA1 != shas[0] {
+		t.Errorf("pular a única pendente: code=%d; deveria devolver ela mesma", code)
+	}
+}
+
 func TestNextFilaVazia(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedPending(t, "única")

@@ -20,6 +20,8 @@ import (
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
+
+	"SIDM/internal/importer"
 )
 
 func testStore(t *testing.T) *Store {
@@ -61,7 +63,7 @@ func testStore(t *testing.T) *Store {
 	})
 
 	// Os mesmos índices únicos do mongo/init/01-init.js.
-	for _, coll := range []string{"equipments", "cameras", "packages"} {
+	for _, coll := range []string{"equipments", "cameras", "packages", "import_profiles"} {
 		_, err := s.db.Collection(coll).Indexes().CreateOne(ctx, mongo.IndexModel{
 			Keys:    bson.D{{Key: "name", Value: 1}},
 			Options: options.Index().SetUnique(true),
@@ -663,5 +665,110 @@ func TestListPackagesBuscaEPaginacao(t *testing.T) {
 	pkgs, total, _ = s.ListPackages(ctx, "nada", 10, 0)
 	if total != 0 || pkgs == nil {
 		t.Errorf("sem resultados: total=%d pkgs=%v (deve ser [] e não nil)", total, pkgs)
+	}
+}
+
+func TestPerfisDeImport(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	p := &importer.Profile{
+		Name:   "csv-8003",
+		Reader: importer.ReaderConfig{Type: "csv", Delimiter: ";"},
+		Match:  importer.MatchConfig{Column: "Arquivo", By: importer.MatchByOriginalName},
+		Fields: map[string]importer.FieldRule{
+			// Chaves com "." e "$": o motivo de guardar o perfil como texto.
+			"weather": {Column: "Clima", Map: map[string]string{"Chuva.forte": "rain", "$limpo": "clear"}},
+		},
+		CreatedBy: "nathan",
+		UpdatedAt: ms(time.Now()),
+	}
+	if err := s.CreateProfile(ctx, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateProfile(ctx, p); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("duplicado: err = %v, want ErrDuplicate", err)
+	}
+
+	got, err := s.FindProfile(ctx, "csv-8003")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Fields["weather"].Map["Chuva.forte"] != "rain" || got.Fields["weather"].Map["$limpo"] != "clear" {
+		t.Errorf("chaves com . e $ não sobreviveram: %+v", got.Fields["weather"].Map)
+	}
+	if got.CreatedBy != "nathan" || !got.UpdatedAt.Equal(p.UpdatedAt) {
+		t.Errorf("metadados: %+v", got)
+	}
+	if _, err := s.FindProfile(ctx, "nao-existe"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("inexistente: err = %v", err)
+	}
+
+	// Atualizar mantém o created_by.
+	got.Fields["weather"].Map["Garoa"] = "rain"
+	got.CreatedBy = "outra-pessoa"
+	if err := s.ReplaceProfile(ctx, got); err != nil {
+		t.Fatal(err)
+	}
+	again, _ := s.FindProfile(ctx, "csv-8003")
+	if again.Fields["weather"].Map["Garoa"] != "rain" || again.CreatedBy != "nathan" {
+		t.Errorf("replace: map=%v created_by=%q", again.Fields["weather"].Map, again.CreatedBy)
+	}
+	ghost := *p
+	ghost.Name = "nao-existe"
+	if err := s.ReplaceProfile(ctx, &ghost); !errors.Is(err, ErrNotFound) {
+		t.Errorf("replace inexistente: err = %v", err)
+	}
+
+	s.CreateProfile(ctx, &importer.Profile{Name: "outro-csv", Reader: p.Reader, Match: p.Match})
+	list, total, err := s.ListProfiles(ctx, "8003", 10, 0)
+	if err != nil || total != 1 || list[0].Name != "csv-8003" {
+		t.Errorf("busca: total=%d %v %v", total, list, err)
+	}
+	list, total, _ = s.ListProfiles(ctx, "", 1, 1)
+	if total != 2 || len(list) != 1 || list[0].Name != "outro-csv" {
+		t.Errorf("paginação: total=%d %v", total, list)
+	}
+}
+
+func TestFindImagesByKeys(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	a := newImage("sha-a", time.Now())
+	a.OriginalName = "foto.jpg"
+	b := newImage("sha-b", time.Now())
+	b.OriginalName = "foto.jpg" // mesmo nome, outra imagem
+	c := newImage("sha-c", time.Now())
+	c.OriginalName = "outra.jpg"
+	d := newImage("sha-d", time.Now())
+	d.OriginalName = "foto.jpg"
+	d.Package = "pacote-2" // outro pacote: não pode aparecer
+	for _, img := range []*Image{a, b, c, d} {
+		s.InsertImage(ctx, img)
+	}
+
+	byName, err := s.FindImagesByKeys(ctx, "pacote-1", importer.MatchByOriginalName, []string{"foto.jpg", "nada.jpg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shas(byName) != "[sha-a sha-b]" && shas(byName) != "[sha-b sha-a]" {
+		t.Errorf("por nome = %s, want sha-a e sha-b (só do pacote-1)", shas(byName))
+	}
+
+	byHash, _ := s.FindImagesByKeys(ctx, "pacote-1", importer.MatchBySHA1, []string{"sha-c", "sha-d"})
+	if shas(byHash) != "[sha-c]" {
+		t.Errorf("por hash = %s, want só sha-c (sha-d é de outro pacote)", shas(byHash))
+	}
+
+	// Mais de 1000 chaves: tem que funcionar em lotes.
+	many := make([]string, 2500)
+	for i := range many {
+		many[i] = fmt.Sprintf("x%d.jpg", i)
+	}
+	many[2400] = "outra.jpg"
+	got, err := s.FindImagesByKeys(ctx, "pacote-1", importer.MatchByOriginalName, many)
+	if err != nil || shas(got) != "[sha-c]" {
+		t.Errorf("2500 chaves: %s, %v", shas(got), err)
 	}
 }

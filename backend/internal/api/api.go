@@ -12,6 +12,7 @@ import (
 
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
+	"SIDM/internal/importer"
 	"SIDM/internal/store"
 )
 
@@ -26,6 +27,12 @@ import (
 //   GET  /packages?q=&limit=   pacotes com progresso, paginado
 //   POST /packages/{name}/next pega a próxima imagem da fila (X-User obrigatório)
 //   POST /images/{sha1}/release devolve a imagem para a fila
+//   POST /imports/inspect      "raio-x" de um CSV (colunas, exemplos, valores distintos)
+//   POST /import-profiles      cria um perfil de import (o "modelo" de um CSV)
+//   GET  /import-profiles      lista os perfis, paginado
+//   GET  /import-profiles/{name}  um perfil
+//   PUT  /import-profiles/{name}  atualiza um perfil
+//   POST /packages/{name}/import?profile=X&dry_run=false  importa um CSV para os rascunhos
 //   POST /images/exists        checa hashes antes do upload
 //   POST /images?package=X     upload para o pacote X (pending)
 //   GET  /images               busca com filtros, paginado
@@ -65,6 +72,12 @@ type Store interface {
 	ListImages(ctx context.Context, f store.ImageFilter) ([]store.Image, int64, error)
 	ExistingImages(ctx context.Context, ids []string) (map[string]store.ExistingImage, error)
 	InsertHistory(ctx context.Context, entries []store.HistoryEntry) error
+
+	CreateProfile(ctx context.Context, p *importer.Profile) error
+	FindProfile(ctx context.Context, name string) (*importer.Profile, error)
+	ReplaceProfile(ctx context.Context, p *importer.Profile) error
+	ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error)
+	FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]store.Image, error)
 }
 
 type Server struct {
@@ -89,6 +102,12 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /packages", s.handleListPackages)
 	mux.HandleFunc("POST /packages/{name}/next", s.handleNext)
 	mux.HandleFunc("POST /images/{sha1}/release", s.handleRelease)
+	mux.HandleFunc("POST /packages/{name}/import", s.handleImport)
+	mux.HandleFunc("POST /imports/inspect", s.handleInspect)
+	mux.HandleFunc("POST /import-profiles", s.handleCreateProfile)
+	mux.HandleFunc("GET /import-profiles", s.handleListProfiles)
+	mux.HandleFunc("GET /import-profiles/{name}", s.handleGetProfile)
+	mux.HandleFunc("PUT /import-profiles/{name}", s.handleReplaceProfile)
 	mux.HandleFunc("POST /images", s.handleUpload)
 	mux.HandleFunc("POST /images/exists", s.handleExists)
 	mux.HandleFunc("GET /images", s.handleListImages)

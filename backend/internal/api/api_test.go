@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"SIDM/internal/files"
+	"SIDM/internal/importer"
 	"SIDM/internal/store"
 )
 
@@ -40,6 +41,7 @@ type memStore struct {
 	equipments map[string]bool
 	cameras    map[string]bool
 	packages   map[string]store.Package
+	profiles   map[string]importer.Profile
 	images     map[string]store.Image
 	history    []store.HistoryEntry
 	lastFilter store.ImageFilter
@@ -56,6 +58,7 @@ func newMemStore() *memStore {
 		equipments: map[string]bool{},
 		cameras:    map[string]bool{},
 		packages:   map[string]store.Package{},
+		profiles:   map[string]importer.Profile{},
 		images:     map[string]store.Image{},
 	}
 }
@@ -246,17 +249,9 @@ func (m *memStore) ClaimNext(ctx context.Context, pkg, user, skip string, lease 
 		}
 	}
 
-	var best *store.Image
-	for _, img := range m.images {
-		img := img
-		free := img.ClaimedUntil == nil || !img.ClaimedUntil.After(now)
-		if img.Package != pkg || img.Status != store.StatusPending || !free {
-			continue
-		}
-		if best == nil || img.QueuedAt.Before(best.QueuedAt) ||
-			(img.QueuedAt.Equal(best.QueuedAt) && img.SHA1 < best.SHA1) {
-			best = &img
-		}
+	best := m.oldestFree(pkg, now, skip)
+	if best == nil && skip != "" {
+		best = m.oldestFree(pkg, now, "") // a pulada era a única: ela volta
 	}
 	if best == nil {
 		return nil, store.ErrNotFound
@@ -266,6 +261,23 @@ func (m *memStore) ClaimNext(ctx context.Context, pkg, user, skip string, lease 
 	m.images[best.SHA1] = *best
 	out := *best
 	return &out, nil
+}
+
+// oldestFree: a pendente livre mais antiga da fila, ignorando `except`.
+func (m *memStore) oldestFree(pkg string, now time.Time, except string) *store.Image {
+	var best *store.Image
+	for _, img := range m.images {
+		img := img
+		free := img.ClaimedUntil == nil || !img.ClaimedUntil.After(now)
+		if img.Package != pkg || img.Status != store.StatusPending || !free || img.SHA1 == except {
+			continue
+		}
+		if best == nil || img.QueuedAt.Before(best.QueuedAt) ||
+			(img.QueuedAt.Equal(best.QueuedAt) && img.SHA1 < best.SHA1) {
+			best = &img
+		}
+	}
+	return best
 }
 
 func (m *memStore) ReleaseClaim(ctx context.Context, sha1, user string) error {
@@ -314,6 +326,71 @@ func (m *memStore) InsertHistory(ctx context.Context, entries []store.HistoryEnt
 	defer m.mu.Unlock()
 	m.history = append(m.history, entries...)
 	return nil
+}
+
+func (m *memStore) CreateProfile(ctx context.Context, p *importer.Profile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.profiles[p.Name]; ok {
+		return store.ErrDuplicate
+	}
+	m.profiles[p.Name] = *p
+	return nil
+}
+
+func (m *memStore) FindProfile(ctx context.Context, name string) (*importer.Profile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.profiles[name]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return &p, nil
+}
+
+func (m *memStore) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	old, ok := m.profiles[p.Name]
+	if !ok {
+		return store.ErrNotFound
+	}
+	p.CreatedBy = old.CreatedBy
+	m.profiles[p.Name] = *p
+	return nil
+}
+
+func (m *memStore) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []importer.Profile{}
+	for _, p := range m.profiles {
+		if strings.Contains(strings.ToLower(p.Name), strings.ToLower(q)) {
+			out = append(out, p)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return paginate(out, limit, skip), int64(len(out)), nil
+}
+
+func (m *memStore) FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]store.Image, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	want := map[string]bool{}
+	for _, k := range keys {
+		want[k] = true
+	}
+	out := []store.Image{}
+	for _, img := range m.images {
+		k := img.OriginalName
+		if by == importer.MatchBySHA1 {
+			k = img.SHA1
+		}
+		if img.Package == pkg && want[k] {
+			out = append(out, img)
+		}
+	}
+	return out, nil
 }
 
 // ---------- helpers ----------

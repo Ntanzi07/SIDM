@@ -8,6 +8,10 @@ db.createCollection("image_history");
 db.createCollection("packages");    // { name, created_by, created_at }
 db.packages.createIndex({ name: 1 }, { unique: true });
 
+// Perfis de import: o "modelo" de cada formato de CSV ({ name, spec: "<json>", ... }).
+db.createCollection("import_profiles");
+db.import_profiles.createIndex({ name: 1 }, { unique: true });
+
 db.createCollection("cameras");     // { name: "hikvision-233", active: true }  (name já sanitizado)
 db.createCollection("equipments");  // { name: "8003-MF4739", active: true }    (name já sanitizado)
 
@@ -15,6 +19,7 @@ db.cameras.createIndex({ name: 1 }, { unique: true });
 db.equipments.createIndex({ name: 1 }, { unique: true });
 
 db.images.createIndex({ package: 1, status: 1, queued_at: 1 });  // fila de trabalho e progresso de cada pacote
+db.images.createIndex({ package: 1, original_name: 1 });         // import: casar a linha do CSV com a imagem
 db.images.createIndex({ equipment: 1, captured_at: -1 });
 db.images.createIndex({ camera: 1, captured_at: -1 });
 db.images.createIndex({ day_time: 1, captured_at: -1 });
