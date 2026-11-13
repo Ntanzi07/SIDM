@@ -40,6 +40,8 @@ import (
 //   GET  /images/{sha1}/file   o arquivo da imagem
 //   PUT  /images/{sha1}        salva rascunho / verifica (renomeia para v2)
 //   POST /export               TODO: zip das imagens selecionadas
+//   GET  /docs                 Swagger UI (documentação interativa)
+//   GET  /openapi.yaml         a especificação OpenAPI
 //
 // Toda listagem responde no mesmo formato: {"total": N, "items": [...]},
 // com ?limit= e ?skip= para paginar.
@@ -89,31 +91,55 @@ func New(s Store, fs *files.Storage) *Server {
 	return &Server{store: s, files: fs}
 }
 
-// Routes registra todas as rotas e devolve o handler pronto para o http.ListenAndServe.
+// route é uma linha da tabela de rotas.
+type route struct {
+	method, path string
+	handler      http.HandlerFunc
+}
+
+// routes é a tabela de TODAS as rotas da API. Fica separada do Routes()
+// para o teste conseguir percorrer a lista e conferir que cada rota está
+// documentada no openapi.yaml (ver docs_test.go).
+func (s *Server) routes() []route {
+	return []route{
+		{"GET", "/health", s.handleHealth},
+		{"GET", "/codes", s.handleCodes},
+
+		{"GET", "/equipments", s.handleSearchNames(s.store.SearchEquipments)},
+		{"POST", "/equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment)},
+		{"GET", "/cameras", s.handleSearchNames(s.store.SearchCameras)},
+		{"POST", "/cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera)},
+
+		{"GET", "/packages", s.handleListPackages},
+		{"POST", "/packages", s.handleCreatePackage},
+		{"POST", "/packages/{name}/next", s.handleNext},
+		{"POST", "/packages/{name}/import", s.handleImport},
+
+		{"GET", "/images", s.handleListImages},
+		{"POST", "/images", s.handleUpload},
+		{"POST", "/images/exists", s.handleExists},
+		{"GET", "/images/{sha1}", s.handleGetImage},
+		{"PUT", "/images/{sha1}", s.handleAnnotate},
+		{"GET", "/images/{sha1}/file", s.handleImageFile},
+		{"POST", "/images/{sha1}/release", s.handleRelease},
+
+		{"POST", "/imports/inspect", s.handleInspect},
+		{"GET", "/import-profiles", s.handleListProfiles},
+		{"POST", "/import-profiles", s.handleCreateProfile},
+		{"GET", "/import-profiles/{name}", s.handleGetProfile},
+		{"PUT", "/import-profiles/{name}", s.handleReplaceProfile},
+	}
+}
+
+// Routes registra todas as rotas, mais a documentação, e devolve o handler
+// pronto para o http.ListenAndServe.
 func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /health", s.handleHealth)
-	mux.HandleFunc("GET /codes", s.handleCodes)
-	mux.HandleFunc("GET /equipments", s.handleSearchNames(s.store.SearchEquipments))
-	mux.HandleFunc("GET /cameras", s.handleSearchNames(s.store.SearchCameras))
-	mux.HandleFunc("POST /equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment))
-	mux.HandleFunc("POST /cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera))
-	mux.HandleFunc("POST /packages", s.handleCreatePackage)
-	mux.HandleFunc("GET /packages", s.handleListPackages)
-	mux.HandleFunc("POST /packages/{name}/next", s.handleNext)
-	mux.HandleFunc("POST /images/{sha1}/release", s.handleRelease)
-	mux.HandleFunc("POST /packages/{name}/import", s.handleImport)
-	mux.HandleFunc("POST /imports/inspect", s.handleInspect)
-	mux.HandleFunc("POST /import-profiles", s.handleCreateProfile)
-	mux.HandleFunc("GET /import-profiles", s.handleListProfiles)
-	mux.HandleFunc("GET /import-profiles/{name}", s.handleGetProfile)
-	mux.HandleFunc("PUT /import-profiles/{name}", s.handleReplaceProfile)
-	mux.HandleFunc("POST /images", s.handleUpload)
-	mux.HandleFunc("POST /images/exists", s.handleExists)
-	mux.HandleFunc("GET /images", s.handleListImages)
-	mux.HandleFunc("GET /images/{sha1}", s.handleGetImage)
-	mux.HandleFunc("GET /images/{sha1}/file", s.handleImageFile)
-	mux.HandleFunc("PUT /images/{sha1}", s.handleAnnotate)
+	for _, rt := range s.routes() {
+		mux.HandleFunc(rt.method+" "+rt.path, rt.handler)
+	}
+	mux.HandleFunc("GET /docs", handleDocs)
+	mux.HandleFunc("GET /openapi.yaml", handleOpenAPI)
 	return mux
 }
 

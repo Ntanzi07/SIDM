@@ -1,0 +1,815 @@
+openapi: 3.0.3
+info:
+  title: SIDM API
+  version: "1.0"
+  description: |
+    Controle e anotação de imagens de veículos.
+
+    **Fluxo:** criar pacote → upload → fila de anotação (`/next`) → verificar (`PUT` com `complete: true`).
+
+    **v1 interna, sem login:** quem está agindo vai no header `X-User`. Rode só na rede interna.
+
+    **Listagens** respondem sempre `{"total": N, "items": [...]}`, com `limit` e `skip` para paginar.
+
+    **Erros** respondem sempre `{"error": "mensagem"}`.
+
+tags:
+  - name: sistema
+  - name: cadastros
+    description: Equipamentos e câmeras.
+  - name: pacotes
+  - name: imagens
+  - name: fila
+    description: Fila de trabalho compartilhada (várias pessoas anotando o mesmo pacote).
+  - name: import
+    description: Import de metadados por CSV, usando perfis.
+
+paths:
+  /health:
+    get:
+      tags: [sistema]
+      summary: Saúde do serviço
+      description: Responde `ok` se o Mongo está acessível.
+      responses:
+        "200":
+          description: Tudo certo.
+          content:
+            text/plain:
+              schema: { type: string, example: ok }
+        "503":
+          description: Mongo indisponível.
+
+  /codes:
+    get:
+      tags: [cadastros]
+      summary: Tabelas fixas do padrão v2
+      description: |
+        Para os dropdowns: código → valor, por campo. Equipamentos e câmeras
+        **não** vêm aqui (têm busca própria: `/equipments` e `/cameras`).
+      responses:
+        "200":
+          description: Tabelas por campo.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: object
+                  additionalProperties: { type: string }
+              example:
+                day_time: { D: day, N: night }
+                weather: { S: clear, C: rain, N: fog }
+
+  /equipments:
+    get:
+      tags: [cadastros]
+      summary: Buscar equipamentos (autocomplete)
+      description: Busca por "contém", sem diferenciar maiúscula. `mf47` encontra `8003-MF4739`.
+      parameters:
+        - $ref: "#/components/parameters/SearchQ"
+        - $ref: "#/components/parameters/LimitNames"
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200": { $ref: "#/components/responses/NamePage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    post:
+      tags: [cadastros]
+      summary: Cadastrar equipamento
+      description: O nome é sanitizado (espaço vira `-`; só `A-Z a-z 0-9 -`).
+      requestBody: { $ref: "#/components/requestBodies/Name" }
+      responses:
+        "201": { $ref: "#/components/responses/NameCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /cameras:
+    get:
+      tags: [cadastros]
+      summary: Buscar câmeras (autocomplete)
+      parameters:
+        - $ref: "#/components/parameters/SearchQ"
+        - $ref: "#/components/parameters/LimitNames"
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200": { $ref: "#/components/responses/NamePage" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+    post:
+      tags: [cadastros]
+      summary: Cadastrar câmera
+      requestBody: { $ref: "#/components/requestBodies/Name" }
+      responses:
+        "201": { $ref: "#/components/responses/NameCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /packages:
+    get:
+      tags: [pacotes]
+      summary: Listar pacotes com progresso
+      description: Mais novos primeiro.
+      parameters:
+        - $ref: "#/components/parameters/SearchQ"
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200":
+          description: Página de pacotes.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/PackageSummary" }
+    post:
+      tags: [pacotes]
+      summary: Criar pacote
+      description: O nome vira nome de pasta no servidor, por isso é sanitizado. A pasta é criada na hora.
+      parameters:
+        - $ref: "#/components/parameters/XUser"
+      requestBody: { $ref: "#/components/requestBodies/Name" }
+      responses:
+        "201": { $ref: "#/components/responses/NameCreated" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /packages/{name}/next:
+    post:
+      tags: [fila]
+      summary: Pegar a próxima imagem da fila
+      description: |
+        Entrega a imagem pendente livre mais antiga do pacote e reserva para o
+        usuário por 15 minutos. Recarregar devolve a mesma imagem. Duas pessoas
+        nunca recebem a mesma imagem.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+        - $ref: "#/components/parameters/XUserRequired"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                skip:
+                  type: string
+                  description: sha1 da imagem atual, para pular (ela vai para o fim da fila).
+      responses:
+        "200":
+          description: A imagem, já reservada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Image" }
+        "204": { description: Fila vazia. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /packages/{name}/import:
+    post:
+      tags: [import]
+      summary: Importar um CSV para os rascunhos do pacote
+      description: |
+        Casa cada linha do CSV com uma imagem do pacote e preenche o **rascunho**
+        (nunca verifica). Equipamentos e câmeras novos são cadastrados.
+
+        **O padrão é ensaio**: só grava com `dry_run=false`.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+        - $ref: "#/components/parameters/XUser"
+        - name: profile
+          in: query
+          required: true
+          schema: { type: string }
+        - name: dry_run
+          in: query
+          schema: { type: boolean, default: true }
+        - name: overwrite
+          in: query
+          description: "false: só preenche campos vazios. true: o CSV substitui o rascunho."
+          schema: { type: boolean, default: false }
+      requestBody: { $ref: "#/components/requestBodies/CSVFile" }
+      responses:
+        "200":
+          description: Relatório do import.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ImportReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "413": { description: Arquivo maior que 20 MB. }
+
+  /images:
+    get:
+      tags: [imagens]
+      summary: Buscar imagens
+      description: |
+        Filtros de veículo valem para o **mesmo** veículo: "caminhão branco" não
+        traz uma imagem com um caminhão preto e um carro branco.
+      parameters:
+        - { name: package, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [pending, verified] } }
+        - { name: equipment, in: query, schema: { type: string } }
+        - { name: camera, in: query, schema: { type: string } }
+        - { name: day_time, in: query, schema: { type: string } }
+        - { name: weather, in: query, schema: { type: string } }
+        - { name: direction, in: query, schema: { type: string } }
+        - { name: vehicle_type, in: query, schema: { type: string } }
+        - { name: vehicle_color, in: query, schema: { type: string } }
+        - { name: plate, in: query, schema: { type: string } }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200":
+          description: Página de imagens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Image" }
+    post:
+      tags: [imagens]
+      summary: Upload de imagens para um pacote
+      description: |
+        Imagem repetida (mesmo conteúdo) que já está em outro pacote é **pulada**,
+        e o resto do lote segue.
+      parameters:
+        - name: package
+          in: query
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items: { type: string, format: binary }
+      responses:
+        "200":
+          description: Resultado de cada arquivo.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/UploadResult" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /images/exists:
+    post:
+      tags: [imagens]
+      summary: Quais hashes já existem
+      description: O front pergunta antes de subir, para não mandar GB repetido.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sha1s]
+              properties:
+                sha1s:
+                  type: array
+                  maxItems: 1000
+                  items: { type: string }
+      responses:
+        "200":
+          description: Separados em existentes e faltando.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  existing:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sha1: { type: string }
+                        package: { type: string }
+                        status: { type: string }
+                  missing:
+                    type: array
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /images/{sha1}:
+    get:
+      tags: [imagens]
+      summary: Detalhe de uma imagem
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+      responses:
+        "200":
+          description: A imagem (inclui o rascunho salvo).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Image" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [imagens]
+      summary: Salvar rascunho ou verificar
+      description: |
+        Substitui **todos** os campos de anotação.
+
+        - `complete: false`: salva o rascunho (continua pending, não renomeia).
+        - `complete: true`: valida tudo, renomeia para o padrão v2 e marca verified.
+
+        Usa optimistic locking: se alguém gravou no meio, responde 409.
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnotationRequest" }
+      responses:
+        "200":
+          description: A imagem atualizada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Image" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /images/{sha1}/file:
+    get:
+      tags: [imagens]
+      summary: O arquivo da imagem
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+      responses:
+        "200":
+          description: Os bytes da imagem.
+          content:
+            image/jpeg:
+              schema: { type: string, format: binary }
+            image/png:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /images/{sha1}/release:
+    post:
+      tags: [fila]
+      summary: Devolver a imagem para a fila
+      description: Só quem está com a imagem consegue liberar. Sem chamar, o prazo vence sozinho em 15 min.
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+        - $ref: "#/components/parameters/XUserRequired"
+      responses:
+        "204": { description: Liberada. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /imports/inspect:
+    post:
+      tags: [import]
+      summary: Raio-x de um CSV
+      description: |
+        Para escrever um perfil novo: colunas, linhas de exemplo e os valores
+        distintos de cada coluna. Não precisa de perfil.
+      parameters:
+        - name: delimiter
+          in: query
+          description: Por nome, porque ";" cru é descartado na URL.
+          schema: { type: string, enum: [comma, semicolon, tab, pipe], default: comma }
+        - name: encoding
+          in: query
+          schema: { type: string, enum: [utf-8, latin1], default: utf-8 }
+      requestBody: { $ref: "#/components/requestBodies/CSVFile" }
+      responses:
+        "200":
+          description: O raio-x.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Inspection" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+
+  /import-profiles:
+    get:
+      tags: [import]
+      summary: Listar perfis de import
+      parameters:
+        - $ref: "#/components/parameters/SearchQ"
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20, minimum: 1, maximum: 100 }
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200":
+          description: Página de perfis.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Profile" }
+    post:
+      tags: [import]
+      summary: Criar perfil de import
+      description: Validado antes de salvar; os erros vêm todos juntos.
+      parameters:
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "201":
+          description: Criado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /import-profiles/{name}:
+    get:
+      tags: [import]
+      summary: Um perfil
+      parameters:
+        - $ref: "#/components/parameters/ProfileName"
+      responses:
+        "200":
+          description: O perfil.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [import]
+      summary: Atualizar perfil
+      description: Ex. o ensaio mostrou "Garoa" sem tradução; adicione no map e mande de novo.
+      parameters:
+        - $ref: "#/components/parameters/ProfileName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "200":
+          description: Atualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+components:
+  parameters:
+    XUser:
+      name: X-User
+      in: header
+      description: Quem está agindo (vai para o histórico). Sem ele, "anonymous".
+      schema: { type: string, example: nathan }
+    XUserRequired:
+      name: X-User
+      in: header
+      required: true
+      description: Quem está anotando.
+      schema: { type: string, example: nathan }
+    SHA1:
+      name: sha1
+      in: path
+      required: true
+      schema: { type: string, pattern: "^[0-9a-f]{40}$" }
+    PackageName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, example: pacote-8003 }
+    ProfileName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, example: csv-pg-veiculos }
+    SearchQ:
+      name: q
+      in: query
+      description: Contém, sem diferenciar maiúscula. Máx. 64 caracteres.
+      schema: { type: string, maxLength: 64 }
+    LimitNames:
+      name: limit
+      in: query
+      schema: { type: integer, default: 10, minimum: 1, maximum: 50 }
+    Skip:
+      name: skip
+      in: query
+      schema: { type: integer, default: 0, minimum: 0 }
+
+  requestBodies:
+    Name:
+      required: true
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string, example: 8003 MF4739 }
+    CSVFile:
+      required: true
+      content:
+        multipart/form-data:
+          schema:
+            type: object
+            required: [file]
+            properties:
+              file: { type: string, format: binary }
+
+  responses:
+    BadRequest:
+      description: Dado inválido; a mensagem diz o quê.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Não encontrado.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Duplicado, imagem com outra pessoa, ou alterada por outra pessoa no meio.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NameCreated:
+      description: Criado; devolve o nome já sanitizado.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              name: { type: string, example: 8003-MF4739 }
+    NamePage:
+      description: Página de nomes.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              total: { type: integer }
+              items:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name: { type: string }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    Vehicle:
+      type: object
+      properties:
+        plate: { type: string, example: ABC1D23 }
+        plate_type: { type: string, example: mercosul }
+        plate_category: { type: string, example: private }
+        type: { type: string, example: truck }
+        color: { type: string, example: white }
+
+    Image:
+      type: object
+      properties:
+        sha1: { type: string }
+        package: { type: string }
+        status: { type: string, enum: [pending, verified] }
+        original_name: { type: string }
+        file_name: { type: string, description: "Nome v2, quando verified." }
+        path: { type: string, description: Relativo à pasta de imagens do servidor. }
+        ext: { type: string }
+        size: { type: integer }
+        pattern_version: { type: string }
+        equipment: { type: string }
+        camera: { type: string }
+        direction: { type: string }
+        resolution: { type: string }
+        capture_angle: { type: string }
+        day_time: { type: string }
+        image_range: { type: string }
+        weather: { type: string }
+        conditions:
+          type: array
+          items: { type: string }
+        captured_at: { type: string, format: date-time }
+        vehicles:
+          type: array
+          items: { $ref: "#/components/schemas/Vehicle" }
+        claimed_by: { type: string, description: Quem está anotando agora. }
+        claimed_until: { type: string, format: date-time }
+        queued_at: { type: string, format: date-time }
+        ingested_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    AnnotationRequest:
+      type: object
+      properties:
+        equipment: { type: string }
+        camera: { type: string }
+        direction: { type: string }
+        resolution: { type: string }
+        capture_angle: { type: string }
+        day_time: { type: string }
+        image_range: { type: string }
+        weather: { type: string }
+        conditions:
+          type: array
+          items: { type: string }
+        captured_at:
+          type: string
+          format: date-time
+          description: Pode ter fuso (ex. -03:00); o servidor converte para UTC.
+        vehicles:
+          type: array
+          items: { $ref: "#/components/schemas/Vehicle" }
+        complete:
+          type: boolean
+          description: "false: rascunho. true: verifica e renomeia para v2."
+      example:
+        equipment: 8003-MF4739
+        camera: hikvision-233
+        direction: front
+        resolution: 1920x1080
+        capture_angle: lateral
+        day_time: day
+        image_range: narrow
+        weather: clear
+        conditions: [no_damage]
+        captured_at: "2026-09-03T08:25:23-03:00"
+        vehicles:
+          - { plate: ABC1D23, plate_type: mercosul, plate_category: private, type: truck, color: white }
+        complete: true
+
+    PackageSummary:
+      type: object
+      properties:
+        name: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        total: { type: integer }
+        verified: { type: integer }
+        pending: { type: integer }
+        in_progress: { type: integer, description: Pendentes que alguém está anotando agora. }
+
+    UploadResult:
+      type: object
+      properties:
+        file: { type: string }
+        sha1: { type: string }
+        status: { type: string, enum: [created, duplicate, error] }
+        existing_package: { type: string, description: "Se duplicate: onde ela já está." }
+        prefilled: { type: boolean }
+        error: { type: string }
+
+    FieldRule:
+      type: object
+      description: Use `column` OU `value`.
+      properties:
+        column: { type: string }
+        value: { type: string, description: Valor fixo para o arquivo todo. }
+        map:
+          type: object
+          description: Valor de origem → nosso valor. Ignora maiúscula.
+          additionalProperties: { type: string }
+        split: { type: string, description: Só em conditions. }
+        date_format: { type: string, description: "Só em captured_at. Layout do Go, ex. 2006-01-02 15:04:05.000" }
+        timezone: { type: string, example: America/Sao_Paulo }
+
+    Profile:
+      type: object
+      required: [name, reader, match]
+      properties:
+        name: { type: string, example: csv-pg-veiculos }
+        description: { type: string }
+        reader:
+          type: object
+          properties:
+            type: { type: string, enum: [csv] }
+            delimiter: { type: string, example: ";" }
+            encoding: { type: string, enum: [utf-8, latin1] }
+        match:
+          type: object
+          properties:
+            column: { type: string, example: imagem_nome }
+            by: { type: string, enum: [original_name, sha1] }
+        fields:
+          type: object
+          description: "Campos: equipment, camera, direction, resolution, capture_angle, day_time, image_range, weather, conditions, captured_at."
+          additionalProperties: { $ref: "#/components/schemas/FieldRule" }
+        vehicles:
+          type: object
+          properties:
+            mode: { type: string, enum: [row, columns] }
+            max: { type: integer, description: Só no modo columns. }
+            fields:
+              type: object
+              description: "Campos: plate (obrigatório), plate_type, plate_category, type, color. No modo columns, use {n} no nome da coluna."
+              additionalProperties: { $ref: "#/components/schemas/FieldRule" }
+        created_by: { type: string, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    Inspection:
+      type: object
+      properties:
+        rows: { type: integer }
+        columns:
+          type: array
+          items: { type: string }
+        sample:
+          type: array
+          items:
+            type: object
+            additionalProperties: { type: string }
+        distinct:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              total: { type: integer }
+              truncated: { type: boolean }
+              values:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    value: { type: string }
+                    count: { type: integer }
+
+    ImportReport:
+      type: object
+      properties:
+        dry_run: { type: boolean }
+        package: { type: string }
+        profile: { type: string }
+        overwrite: { type: boolean }
+        rows: { type: integer, description: Linhas lidas (vazias são ignoradas). }
+        records: { type: integer, description: Imagens descritas (linhas agrupadas). }
+        unmapped:
+          type: object
+          description: Valores sem tradução, por campo, com a contagem. É o que falta no perfil.
+          additionalProperties:
+            type: object
+            additionalProperties: { type: integer }
+          example: { weather: { Garoa: 12 } }
+        missing_key: { type: integer }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              line: { type: integer }
+              field: { type: string }
+              error: { type: string }
+        error_count: { type: integer }
+        matched: { type: integer }
+        not_found:
+          type: array
+          items: { type: string }
+        not_found_count: { type: integer }
+        ambiguous:
+          type: array
+          items: { type: string }
+        skipped_verified: { type: integer }
+        skipped_claimed: { type: integer }
+        unchanged: { type: integer }
+        applied: { type: integer, description: "No ensaio: quantas seriam aplicadas." }
+        conflicts: { type: integer }
+        new_equipments:
+          type: array
+          items: { type: string }
+        new_cameras:
+          type: array
+          items: { type: string }
+        invalid_names:
+          type: array
+          items:
+            type: object
+            properties:
+              line: { type: integer }
+              field: { type: string }
+              value: { type: string }
+              error: { type: string }
