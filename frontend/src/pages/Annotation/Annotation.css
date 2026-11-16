@@ -1,0 +1,248 @@
+.annotation-page {
+  width: min(1400px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 32px 0 64px;
+}
+
+.annotation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.annotation-header > div {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  color: #5963d9;
+  font-size: 13px;
+}
+
+.annotation-header span {
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #f0f1fc;
+}
+
+.annotation-layout {
+  display: block;
+}
+
+.annotation-preview-card,
+.annotation-form-card {
+  border: 1px solid #e5e8ef;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.annotation-main {
+  min-width: 0;
+}
+
+.annotation-navigation {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 16px;
+}
+
+.annotation-navigation > span {
+  min-width: 110px;
+  color: #687287;
+  font-size: 12px;
+  text-align: center;
+}
+
+.annotation-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+  align-items: start;
+  gap: 22px;
+}
+
+.annotation-preview-column {
+  min-width: 0;
+}
+
+.annotation-preview-card {
+  overflow: hidden;
+}
+
+.annotation-preview {
+  display: grid;
+  min-height: 380px;
+  place-items: center;
+  padding: 18px;
+  background: #f1f3f7;
+}
+
+.annotation-preview img {
+  display: block;
+  max-width: 100%;
+  max-height: 500px;
+  object-fit: contain;
+}
+
+.annotation-image-meta,
+.annotation-form-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.annotation-image-meta {
+  padding: 13px 18px;
+  color: #929aaa;
+  font-size: 11px;
+}
+
+.annotation-image-meta strong,
+.annotation-image-meta span {
+  display: block;
+}
+
+.annotation-image-meta strong {
+  margin-bottom: 3px;
+  color: #384257;
+  font-size: 12px;
+}
+
+.annotation-form-card {
+  padding: 22px;
+}
+
+.annotation-form-heading h2 {
+  margin: 0 0 4px;
+  color: #283247;
+  font-size: 18px;
+}
+
+.annotation-form-heading p {
+  margin: 0 0 20px;
+  color: #929aaa;
+  font-size: 12px;
+}
+
+.annotation-status {
+  padding: 6px 10px;
+  border-radius: 20px;
+  color: #a26d26;
+  background: #fff5df;
+  font-size: 11px;
+}
+
+.annotation-status--done {
+  color: #36825d;
+  background: #e8f7ef;
+}
+
+.annotation-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.annotation-field {
+  display: grid;
+  gap: 6px;
+  color: #566177;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.annotation-field input,
+.annotation-field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #dfe3eb;
+  border-radius: 6px;
+  color: #384257;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.annotation-condition {
+  max-width: calc(33.333% - 9px);
+  margin-top: 14px;
+}
+
+.vehicle-row {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid #edf0f4;
+}
+
+.vehicle-row-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.vehicle-row h3 {
+  margin: 0;
+  color: #384257;
+  font-size: 13px;
+}
+
+.annotation-add-vehicle {
+  display: block;
+  margin-top: 16px;
+  width: 100%;
+}
+
+.annotation-save {
+  margin-top: 22px;
+}
+
+.annotation-feedback {
+  margin: 0 0 16px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  color: #36825d;
+  background: #e8f7ef;
+  font-size: 12px;
+}
+
+.annotation-feedback--error {
+  color: #a04444;
+  background: #fff0f0;
+}
+
+.annotation-empty {
+  display: grid;
+  min-height: 300px;
+  place-items: center;
+  color: #7d8798;
+}
+
+@media (max-width: 900px) {
+  .annotation-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 650px) {
+  .annotation-page {
+    width: min(100% - 28px, 1400px);
+  }
+
+  .annotation-header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .annotation-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .annotation-condition {
+    max-width: none;
+  }
+}

@@ -1,0 +1,57 @@
+.app-header {
+  align-items: center;
+  background: #fff;
+  border-bottom: 1px solid #e5e8ef;
+  display: flex;
+  height: 56px;
+  padding: 0 24px;
+  gap: 32px;
+}
+
+.app-header__brand {
+  color: #5963d9;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+}
+
+.app-header nav {
+  display: flex;
+  height: 100%;
+}
+
+.app-header__link {
+  align-items: center;
+  color: #7d8798;
+  display: flex;
+  font-size: 14px;
+  padding: 0 16px;
+  text-decoration: none;
+}
+
+.app-header__link:hover,
+.app-header__link--active {
+  color: #5963d9;
+}
+
+.app-header__link--active {
+  box-shadow: inset 0 -2px #5963d9;
+  font-weight: 700;
+}
+
+.app-header__user {
+  color: #7d8798;
+  font-size: 14px;
+  margin-left: auto;
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    gap: 16px;
+    padding: 0 16px;
+  }
+
+  .app-header__link {
+    padding: 0 8px;
+  }
+}
