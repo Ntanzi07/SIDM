@@ -102,6 +102,114 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /equipments/{name}:
+    patch:
+      tags: [cadastros]
+      summary: Renomear ou ativar/desativar equipamento
+      description: |
+        - `name`: renomeia **em cascata**. As pendentes trocam de nome no banco; nas
+          verificadas, o **arquivo é renomeado** para o novo nome v2. Se o nome novo
+          já existir, os dois são **fundidos** (útil para limpar duplicatas do import).
+          Se alguma imagem falhar, o nome antigo é mantido e o mesmo pedido pode ser
+          repetido para terminar (`complete: false`).
+        - `active`: ativa ou desativa. Desativado some do autocomplete e não pode ser
+          usado em novas verificações.
+      parameters:
+        - $ref: "#/components/parameters/RegistryName"
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                active: { type: boolean }
+      responses:
+        "200":
+          description: Resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegistryReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [cadastros]
+      summary: Excluir equipamento
+      description: |
+        Em uso por alguma imagem: **desativa** (as imagens continuam intactas).
+        Sem uso: apaga de vez.
+      parameters:
+        - $ref: "#/components/parameters/RegistryName"
+      responses:
+        "200":
+          description: O que foi feito.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  images: { type: integer, description: Quantas imagens usam. }
+                  deleted: { type: boolean }
+                  deactivated: { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /cameras/{name}:
+    patch:
+      tags: [cadastros]
+      summary: Renomear ou ativar/desativar câmera
+      description: |
+        - `name`: renomeia **em cascata**. As pendentes trocam de nome no banco; nas
+          verificadas, o **arquivo é renomeado** para o novo nome v2. Se o nome novo
+          já existir, os dois são **fundidos** (útil para limpar duplicatas do import).
+          Se alguma imagem falhar, o nome antigo é mantido e o mesmo pedido pode ser
+          repetido para terminar (`complete: false`).
+        - `active`: ativa ou desativa. Desativado some do autocomplete e não pode ser
+          usado em novas verificações.
+      parameters:
+        - $ref: "#/components/parameters/RegistryName"
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                active: { type: boolean }
+      responses:
+        "200":
+          description: Resultado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RegistryReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [cadastros]
+      summary: Excluir câmera
+      description: |
+        Em uso por alguma imagem: **desativa** (as imagens continuam intactas).
+        Sem uso: apaga de vez.
+      parameters:
+        - $ref: "#/components/parameters/RegistryName"
+      responses:
+        "200":
+          description: O que foi feito.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  images: { type: integer, description: Quantas imagens usam. }
+                  deleted: { type: boolean }
+                  deactivated: { type: boolean }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /packages:
     get:
       tags: [pacotes]
@@ -136,6 +244,56 @@ paths:
         "201": { $ref: "#/components/responses/NameCreated" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /packages/{name}:
+    patch:
+      tags: [pacotes]
+      summary: Renomear pacote
+      description: Renomeia a pasta no servidor, o cadastro e o caminho de todas as imagens. O nome dos arquivos não muda.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+      requestBody: { $ref: "#/components/requestBodies/Name" }
+      responses:
+        "200":
+          description: Renomeado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  images: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [pacotes]
+      summary: Excluir pacote (IRREVERSÍVEL)
+      description: |
+        Apaga o pacote, **todas as imagens dele** (banco e arquivos no disco) e o
+        histórico. Para confirmar, repita o nome do pacote em `confirm`.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+        - name: confirm
+          in: query
+          required: true
+          description: O nome do pacote, de novo.
+          schema: { type: string }
+      responses:
+        "200":
+          description: Apagado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  deleted_images: { type: integer }
+                  warnings:
+                    type: array
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /packages/{name}/next:
     post:
@@ -522,6 +680,11 @@ components:
       in: path
       required: true
       schema: { type: string, example: pacote-8003 }
+    RegistryName:
+      name: name
+      in: path
+      required: true
+      schema: { type: string, example: 8003-MF4739 }
     ProfileName:
       name: name
       in: path
@@ -605,6 +768,21 @@ components:
       type: object
       properties:
         error: { type: string }
+
+    RegistryReport:
+      type: object
+      properties:
+        name: { type: string, description: O nome final. }
+        renamed: { type: boolean }
+        merged: { type: boolean, description: O nome novo já existia e os dois foram fundidos. }
+        active: { type: boolean }
+        pending_updated: { type: integer }
+        verified_renamed: { type: integer, description: Verificadas cujo arquivo foi renomeado. }
+        failed:
+          type: array
+          items: { type: string }
+          description: sha1 das imagens que não deu para renomear agora.
+        complete: { type: boolean, description: "false: repita o pedido para terminar." }
 
     Vehicle:
       type: object

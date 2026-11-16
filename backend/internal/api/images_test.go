@@ -45,17 +45,21 @@ func TestListImages(t *testing.T) {
 
 	rec := env.do("GET", "/images?package="+testPkg+"&status=pending&equipment=8003-MF4739&plate=abc1d23&limit=9999&skip=-5", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
+	full := env.db.lastFilter
 
+	// Aqui só interessa que os filtros CHEGAM no banco (ver lastFilter abaixo).
+	// A contagem é conferida num pedido só com pacote e status:
 	var resp struct {
 		Total int64         `json:"total"`
 		Items []store.Image `json:"items"`
 	}
-	decode(t, rec, &resp)
+	decode(t, env.do("GET", "/images?package="+testPkg+"&status=pending", nil, nil), &resp)
 	if resp.Total != 2 || len(resp.Items) != 2 {
 		t.Errorf("total=%d items=%d", resp.Total, len(resp.Items))
 	}
+	_ = rec
 
-	f := env.db.lastFilter
+	f := full
 	if f.Package != testPkg || f.Status != "pending" || f.Equipment != "8003-MF4739" {
 		t.Errorf("filtro não repassado: %+v", f)
 	}

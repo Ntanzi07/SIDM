@@ -38,7 +38,7 @@ type searchCall struct {
 type memStore struct {
 	mu sync.Mutex
 
-	equipments map[string]bool
+	equipments map[string]bool // nome -> ativo (a chave existir = está cadastrado)
 	cameras    map[string]bool
 	packages   map[string]store.Package
 	profiles   map[string]importer.Profile
@@ -83,8 +83,8 @@ func (m *memStore) search(set map[string]bool, q string, limit, skip int64) ([]s
 		return nil, 0, m.listErr
 	}
 	all := []string{}
-	for n := range set {
-		if strings.Contains(strings.ToLower(n), strings.ToLower(q)) {
+	for n, active := range set {
+		if active && strings.Contains(strings.ToLower(n), strings.ToLower(q)) {
 			all = append(all, n)
 		}
 	}
@@ -114,7 +114,7 @@ func (m *memStore) CreateCamera(ctx context.Context, name string) error {
 func (m *memStore) create(set map[string]bool, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if set[name] {
+	if _, ok := set[name]; ok {
 		return store.ErrDuplicate
 	}
 	set[name] = true
@@ -290,7 +290,7 @@ func (m *memStore) ReleaseClaim(ctx context.Context, sha1, user string) error {
 	return nil
 }
 
-// ListImages filtra só por status e pacote (o suficiente para os testes da API;
+// ListImages filtra por status, pacote, equipamento e câmera (o suficiente para os testes da API;
 // os filtros de verdade são testados contra o Mongo no pacote store).
 func (m *memStore) ListImages(ctx context.Context, f store.ImageFilter) ([]store.Image, int64, error) {
 	m.mu.Lock()
@@ -301,11 +301,15 @@ func (m *memStore) ListImages(ctx context.Context, f store.ImageFilter) ([]store
 	}
 	out := []store.Image{}
 	for _, img := range m.images {
-		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) {
+		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
+			(f.Equipment == "" || img.Equipment == f.Equipment) && (f.Camera == "" || img.Camera == f.Camera) {
 			out = append(out, img)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].SHA1 < out[j].SHA1 })
+	if f.Limit > 0 {
+		return paginate(out, f.Limit, f.Skip), int64(len(out)), nil
+	}
 	return out, int64(len(out)), nil
 }
 
@@ -391,6 +395,128 @@ func (m *memStore) FindImagesByKeys(ctx context.Context, pkg, by string, keys []
 		}
 	}
 	return out, nil
+}
+
+func (m *memStore) registry(reg store.Registry) map[string]bool {
+	if reg == store.Cameras {
+		return m.cameras
+	}
+	return m.equipments
+}
+
+func (m *memStore) FindRegistry(ctx context.Context, reg store.Registry, name string) (*store.RegistryEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	active, ok := m.registry(reg)[name]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return &store.RegistryEntry{Name: name, Active: active}, nil
+}
+
+func (m *memStore) SetRegistryActive(ctx context.Context, reg store.Registry, name string, active bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := m.registry(reg)
+	if _, ok := set[name]; !ok {
+		return store.ErrNotFound
+	}
+	set[name] = active
+	return nil
+}
+
+func (m *memStore) DeleteRegistry(ctx context.Context, reg store.Registry, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set := m.registry(reg)
+	if _, ok := set[name]; !ok {
+		return store.ErrNotFound
+	}
+	delete(set, name)
+	return nil
+}
+
+func imageField(img *store.Image, reg store.Registry) *string {
+	if reg == store.Cameras {
+		return &img.Camera
+	}
+	return &img.Equipment
+}
+
+func (m *memStore) CountImagesUsing(ctx context.Context, reg store.Registry, name string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for _, img := range m.images {
+		if *imageField(&img, reg) == name {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *memStore) RenameOnPending(ctx context.Context, reg store.Registry, oldName, newName string, now time.Time) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var n int64
+	for id, img := range m.images {
+		if f := imageField(&img, reg); *f == oldName && img.Status == store.StatusPending {
+			*f, img.UpdatedAt = newName, now
+			m.images[id] = img
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *memStore) RenamePackage(ctx context.Context, oldName, newName string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.packages[oldName]
+	if !ok {
+		return 0, store.ErrNotFound
+	}
+	if _, exists := m.packages[newName]; exists {
+		return 0, store.ErrDuplicate
+	}
+	delete(m.packages, oldName)
+	p.Name = newName
+	m.packages[newName] = p
+
+	var n int64
+	for id, img := range m.images {
+		if img.Package == oldName {
+			img.Package = newName
+			img.Path = "dataset/" + newName + "/" + strings.TrimPrefix(img.Path, "dataset/"+oldName+"/")
+			m.images[id] = img
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (m *memStore) DeletePackage(ctx context.Context, name string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.packages[name]; !ok {
+		return 0, store.ErrNotFound
+	}
+	deleted := map[string]bool{}
+	for id, img := range m.images {
+		if img.Package == name {
+			deleted[id] = true
+			delete(m.images, id)
+		}
+	}
+	kept := m.history[:0]
+	for _, h := range m.history {
+		if !deleted[h.ImageID] {
+			kept = append(kept, h)
+		}
+	}
+	m.history = kept
+	delete(m.packages, name)
+	return int64(len(deleted)), nil
 }
 
 // ---------- helpers ----------

@@ -23,7 +23,10 @@ import (
 //   GET  /cameras?q=&limit=    busca câmeras (autocomplete), paginado
 //   POST /equipments           cadastra equipamento {"name":...}
 //   POST /cameras              cadastra câmera {"name":...}
+//   PATCH/DELETE /equipments/{name}, /cameras/{name}  renomeia (cascata) / desativa
 //   POST /packages             cria pacote {"name":...}
+//   PATCH /packages/{name}     renomeia pacote (pasta + imagens)
+//   DELETE /packages/{name}?confirm=<name>  apaga pacote, imagens e arquivos
 //   GET  /packages?q=&limit=   pacotes com progresso, paginado
 //   POST /packages/{name}/next pega a próxima imagem da fila (X-User obrigatório)
 //   POST /images/{sha1}/release devolve a imagem para a fila
@@ -61,7 +64,15 @@ type Store interface {
 	EquipmentExists(ctx context.Context, name string) (bool, error)
 	CameraExists(ctx context.Context, name string) (bool, error)
 
+	FindRegistry(ctx context.Context, reg store.Registry, name string) (*store.RegistryEntry, error)
+	SetRegistryActive(ctx context.Context, reg store.Registry, name string, active bool) error
+	DeleteRegistry(ctx context.Context, reg store.Registry, name string) error
+	CountImagesUsing(ctx context.Context, reg store.Registry, name string) (int64, error)
+	RenameOnPending(ctx context.Context, reg store.Registry, oldName, newName string, now time.Time) (int64, error)
+
 	CreatePackage(ctx context.Context, name, createdBy string) error
+	RenamePackage(ctx context.Context, oldName, newName string) (int64, error)
+	DeletePackage(ctx context.Context, name string) (int64, error)
 	FindPackage(ctx context.Context, name string) (*store.Package, error)
 	ListPackages(ctx context.Context, q string, limit, skip int64) ([]store.PackageSummary, int64, error)
 
@@ -107,11 +118,17 @@ func (s *Server) routes() []route {
 
 		{"GET", "/equipments", s.handleSearchNames(s.store.SearchEquipments)},
 		{"POST", "/equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment)},
+		{"PATCH", "/equipments/{name}", s.handleUpdateRegistry(store.Equipments, filename.SanitizeEquipment)},
+		{"DELETE", "/equipments/{name}", s.handleDeleteRegistry(store.Equipments)},
 		{"GET", "/cameras", s.handleSearchNames(s.store.SearchCameras)},
 		{"POST", "/cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera)},
+		{"PATCH", "/cameras/{name}", s.handleUpdateRegistry(store.Cameras, filename.SanitizeCamera)},
+		{"DELETE", "/cameras/{name}", s.handleDeleteRegistry(store.Cameras)},
 
 		{"GET", "/packages", s.handleListPackages},
 		{"POST", "/packages", s.handleCreatePackage},
+		{"PATCH", "/packages/{name}", s.handleRenamePackage},
+		{"DELETE", "/packages/{name}", s.handleDeletePackage},
 		{"POST", "/packages/{name}/next", s.handleNext},
 		{"POST", "/packages/{name}/import", s.handleImport},
 

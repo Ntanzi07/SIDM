@@ -20,6 +20,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 )
 
 type Storage struct {
@@ -81,6 +82,35 @@ func VerifiedPath(pkg, fileName string) string {
 func (st *Storage) EnsurePackageDir(pkg string) error {
 	if err := os.MkdirAll(st.Abs(PackageDir(pkg)), 0o755); err != nil {
 		return fmt.Errorf("criar pasta do pacote %s: %w", pkg, err)
+	}
+	return nil
+}
+
+// RenamePackageDir renomeia a pasta do pacote (uma operação só, no mesmo disco).
+// Se a pasta antiga não existir (pacote nunca recebeu arquivo), cria a nova.
+func (st *Storage) RenamePackageDir(oldName, newName string) error {
+	from, to := st.Abs(PackageDir(oldName)), st.Abs(PackageDir(newName))
+	if _, err := os.Stat(to); err == nil {
+		return fmt.Errorf("a pasta %s já existe", PackageDir(newName))
+	}
+	if _, err := os.Stat(from); os.IsNotExist(err) {
+		return st.EnsurePackageDir(newName)
+	}
+	if err := os.Rename(from, to); err != nil {
+		return fmt.Errorf("renomear pasta %s -> %s: %w", oldName, newName, err)
+	}
+	return nil
+}
+
+// RemovePackageDir apaga a pasta do pacote com tudo dentro. IRREVERSÍVEL.
+// Por segurança, só aceita um nome de pacote simples: nada de "..", "/" ou
+// vazio, que fariam o RemoveAll sair de dentro de dataset/.
+func (st *Storage) RemovePackageDir(name string) error {
+	if name == "" || name == "." || name == ".." || strings.ContainsAny(name, `/\`) {
+		return fmt.Errorf("nome de pacote inválido para apagar: %q", name)
+	}
+	if err := os.RemoveAll(st.Abs(PackageDir(name))); err != nil {
+		return fmt.Errorf("apagar pasta do pacote %s: %w", name, err)
 	}
 	return nil
 }

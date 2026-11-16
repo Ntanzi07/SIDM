@@ -141,3 +141,58 @@ func TestCaminhosRelativos(t *testing.T) {
 		t.Errorf("Abs = %q, want %q", got, want)
 	}
 }
+
+func TestRenamePackageDir(t *testing.T) {
+	st, root := newStorage(t)
+	tmp, sum, _, _ := st.Receive(strings.NewReader("x"))
+	st.Store(tmp, PendingPath("antigo", sum, ".jpg"))
+
+	if err := st.RenamePackageDir("antigo", "novo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dataset", "novo", sum+".jpg")); err != nil {
+		t.Error("o arquivo deveria estar na pasta nova")
+	}
+	if _, err := os.Stat(filepath.Join(root, "dataset", "antigo")); !os.IsNotExist(err) {
+		t.Error("a pasta antiga deveria ter sumido")
+	}
+
+	st.EnsurePackageDir("outro")
+	if err := st.RenamePackageDir("novo", "outro"); err == nil {
+		t.Error("renomear para uma pasta que já existe deveria falhar (senão misturaria pacotes)")
+	}
+
+	// Pacote que nunca recebeu arquivo: não tem pasta, e tudo bem.
+	if err := st.RenamePackageDir("sem-pasta", "com-pasta"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dataset", "com-pasta")); err != nil {
+		t.Error("deveria ter criado a pasta nova")
+	}
+}
+
+func TestRemovePackageDir(t *testing.T) {
+	st, root := newStorage(t)
+	tmp, sum, _, _ := st.Receive(strings.NewReader("x"))
+	st.Store(tmp, PendingPath("apagar", sum, ".jpg"))
+	st.EnsurePackageDir("manter")
+
+	if err := st.RemovePackageDir("apagar"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dataset", "apagar")); !os.IsNotExist(err) {
+		t.Error("a pasta deveria ter sido apagada")
+	}
+	if _, err := os.Stat(filepath.Join(root, "dataset", "manter")); err != nil {
+		t.Error("as outras pastas não podem ser afetadas")
+	}
+
+	for _, bad := range []string{"", ".", "..", "../tmp", "a/b"} {
+		if err := st.RemovePackageDir(bad); err == nil {
+			t.Errorf("RemovePackageDir(%q) deveria recusar", bad)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "tmp")); err != nil {
+		t.Fatal("a proteção falhou: apagou algo fora de dataset/")
+	}
+}

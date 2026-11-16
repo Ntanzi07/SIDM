@@ -250,26 +250,7 @@ func (s *Server) finalName(r *http.Request, img *store.Image) (string, string) {
 		return "", "captured_at é obrigatório para concluir"
 	}
 
-	meta := filename.ImageMeta{
-		SHA1:         img.SHA1,
-		Version:      filename.CurrentVersion,
-		Equipment:    img.Equipment,
-		Camera:       img.Camera,
-		Direction:    img.Direction,
-		Resolution:   img.Resolution,
-		CaptureAngle: img.CaptureAngle,
-		DayTime:      img.DayTime,
-		ImageRange:   img.ImageRange,
-		Weather:      img.Weather,
-		Conditions:   img.Conditions,
-		CapturedAt:   *img.CapturedAt,
-	}
-	for _, v := range img.Vehicles {
-		meta.Vehicles = append(meta.Vehicles, filename.Vehicle{
-			Plate: v.Plate, PlateType: v.PlateType,
-			PlateCategory: v.PlateCategory, Type: v.Type, Color: v.Color,
-		})
-	}
+	meta := metaFromImage(img)
 
 	// O Format já valida todos os códigos e formatos.
 	base, err := filename.Format(meta)
@@ -287,6 +268,35 @@ func (s *Server) finalName(r *http.Request, img *store.Image) (string, string) {
 	}
 
 	return base + img.Ext, ""
+}
+
+// metaFromImage converte o documento da imagem nos metadados do padrão v2.
+// Usado ao verificar e ao renomear em cascata (equipamento/câmera), para o
+// nome do arquivo ser montado sempre do mesmo jeito.
+func metaFromImage(img *store.Image) filename.ImageMeta {
+	meta := filename.ImageMeta{
+		SHA1:         img.SHA1,
+		Version:      filename.CurrentVersion,
+		Equipment:    img.Equipment,
+		Camera:       img.Camera,
+		Direction:    img.Direction,
+		Resolution:   img.Resolution,
+		CaptureAngle: img.CaptureAngle,
+		DayTime:      img.DayTime,
+		ImageRange:   img.ImageRange,
+		Weather:      img.Weather,
+		Conditions:   img.Conditions,
+	}
+	if img.CapturedAt != nil {
+		meta.CapturedAt = *img.CapturedAt
+	}
+	for _, v := range img.Vehicles {
+		meta.Vehicles = append(meta.Vehicles, filename.Vehicle{
+			Plate: v.Plate, PlateType: v.PlateType,
+			PlateCategory: v.PlateCategory, Type: v.Type, Color: v.Color,
+		})
+	}
+	return meta
 }
 
 // diffHistory gera uma entrada para cada campo que mudou.
