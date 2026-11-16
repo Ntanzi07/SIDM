@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"SIDM/internal/filename"
 )
 
 // Annotation é o que o import descobriu sobre UMA imagem.
@@ -143,22 +145,58 @@ func fillTemplate(tpl string, values map[string]string) string {
 	return strings.TrimSpace(out)
 }
 
-// translate passa o valor pelo Map. Sem Map, o valor vai como está.
-// Valor sem tradução: devolve "" e anota no relatório.
+// codeLookup: para cada tabela do padrão, o que o CSV pode trazer sem um
+// "map" (o valor, "car", ou a letra do nome do arquivo, "C"), em minúsculas,
+// apontando para o valor certo. Montado uma vez só.
+var codeLookup = func() map[string]map[string]string {
+	out := map[string]map[string]string{}
+	for table, codes := range filename.Codes() {
+		m := map[string]string{}
+		for code, value := range codes {
+			m[strings.ToLower(code)] = value
+			m[strings.ToLower(value)] = value
+		}
+		out[table] = m
+	}
+	return out
+}()
+
+// translate passa o valor pelo Map. Valor sem tradução: devolve "" e anota
+// no relatório (o ensaio mostra em "valores sem tradução").
+//
+// Sem Map, um campo de texto livre (placa, equipamento) vai como está. Um
+// campo CODIFICADO (tipo, cor, período...) só aceita o próprio valor ("car")
+// ou a letra do padrão ("C"), sem diferenciar maiúscula. Antes, sem Map,
+// qualquer texto passava ("AUTOMOVEL") e quebrava a verificação depois.
 func (tr *transformer) translate(field, value string, rule FieldRule) string {
-	if value == "" || rule.Map == nil {
+	if value == "" {
 		return value
+	}
+	if rule.Map == nil {
+		table, coded := codeTable[strings.TrimPrefix(field, "vehicles.")]
+		if !coded {
+			return value
+		}
+		if v, ok := codeLookup[table][strings.ToLower(value)]; ok {
+			return v
+		}
+		tr.unmapped(field, value)
+		return ""
 	}
 	for from, to := range rule.Map {
 		if strings.EqualFold(strings.TrimSpace(from), value) {
 			return to
 		}
 	}
+	tr.unmapped(field, value)
+	return ""
+}
+
+func (tr *transformer) unmapped(field, value string) {
 	if tr.rep.Unmapped[field] == nil {
 		tr.rep.Unmapped[field] = map[string]int{}
 	}
 	tr.rep.Unmapped[field][value]++
-	return ""
 }
 
 func (tr *transformer) addError(line int, field, msg string) {

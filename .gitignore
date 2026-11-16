@@ -11,8 +11,10 @@ frontend/dist/
 # Ambiente
 .env
 
-# Dados locais (imagens nunca vão pro git)
-data/
+# Dados locais (imagens nunca vão pro git).
+# A barra no começo prende a regra à pasta data/ da RAIZ: sem ela, o git
+# ignorava também frontend/src/data/ (e o código do front sumia do repositório).
+/data/
 
 # IDE
 .idea/

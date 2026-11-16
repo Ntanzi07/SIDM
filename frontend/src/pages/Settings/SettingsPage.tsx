@@ -8,11 +8,15 @@ import {
   deleteCamera,
   deleteEquipment,
   deleteImportProfile,
-  getCodes,
+  imageFiles,
   inspectCsv,
-  listImportProfiles,
+  inspectIni,
+  listAllImportProfiles,
+  listCameras,
+  listEquipments,
   renameCamera,
   renameEquipment,
+  renameImportProfile,
   updateImportProfile,
   type CsvInspection,
   type FieldRule,
@@ -41,6 +45,52 @@ const vehicleFields = [
   ['color', 'Cor do veículo'],
 ] as const
 
+// Formatos de data mais comuns. O backend usa o layout do Go: a data de
+// referência 2006-01-02 15:04:05 escrita do jeito que aparece no CSV.
+const DATE_PRESETS = [
+  ['02/01/2006 15:04:05', 'DD/MM/AAAA HH:MM:SS'],
+  ['02/01/2006 15:04', 'DD/MM/AAAA HH:MM'],
+  ['02/01/2006', 'DD/MM/AAAA'],
+  ['2006-01-02 15:04:05', 'AAAA-MM-DD HH:MM:SS'],
+  ['2006-01-02 15:04:05.000', 'AAAA-MM-DD HH:MM:SS.mmm'],
+  ['2006-01-02T15:04:05Z07:00', 'ISO 8601 (com fuso)'],
+] as const
+
+// Monta as regras finais do perfil: o que a tela edita (a coluna de cada
+// campo) por cima do perfil original, SEM perder o que a tela não mostra
+// (map, split, valor fixo, template). Antes, salvar pela tela apagava isso.
+function mergeRules(
+  original: Record<string, FieldRule> | undefined,
+  columns: Record<string, string>,
+  editable: readonly string[],
+): Record<string, FieldRule> {
+  const out: Record<string, FieldRule> = {}
+  for (const [field, rule] of Object.entries(original ?? {})) {
+    // Campos que a tela não edita, ou com valor fixo/template: ficam como estão.
+    if (!editable.includes(field) || !rule.column) out[field] = rule
+  }
+  for (const field of editable) {
+    const column = columns[field]
+    if (!column) continue
+    const previous: FieldRule = { ...original?.[field] }
+    delete previous.value
+    delete previous.template
+    out[field] = { ...previous, column }
+  }
+  return out
+}
+
+// Descreve o que um campo tem além da coluna, para a tela avisar que é mantido.
+function advancedLabel(rule: FieldRule | undefined): string {
+  if (!rule) return ''
+  const parts: string[] = []
+  if (rule.value) parts.push(`valor fixo "${rule.value}"`)
+  if (rule.template) parts.push(`template ${rule.template}`)
+  if (rule.map) parts.push(`${Object.keys(rule.map).length} tradução(ões)`)
+  if (rule.split) parts.push(`separa por "${rule.split}"`)
+  return parts.join(', ')
+}
+
 type EditingRegistry = { type: 'equipment' | 'camera'; name: string; newName: string } | null
 
 export function SettingsPage() {
@@ -49,6 +99,13 @@ export function SettingsPage() {
   const [cameras, setCameras] = useState<string[]>([])
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
   const [editingProfile, setEditingProfile] = useState<string | null>(null)
+  const [editingOriginal, setEditingOriginal] = useState<ImportProfile | null>(null)
+  // csv: os dados vêm de um CSV. jpeg-ini: do INI gravado dentro de cada JPEG.
+  const [profileType, setProfileType] = useState<'csv' | 'jpeg-ini'>('csv')
+  const [profileImages, setProfileImages] = useState<File[]>([])
+  // Data e hora em colunas separadas (comum no INI: Data= e Hora=).
+  const [timeColumn, setTimeColumn] = useState('')
+  const [dateCustom, setDateCustom] = useState(false)
   const [availableColumns, setAvailableColumns] = useState<string[]>([])
   const [equipmentName, setEquipmentName] = useState('')
   const [cameraName, setCameraName] = useState('')
@@ -73,16 +130,16 @@ export function SettingsPage() {
   const [editingRegistry, setEditingRegistry] = useState<EditingRegistry>(null)
 
   function loadCodes() {
-    getCodes()
-      .then((codes) => {
-        setEquipments(codes.equipments)
-        setCameras(codes.cameras)
+    Promise.all([listEquipments(), listCameras()])
+      .then(([equipmentNames, cameraNames]) => {
+        setEquipments(equipmentNames)
+        setCameras(cameraNames)
       })
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar as configurações.'))
   }
 
   function loadProfiles() {
-    listImportProfiles()
+    listAllImportProfiles()
       .then(setProfiles)
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis de importação.'))
   }
@@ -175,8 +232,9 @@ export function SettingsPage() {
   }
 
   async function inspectProfileFile() {
-    if (!profileFile) {
-      setError('Selecione um arquivo CSV para analisar.')
+    const isIni = profileType === 'jpeg-ini'
+    if (isIni ? profileImages.length === 0 : !profileFile) {
+      setError(isIni ? 'Selecione algumas imagens com INI para analisar.' : 'Selecione um arquivo CSV para analisar.')
       return
     }
 
@@ -184,13 +242,17 @@ export function SettingsPage() {
     setError('')
     setMessage('')
     try {
-      const result = await inspectCsv(profileFile, delimiter, encoding)
+      const result = isIni ? await inspectIni(profileImages) : await inspectCsv(profileFile as File, delimiter, encoding)
       setInspection(result)
-      setAvailableColumns(result.columns)
-      if (!matchColumn || !result.columns.includes(matchColumn)) {
+      // Editando: mantém as colunas que o perfil já usava, mesmo que estas
+      // imagens/este CSV não tenham alguma.
+      setAvailableColumns((current) => Array.from(new Set([...result.columns, ...(editingProfile ? current : [])])))
+      if (!isIni && (!matchColumn || !result.columns.includes(matchColumn))) {
         setMatchColumn(result.columns[0] ?? '')
       }
-      setMessage(`${result.rows} linha(s) analisada(s). Configure o perfil abaixo.`)
+      setMessage(isIni
+        ? `${result.rows} imagem(ns) com INI, ${result.columns.length} chave(s). Configure o perfil abaixo.`
+        : `${result.rows} linha(s) analisada(s). Configure o perfil abaixo.`)
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível analisar o CSV.')
     } finally {
@@ -200,6 +262,10 @@ export function SettingsPage() {
 
   function handleEditProfile(profile: ImportProfile) {
     setEditingProfile(profile.name)
+    setEditingOriginal(profile)
+    setProfileType(profile.reader.type)
+    setProfileImages([])
+    setTimeColumn('')
     setProfileName(profile.name)
     setProfileDescription(profile.description ?? '')
     const d = profile.reader.delimiter
@@ -218,8 +284,19 @@ export function SettingsPage() {
           initialFieldColumns[field] = rule.column
           cols.add(rule.column)
         }
+        // Data e hora separadas ficam num template "{Data} {Hora}".
+        const parts = field === 'captured_at' ? rule.template?.match(/^\{([^{}]+)\} \{([^{}]+)\}$/) : null
+        if (parts) {
+          initialFieldColumns[field] = parts[1]
+          setTimeColumn(parts[2])
+          cols.add(parts[1])
+          cols.add(parts[2])
+        }
         if (field === 'captured_at') {
-          if (rule.date_format) setDateFormat(rule.date_format)
+          if (rule.date_format) {
+            setDateFormat(rule.date_format)
+            setDateCustom(!DATE_PRESETS.some(([layout]) => layout === rule.date_format))
+          }
           if (rule.timezone) setTimezone(rule.timezone)
         }
       })
@@ -247,6 +324,12 @@ export function SettingsPage() {
 
   function handleCancelEdit() {
     setEditingProfile(null)
+    setEditingOriginal(null)
+    setProfileType('csv')
+    setProfileImages([])
+    setTimeColumn('')
+    setDateFormat(DATE_PRESETS[0][0])
+    setDateCustom(false)
     setProfileName('')
     setProfileDescription('')
     setProfileFile(null)
@@ -282,20 +365,13 @@ export function SettingsPage() {
   async function submitProfile(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const normalizedProfileName = profileName.trim().replace(/\s+/g, '-')
-    const mappedFields: Record<string, FieldRule> = {}
-    const mappedVehicleFields: Record<string, FieldRule> = {}
-    Object.entries(fieldColumns)
-      .filter(([, column]) => column)
-      .forEach(([field, column]) => {
-        mappedFields[field] = { column }
-      })
-    Object.entries(vehicleFieldColumns)
-      .filter(([, column]) => column)
-      .forEach(([field, column]) => {
-        mappedVehicleFields[field] = { column }
-      })
-    if (!normalizedProfileName || !matchColumn || Object.keys(mappedFields).length === 0) {
-      setError('Informe o nome, a coluna da imagem e mapeie pelo menos um campo.')
+    const mappedFields = mergeRules(editingOriginal?.fields, fieldColumns, profileFields.map(([field]) => field))
+    const mappedVehicleFields = mergeRules(editingOriginal?.vehicles?.fields, vehicleFieldColumns, vehicleFields.map(([field]) => field))
+    const isIni = profileType === 'jpeg-ini'
+    if (!normalizedProfileName || (!isIni && !matchColumn) || (Object.keys(mappedFields).length === 0 && !mappedVehicleFields.plate)) {
+      setError(isIni
+        ? 'Informe o nome e mapeie pelo menos um campo.'
+        : 'Informe o nome, a coluna da imagem e mapeie pelo menos um campo.')
       return
     }
     if (!/^[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/.test(normalizedProfileName)) {
@@ -306,8 +382,22 @@ export function SettingsPage() {
       setError('Para mapear dados de veículo, a coluna Placa é obrigatória.')
       return
     }
-    if (mappedFields.captured_at) {
-      mappedFields.captured_at = { column: mappedFields.captured_at.column, date_format: dateFormat, timezone }
+    if (fieldColumns.captured_at) {
+      if (!dateFormat.trim()) {
+        setError('Informe o formato da data/hora.')
+        return
+      }
+      // Uma coluna só (column) ou data + hora juntas (template "{Data} {Hora}").
+      const base: FieldRule = { ...mappedFields.captured_at }
+      delete base.column
+      delete base.template
+      delete base.value
+      mappedFields.captured_at = {
+        ...base,
+        ...(timeColumn ? { template: `{${fieldColumns.captured_at}} {${timeColumn}}` } : { column: fieldColumns.captured_at }),
+        date_format: dateFormat.trim(),
+        timezone: timezone.trim() || undefined,
+      }
     }
 
     setSaving('profile')
@@ -316,23 +406,41 @@ export function SettingsPage() {
     const profilePayload = {
       name: normalizedProfileName,
       description: profileDescription.trim() || undefined,
-      reader: { type: 'csv' as const, delimiter: delimiter === 'comma' ? undefined : delimiter === 'semicolon' ? ';' : delimiter === 'tab' ? '\t' : '|' , encoding },
-      match: { column: matchColumn, by: matchBy },
+      ...(isIni ? {
+        reader: { type: 'jpeg-ini' as const },
+      } : {
+        reader: { type: 'csv' as const, delimiter: delimiter === 'comma' ? undefined : delimiter === 'semicolon' ? ';' : delimiter === 'tab' ? '\t' : '|', encoding },
+        match: { column: matchColumn, by: matchBy },
+      }),
       fields: mappedFields,
-      ...(mappedVehicleFields.plate ? { vehicles: { mode: 'row' as const, fields: mappedVehicleFields } } : {}),
+      ...(mappedVehicleFields.plate ? {
+        vehicles: {
+          // INI: um veículo por imagem. CSV: o modo (e o max, no modo
+          // "columns") vem do perfil original, se houver.
+          mode: isIni ? 'single' as const : editingOriginal?.vehicles?.mode ?? 'row' as const,
+          max: editingOriginal?.vehicles?.max,
+          fields: mappedVehicleFields,
+        },
+      } : {}),
     }
     try {
       if (editingProfile) {
-        await updateImportProfile(editingProfile, profilePayload)
-        setMessage(`Perfil "${normalizedProfileName}" atualizado com sucesso.`)
+        // Nome mudou: renomeia primeiro (PATCH), depois troca o conteúdo (PUT).
+        if (normalizedProfileName !== editingProfile) {
+          await renameImportProfile(editingProfile, normalizedProfileName)
+          setEditingProfile(normalizedProfileName)
+        }
+        await updateImportProfile(normalizedProfileName, profilePayload)
       } else {
         await createImportProfile(profilePayload)
-        setMessage(`Perfil "${normalizedProfileName}" criado com sucesso.`)
       }
+      // Limpa o formulário ANTES da mensagem (limpar também apaga a mensagem).
       handleCancelEdit()
+      setMessage(`Perfil "${normalizedProfileName}" ${editingProfile ? 'atualizado' : 'criado'} com sucesso.`)
+      setActiveTab('profiles_list')
       loadProfiles()
     } catch (requestError: unknown) {
-      setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o perfil CSV.')
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o perfil.')
     } finally {
       setSaving('')
     }
@@ -441,7 +549,7 @@ export function SettingsPage() {
             </button>
 
             <div className="settings-nav-divider" />
-            <span className="settings-nav-section-title">CSV</span>
+            <span className="settings-nav-section-title">Perfis de import</span>
             <button
               className={`settings-nav-item ${activeTab === 'profiles_list' ? 'settings-nav-item--active' : ''}`}
               onClick={() => setActiveTab('profiles_list')}
@@ -491,8 +599,8 @@ export function SettingsPage() {
             <div className="create-card settings-card">
               <div className="profile-header-flex">
                 <div>
-                  <h2>Perfis de importação CSV cadastrados</h2>
-                  <p>Perfis disponíveis para pré-preenchimento ao importar CSV nos pacotes.</p>
+                  <h2>Perfis de import cadastrados</h2>
+                  <p>Perfis que preenchem os rascunhos a partir de um CSV ou do INI embutido nas imagens.</p>
                 </div>
                 <button
                   className="button button--primary button--sm"
@@ -516,7 +624,10 @@ export function SettingsPage() {
                       <div className={`profile-item ${isSelected ? 'profile-item--selected' : ''}`} key={p.name}>
                         <div className="profile-item__header">
                           <div>
-                            <strong className="profile-item__name">{p.name}</strong>
+                            <strong className="profile-item__name">
+                              {p.name}
+                              <span className="profile-type-badge">{p.reader.type === 'jpeg-ini' ? 'INI' : 'CSV'}</span>
+                            </strong>
                             {p.description && <span className="profile-item__desc">{p.description}</span>}
                           </div>
                           <div className="profile-item__actions">
@@ -538,11 +649,18 @@ export function SettingsPage() {
                             </button>
                           </div>
                         </div>
-                        <div className="profile-item__details">
-                          <span><strong>Separador:</strong> {delimLabel}</span>
-                          <span><strong>Codificação:</strong> {p.reader.encoding ?? 'utf-8'}</span>
-                          {p.match?.column && <span><strong>Coluna chave:</strong> {p.match.column} ({p.match.by === 'sha1' ? 'SHA1' : 'Nome original'})</span>}
-                        </div>
+                        {p.reader.type === 'jpeg-ini' ? (
+                          <div className="profile-item__details">
+                            <span>Lê o INI gravado dentro de cada imagem</span>
+                            <span><strong>Campos:</strong> {Object.keys(p.fields ?? {}).length + Object.keys(p.vehicles?.fields ?? {}).length}</span>
+                          </div>
+                        ) : (
+                          <div className="profile-item__details">
+                            <span><strong>Separador:</strong> {delimLabel}</span>
+                            <span><strong>Codificação:</strong> {p.reader.encoding ?? 'utf-8'}</span>
+                            {p.match?.column && <span><strong>Coluna chave:</strong> {p.match.column} ({p.match.by === 'sha1' ? 'SHA1' : 'Nome original'})</span>}
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -555,8 +673,12 @@ export function SettingsPage() {
             <form className="create-card settings-card" onSubmit={(event) => void submitProfile(event)}>
               <div className="profile-header-flex">
                 <div>
-                  <h2>{editingProfile ? `Editar perfil: ${editingProfile}` : 'Criar novo perfil CSV'}</h2>
-                  <p>{editingProfile ? 'Modifique os parâmetros do perfil e clique em Salvar alterações.' : 'Crie um perfil para relacionar as colunas do seu CSV aos campos de anotação.'}</p>
+                  <h2>{editingProfile ? `Editar perfil: ${editingProfile}` : `Criar novo perfil ${profileType === 'jpeg-ini' ? 'de INI' : 'CSV'}`}</h2>
+                  <p>
+                    {profileType === 'jpeg-ini'
+                      ? 'Relacione as chaves do INI gravado dentro das imagens (Secao.Chave) aos campos de anotação.'
+                      : 'Relacione as colunas do seu CSV aos campos de anotação.'}
+                  </p>
                 </div>
                 {editingProfile && (
                   <button className="button button--secondary button--sm" onClick={handleCancelEdit} type="button">
@@ -564,6 +686,29 @@ export function SettingsPage() {
                   </button>
                 )}
               </div>
+              {!editingProfile && (
+                <div className="import-source profile-type-toggle" role="radiogroup" aria-label="Tipo do perfil">
+                  {(['csv', 'jpeg-ini'] as const).map((type) => (
+                    <button
+                      aria-checked={profileType === type}
+                      className={profileType === type ? 'import-source__option import-source__option--active' : 'import-source__option'}
+                      key={type}
+                      onClick={() => {
+                        setProfileType(type)
+                        setInspection(null)
+                        setAvailableColumns([])
+                        setFieldColumns({})
+                        setVehicleFieldColumns({})
+                        setTimeColumn('')
+                      }}
+                      role="radio"
+                      type="button"
+                    >
+                      {type === 'csv' ? 'CSV' : 'INI embutido na imagem'}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="profile-form-grid">
                 <label className="form-field">
                   <span>Nome do perfil</span>
@@ -574,6 +719,8 @@ export function SettingsPage() {
                   <span>Descrição (opcional)</span>
                   <input onChange={(event) => setProfileDescription(event.target.value)} placeholder="Formato do CSV da rodovia" value={profileDescription} />
                 </label>
+                {profileType === 'csv' && (
+                  <>
                 <label className="form-field">
                   <span>Separador</span>
                   <select onChange={(event) => setDelimiter(event.target.value)} value={delimiter}>
@@ -590,23 +737,51 @@ export function SettingsPage() {
                     <option value="latin1">Latin-1</option>
                   </select>
                 </label>
+                  </>
+                )}
               </div>
-              <label className="profile-file-picker">
-                <span>{profileFile?.name ?? (editingProfile ? 'Selecione um novo CSV para inspecionar outras colunas (opcional)' : 'Selecione o CSV para analisar')}</span>
-                <input accept=".csv,text/csv" onChange={(event) => {
-                  setProfileFile(event.target.files?.[0] ?? null)
-                  setInspection(null)
-                  setError('')
-                }} type="file" />
-              </label>
-              <button className="button button--secondary" disabled={!profileFile || saving !== ''} onClick={() => void inspectProfileFile()} type="button">
-                {saving === 'inspect' ? 'Analisando...' : 'Analisar CSV'}
+              {profileType === 'csv' ? (
+                <label className="profile-file-picker">
+                  <span>{profileFile?.name ?? (editingProfile ? 'Selecione um novo CSV para inspecionar outras colunas (opcional)' : 'Selecione o CSV para analisar')}</span>
+                  <input accept=".csv,text/csv" onChange={(event) => {
+                    setProfileFile(event.target.files?.[0] ?? null)
+                    setInspection(null)
+                    setError('')
+                  }} type="file" />
+                </label>
+              ) : (
+                <label className="profile-file-picker">
+                  <span>
+                    {profileImages.length > 0
+                      ? `${profileImages.length} imagem(ns) selecionada(s)`
+                      : 'Selecione algumas imagens de exemplo (até 20, podem ser criptografadas) para ler as chaves do INI'}
+                  </span>
+                  {/* sem "accept": as criptografadas não têm tipo de imagem, e o backend as abre */}
+                  <input multiple onChange={(event) => {
+                    setProfileImages(imageFiles(event.target.files ?? []).slice(0, 20))
+                    setInspection(null)
+                    setError('')
+                  }} type="file" />
+                </label>
+              )}
+              <button
+                className="button button--secondary"
+                disabled={(profileType === 'csv' ? !profileFile : profileImages.length === 0) || saving !== ''}
+                onClick={() => void inspectProfileFile()}
+                type="button"
+              >
+                {saving === 'inspect' ? 'Analisando...' : profileType === 'csv' ? 'Analisar CSV' : 'Ler o INI das imagens'}
               </button>
               {(inspection || availableColumns.length > 0) && (
                 <div className="profile-editor">
                   {inspection && (
-                    <p className="profile-editor__summary">{inspection.rows} linha(s), {inspection.columns.length} coluna(s) encontrada(s).</p>
+                    <p className="profile-editor__summary">
+                      {profileType === 'csv'
+                        ? `${inspection.rows} linha(s), ${inspection.columns.length} coluna(s) encontrada(s).`
+                        : `${inspection.rows} imagem(ns) com INI, ${inspection.columns.length} chave(s) encontrada(s).`}
+                    </p>
                   )}
+                  {profileType === 'csv' && (
                   <div className="profile-form-grid">
                     <label className="form-field">
                       <span>Coluna que identifica a imagem</span>
@@ -622,8 +797,9 @@ export function SettingsPage() {
                       </select>
                     </label>
                   </div>
+                  )}
                   <h3>Mapeamento dos campos</h3>
-                  <p className="profile-editor__hint">Escolha "Não mapear" para os campos que não existem no CSV.</p>
+                  <p className="profile-editor__hint">Escolha "Não mapear" para os campos que não existem no {profileType === 'csv' ? 'CSV' : 'INI'}.</p>
                   <div className="profile-fields">
                     {profileFields.map(([field, label]) => (
                       <label className="form-field" key={field}>
@@ -632,6 +808,9 @@ export function SettingsPage() {
                           <option value="">Não mapear</option>
                           {availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
                         </select>
+                        {advancedLabel(editingOriginal?.fields?.[field]) && (
+                          <small className="profile-name-hint">Mantido ao salvar: {advancedLabel(editingOriginal?.fields?.[field])}</small>
+                        )}
                       </label>
                     ))}
                   </div>
@@ -645,14 +824,50 @@ export function SettingsPage() {
                           <option value="">Não mapear</option>
                           {availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
                         </select>
+                        {advancedLabel(editingOriginal?.vehicles?.fields[field]) && (
+                          <small className="profile-name-hint">Mantido ao salvar: {advancedLabel(editingOriginal?.vehicles?.fields[field])}</small>
+                        )}
                       </label>
                     ))}
                   </div>
                   {fieldColumns.captured_at && (
                     <div className="profile-form-grid">
                       <label className="form-field">
+                        <span>Hora em outra {profileType === 'csv' ? 'coluna' : 'chave'} (opcional)</span>
+                        <select onChange={(event) => setTimeColumn(event.target.value)} value={timeColumn}>
+                          <option value="">A data já tem a hora</option>
+                          {availableColumns.filter((column) => column !== fieldColumns.captured_at).map((column) => <option key={column} value={column}>{column}</option>)}
+                        </select>
+                        <small className="profile-name-hint">Junta as duas com um espaço: "data hora".</small>
+                      </label>
+                      <label className="form-field">
                         <span>Formato da data/hora</span>
-                        <input onChange={(event) => setDateFormat(event.target.value)} value={dateFormat} />
+                        <select
+                          onChange={(event) => {
+                            if (event.target.value === 'custom') {
+                              setDateCustom(true)
+                            } else {
+                              setDateCustom(false)
+                              setDateFormat(event.target.value)
+                            }
+                          }}
+                          value={dateCustom ? 'custom' : dateFormat}
+                        >
+                          {DATE_PRESETS.map(([layout, label]) => <option key={layout} value={layout}>{label}</option>)}
+                          <option value="custom">Outro formato…</option>
+                        </select>
+                        {dateCustom && (
+                          <input onChange={(event) => setDateFormat(event.target.value)} placeholder="2006-01-02 15:04:05" value={dateFormat} />
+                        )}
+                        <small className="profile-name-hint">
+                          {dateCustom
+                            ? 'Escreva a data de referência 2006-01-02 15:04:05 no formato do CSV (não uma data do seu arquivo). Ex.: 02/01/2006 15:04:05.000'
+                            : `Layout: ${dateFormat}`}
+                          {inspection?.sample[0]?.[fieldColumns.captured_at] && ` · Exemplo: ${[
+                            inspection.sample[0][fieldColumns.captured_at],
+                            timeColumn ? inspection.sample[0][timeColumn] : '',
+                          ].filter(Boolean).join(' ')}`}
+                        </small>
                       </label>
                       <label className="form-field">
                         <span>Fuso horário</span>

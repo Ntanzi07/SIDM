@@ -63,6 +63,9 @@ func TestValidateErros(t *testing.T) {
 		"nem column nem value":   {func(p *Profile) { p.Fields["camera"] = FieldRule{} }, "fields.camera"},
 		"map com valor inválido": {func(p *Profile) { p.Fields["weather"].Map["Garoa"] = "garoa" }, `map["Garoa"]`},
 		"data sem formato":       {func(p *Profile) { p.Fields["captured_at"] = FieldRule{Column: "D"} }, "date_format"},
+		"data de exemplo no lugar do layout": {func(p *Profile) {
+			p.Fields["captured_at"] = FieldRule{Column: "D", DateFormat: "2026-08-12 09:23:23.000"}
+		}, "não é um layout do Go"},
 		"fuso inválido": {func(p *Profile) {
 			r := p.Fields["captured_at"]
 			r.Timezone = "Marte/Olympus"
@@ -296,5 +299,73 @@ func TestErrosLimitados(t *testing.T) {
 	_, rep := Transform(p, read(t, p.Reader, b.String()))
 	if rep.ErrorCount != maxErrors+50 || len(rep.Errors) != maxErrors {
 		t.Errorf("error_count=%d errors=%d; want o total contado e só %d listados", rep.ErrorCount, len(rep.Errors), maxErrors)
+	}
+}
+
+func TestValidDateLayout(t *testing.T) {
+	validos := []string{
+		"02/01/2006 15:04:05",
+		"2006-01-02 15:04:05.000",
+		"2006-01-02T15:04:05Z07:00",
+		"02/01/2006",
+		"20060102150405",
+		"2 Jan 06 15:04",
+	}
+	for _, l := range validos {
+		if !ValidDateLayout(l) {
+			t.Errorf("%q deveria ser um layout válido", l)
+		}
+	}
+	invalidos := []string{
+		"2026-08-12 09:23:23.000", // uma data de exemplo, não um layout
+		"12/08/2026 09:23",
+		"dd/mm/yyyy hh:mm:ss", // padrão de outras linguagens
+		"YYYY-MM-DD",
+		"15:04:05", // só hora: falta o dia
+		"texto",
+	}
+	for _, l := range invalidos {
+		if ValidDateLayout(l) {
+			t.Errorf("%q não deveria ser aceito como layout", l)
+		}
+	}
+}
+
+func TestTransformCampoCodificadoSemMap(t *testing.T) {
+	p := &Profile{
+		Name:   "sem-map",
+		Reader: ReaderConfig{Type: "csv", Delimiter: ";"},
+		Match:  MatchConfig{Column: "Arquivo", By: MatchByOriginalName},
+		Fields: map[string]FieldRule{
+			"day_time":  {Column: "Periodo"},
+			"equipment": {Column: "Equip"}, // texto livre: vai como está
+		},
+		Vehicles: &VehicleRules{Mode: VehiclesPerRow, Fields: map[string]FieldRule{
+			"plate": {Column: "Placa"},
+			"type":  {Column: "Tipo"},
+		}},
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	csv := "Arquivo;Periodo;Equip;Placa;Tipo\n" +
+		"a.jpg;night;8003 X;AAA1A11;car\n" + // o próprio valor
+		"b.jpg;N;8003 X;BBB1B11;T\n" + // a letra do padrão
+		"c.jpg;Noite;8003 X;CCC1C11;AUTOMOVEL\n" // nenhum dos dois: fica vazio e vai para o relatório
+	records, rep := Transform(p, read(t, p.Reader, csv))
+	if len(records) != 3 {
+		t.Fatalf("records = %d", len(records))
+	}
+	got := func(i int) string {
+		a := records[i].Annotation
+		return a.DayTime + "/" + a.Vehicles[0].Type + "/" + a.Equipment
+	}
+	for i, want := range []string{"night/car/8003 X", "night/truck/8003 X", "/" + "/8003 X"} {
+		if got(i) != want {
+			t.Errorf("linha %d: %q, want %q", i+2, got(i), want)
+		}
+	}
+	if rep.Unmapped["vehicles.type"]["AUTOMOVEL"] != 1 || rep.Unmapped["day_time"]["Noite"] != 1 {
+		t.Errorf("unmapped = %v", rep.Unmapped)
 	}
 }

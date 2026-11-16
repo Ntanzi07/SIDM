@@ -846,3 +846,24 @@ func TestRenomearEApagarPerfil(t *testing.T) {
 		t.Error("o outro perfil não pode ser afetado")
 	}
 }
+
+func TestDeleteImageHistory(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+	now := ms(time.Now())
+	s.InsertHistory(ctx, []HistoryEntry{
+		{ImageID: "a", Field: "status", New: "verified", ChangedBy: "n", ChangedAt: now},
+		{ImageID: "a", Field: "day_time", New: "night", ChangedBy: "n", ChangedAt: now},
+		{ImageID: "b", Field: "status", New: "verified", ChangedBy: "n", ChangedAt: now},
+	})
+	if err := s.DeleteImageHistory(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	hist := s.db.Collection("image_history")
+	if n, _ := hist.CountDocuments(ctx, bson.D{{Key: "image_id", Value: "a"}}); n != 0 {
+		t.Errorf("sobraram %d entradas da imagem apagada", n)
+	}
+	if n, _ := hist.CountDocuments(ctx, bson.D{{Key: "image_id", Value: "b"}}); n != 1 {
+		t.Error("o histórico de outra imagem não pode ser apagado")
+	}
+}

@@ -40,9 +40,35 @@
 }
 
 .app-header__user {
+  align-items: center;
   color: #7d8798;
+  display: flex;
   font-size: 14px;
+  gap: 8px;
   margin-left: auto;
+}
+
+.app-header__user input {
+  border: 1px solid #d6dae3;
+  border-radius: 6px;
+  font: inherit;
+  padding: 4px 8px;
+  width: 160px;
+}
+
+.app-header__user-button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  padding: 4px 8px;
+}
+
+.app-header__user-button:hover:not(:disabled) {
+  border-color: #d6dae3;
+  color: #5963d9;
 }
 
 @media (max-width: 480px) {

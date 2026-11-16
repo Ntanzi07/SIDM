@@ -246,3 +246,64 @@
     max-width: none;
   }
 }
+
+.annotation-hint {
+  color: #7d8798;
+  font-size: 13px;
+  margin: 4px 0 12px;
+}
+
+.annotation-hint a {
+  color: #5963d9;
+}
+
+.annotation-field--invalid select {
+  border-color: #e11d48;
+  color: #9f1239;
+}
+
+.annotation-combobox {
+  position: relative;
+}
+
+.annotation-combobox__list {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  max-height: 240px;
+  margin: 4px 0 0;
+  padding: 4px 0;
+  overflow-y: auto;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #dfe3eb;
+  border-radius: 6px;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+.annotation-combobox__item {
+  padding: 7px 10px;
+  color: #384257;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.annotation-combobox__item:hover,
+.annotation-combobox__item--active {
+  background: #eef0fd;
+  color: #5963d9;
+}
+
+.annotation-combobox__item[aria-selected='true'] {
+  font-weight: 700;
+}
+
+.annotation-combobox__empty {
+  padding: 8px 10px;
+  color: #7d8798;
+  font-size: 12px;
+  font-weight: 400;
+}

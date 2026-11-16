@@ -203,6 +203,19 @@ func (m *memStore) DeleteImage(ctx context.Context, sha1 string) error {
 	return nil
 }
 
+func (m *memStore) DeleteImageHistory(ctx context.Context, sha1 string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	kept := m.history[:0]
+	for _, h := range m.history {
+		if h.ImageID != sha1 {
+			kept = append(kept, h)
+		}
+	}
+	m.history = kept
+	return nil
+}
+
 func (m *memStore) FindImage(ctx context.Context, sha1 string) (*store.Image, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

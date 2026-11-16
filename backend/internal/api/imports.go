@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"SIDM/internal/crypt"
 	"SIDM/internal/filename"
 	"SIDM/internal/importer"
 	"SIDM/internal/store"
@@ -190,6 +191,10 @@ func (s *Server) profileByName(w http.ResponseWriter, r *http.Request, name stri
 // exemplo e os valores distintos de cada coluna. Não precisa de perfil.
 func (s *Server) handleInspect(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if q.Get("type") == importer.ReaderJPEGINI {
+		s.inspectINI(w, r)
+		return
+	}
 	delim, ok := delimiterParam(q.Get("delimiter"))
 	if !ok {
 		writeError(w, http.StatusBadRequest, `delimiter: use comma, semicolon, tab ou pipe`)
@@ -610,4 +615,88 @@ func equalVehicles(a, b []store.Vehicle) bool {
 		}
 	}
 	return true
+}
+
+const (
+	maxInspectINIFiles = 20
+	maxInspectINIBytes = 200 << 20
+)
+
+// inspectINI: POST /imports/inspect?type=jpeg-ini (multipart, um ou mais "file")
+// O mesmo raio-x do CSV, mas lendo o INI embutido em algumas imagens de
+// exemplo: cada imagem vira uma linha, e cada "Secao.Chave" vira uma coluna.
+// É o que o perfil de INI usa como "coluna". Imagens criptografadas são
+// abertas antes, igual ao upload. Nada é gravado.
+func (s *Server) inspectINI(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxInspectINIBytes)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		writeError(w, http.StatusBadRequest, `esperado multipart/form-data com uma ou mais imagens no campo "file"`)
+		return
+	}
+
+	var rows []importer.Row
+	columns := map[string]bool{}
+	files, withoutINI := 0, []string{}
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "erro lendo o upload: "+err.Error())
+			return
+		}
+		if part.FormName() != "file" {
+			part.Close()
+			continue
+		}
+		files++
+		if files > maxInspectINIFiles {
+			part.Close()
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("mande no máximo %d imagens de exemplo", maxInspectINIFiles))
+			return
+		}
+		data, err := io.ReadAll(io.LimitReader(part, maxINIScanBytes+1))
+		name := part.FileName()
+		part.Close()
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "erro lendo "+name+": "+err.Error())
+			return
+		}
+		if len(data) > maxINIScanBytes {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("%s: imagem maior que %d MB", name, maxINIScanBytes>>20))
+			return
+		}
+		if !crypt.IsJPEG(data) {
+			if plain, _, err := crypt.Open(data); err == nil {
+				data = plain
+			}
+		}
+		values := importer.INIValues(importer.ParseINI(importer.ExtractJPEGTrailer(data)))
+		if len(values) == 0 {
+			withoutINI = append(withoutINI, name)
+			continue
+		}
+		for c := range values {
+			columns[c] = true
+		}
+		rows = append(rows, importer.Row{Line: len(rows) + 1, Values: values})
+	}
+
+	if files == 0 {
+		writeError(w, http.StatusBadRequest, `faltou o campo "file" com pelo menos uma imagem`)
+		return
+	}
+	if len(rows) == 0 {
+		writeError(w, http.StatusBadRequest, "nenhuma das imagens tem INI embutido: "+strings.Join(withoutINI, ", "))
+		return
+	}
+
+	cols := make([]string, 0, len(columns))
+	for c := range columns {
+		cols = append(cols, c)
+	}
+	sort.Strings(cols)
+	writeJSON(w, http.StatusOK, importer.Inspect(&importer.Table{Columns: cols, Rows: rows}, 5, 50))
 }

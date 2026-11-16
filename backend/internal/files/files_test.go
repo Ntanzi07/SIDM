@@ -196,3 +196,23 @@ func TestRemovePackageDir(t *testing.T) {
 		t.Fatal("a proteção falhou: apagou algo fora de dataset/")
 	}
 }
+
+func TestRemove(t *testing.T) {
+	st, _ := newStorage(t)
+	if err := st.EnsurePackageDir("p"); err != nil {
+		t.Fatal(err)
+	}
+	rel := PendingPath("p", "abc", ".jpg")
+	if err := os.WriteFile(st.Abs(rel), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Remove(rel); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(st.Abs(rel)); !os.IsNotExist(err) {
+		t.Error("o arquivo deveria ter sido apagado")
+	}
+	if err := st.Remove(rel); err != nil {
+		t.Errorf("apagar de novo (já não existe) não é erro: %v", err)
+	}
+}

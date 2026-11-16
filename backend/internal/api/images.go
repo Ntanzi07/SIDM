@@ -161,6 +161,38 @@ func (req annotationRequest) applyTo(img *store.Image) {
 	}
 }
 
+// DELETE /images/{sha1}
+// Apaga a imagem: o registro, o histórico e o arquivo. Sem volta.
+// Se outra pessoa está anotando, recusa (409).
+func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
+	img, ok := s.imageFromPath(w, r)
+	if !ok {
+		return
+	}
+	if img.ClaimedByOther(userFrom(r), time.Now().UTC()) {
+		writeError(w, http.StatusConflict, fmt.Sprintf("imagem está sendo anotada por %s", img.ClaimedBy))
+		return
+	}
+
+	// Mesma ordem do pacote: banco primeiro. Se o disco falhar, sobra um
+	// arquivo órfão, mas nunca um registro apontando para o nada.
+	ctx := r.Context()
+	if err := s.store.DeleteImage(ctx, img.SHA1); err != nil {
+		s.serverError(w, err)
+		return
+	}
+	warnings := []string{}
+	if err := s.store.DeleteImageHistory(ctx, img.SHA1); err != nil {
+		s.logError(err)
+		warnings = append(warnings, "a imagem foi apagada, mas o histórico dela não")
+	}
+	if err := s.files.Remove(img.Path); err != nil {
+		s.logError(err)
+		warnings = append(warnings, "a imagem foi apagada do banco, mas o arquivo não: apague "+img.Path+" manualmente")
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"sha1": img.SHA1, "deleted": true, "warnings": warnings})
+}
+
 // PUT /images/{sha1}
 // Header opcional X-User: quem está anotando (vai para o histórico).
 func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {

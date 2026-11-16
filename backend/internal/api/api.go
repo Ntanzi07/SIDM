@@ -35,6 +35,7 @@ import (
 //   GET  /import-profiles      lista os perfis, paginado
 //   GET  /import-profiles/{name}  um perfil
 //   PUT  /import-profiles/{name}  atualiza um perfil (o JSON inteiro)
+//   DELETE /images/{sha1}         apaga a imagem (registro, histórico e arquivo)
 //   PATCH  /import-profiles/{name}  renomeia {"name": "..."}
 //   DELETE /import-profiles/{name}  apaga
 //   POST /packages/{name}/import?profile=X&dry_run=false  importa um CSV para os rascunhos
@@ -80,6 +81,7 @@ type Store interface {
 
 	InsertImage(ctx context.Context, img *store.Image) error
 	DeleteImage(ctx context.Context, sha1 string) error
+	DeleteImageHistory(ctx context.Context, sha1 string) error
 	FindImage(ctx context.Context, sha1 string) (*store.Image, error)
 	ReplaceImage(ctx context.Context, img *store.Image, prevUpdatedAt time.Time) error
 	ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*store.Image, error)
@@ -141,6 +143,7 @@ func (s *Server) routes() []route {
 		{"POST", "/images/exists", s.handleExists},
 		{"GET", "/images/{sha1}", s.handleGetImage},
 		{"PUT", "/images/{sha1}", s.handleAnnotate},
+		{"DELETE", "/images/{sha1}", s.handleDeleteImage},
 		{"GET", "/images/{sha1}/file", s.handleImageFile},
 		{"POST", "/images/{sha1}/release", s.handleRelease},
 

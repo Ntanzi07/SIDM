@@ -113,6 +113,16 @@ var (
 	}
 )
 
+// ValidDateLayout diz se o texto é um layout do Go que tem, pelo menos,
+// dia, mês e ano. O jeito de saber: formatar uma data conhecida com ele e
+// ler de volta. Um layout errado (por exemplo uma data de exemplo, como
+// "2026-08-12 09:23:23") não devolve a mesma data.
+func ValidDateLayout(layout string) bool {
+	ref := time.Date(2017, 11, 23, 8, 49, 37, 987_000_000, time.UTC)
+	got, err := time.Parse(layout, ref.Format(layout))
+	return err == nil && got.Year() == ref.Year() && got.Month() == ref.Month() && got.Day() == ref.Day()
+}
+
 // ValidProfileName diz se o nome serve para um perfil: só letras, números e "-".
 func ValidProfileName(name string) bool {
 	_, err := filename.SanitizePackage(name)
@@ -220,6 +230,10 @@ func validateRule(add func(string, ...any), path, field string, r FieldRule) {
 	if field == "captured_at" {
 		if r.DateFormat == "" {
 			add("%s.date_format: obrigatório (layout do Go, ex: \"02/01/2006 15:04:05\")", path)
+		} else if !ValidDateLayout(r.DateFormat) {
+			add("%s.date_format: %q não é um layout do Go. Escreva a data de referência "+
+				"(2006-01-02 15:04:05) no mesmo formato do CSV, ex: \"2006-01-02 15:04:05.000\" ou \"02/01/2006 15:04:05\"",
+				path, r.DateFormat)
 		}
 		if r.Timezone != "" {
 			if _, err := time.LoadLocation(r.Timezone); err != nil {

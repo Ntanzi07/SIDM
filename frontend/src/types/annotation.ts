@@ -26,6 +26,7 @@ export type ImageDetail = {
   captured_at?: string
   vehicles?: Vehicle[]
   claimed_by?: string
+  claimed_until?: string
 }
 
 export type AnnotationForm = {

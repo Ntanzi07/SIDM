@@ -1,11 +1,16 @@
 package api
 
 import (
+	"bytes"
+	"mime/multipart"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"SIDM/internal/crypt"
+	"SIDM/internal/importer"
 	"SIDM/internal/store"
 )
 
@@ -186,4 +191,56 @@ func TestImportINIRelatorioPorImagem(t *testing.T) {
 	if rep.Unmapped["vehicles.type"]["TRICICLO"] != 1 {
 		t.Errorf("unmapped = %v", rep.Unmapped)
 	}
+}
+
+// postFiles manda vários arquivos no campo "file".
+func (e *testEnv) postFiles(t *testing.T, path string, files ...upFile) *httptest.ResponseRecorder {
+	t.Helper()
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	for _, f := range files {
+		w, _ := mw.CreateFormFile("file", f.name)
+		w.Write([]byte(f.content))
+	}
+	mw.Close()
+	return e.do("POST", path, &body, map[string]string{"Content-Type": mw.FormDataContentType()})
+}
+
+func TestInspectINI(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.postFiles(t, "/imports/inspect?type=jpeg-ini",
+		upFile{"a.jpg", jpegWithINI("a", "ABC1D23")},
+		upFile{"b.jpg", string(crypt.EncryptRC4Legacy([]byte(jpegWithINI("b", "XYZ9W87"))))}, // criptografada
+		upFile{"sem-ini.jpg", "\xFF\xD8\xFF\xC0x\xFF\xD9"},
+	)
+	assertStatus(t, rec, http.StatusOK)
+	var ins importer.Inspection
+	decode(t, rec, &ins)
+
+	if ins.Rows != 2 {
+		t.Errorf("rows = %d, want 2 (a imagem sem INI fica de fora)", ins.Rows)
+	}
+	want := []string{"Metrologico.Data", "Metrologico.Hora", "Metrologico.Milisegundo", "NMetrologico.Equip", "NMetrologico.Placa", "NMetrologico.TipoVeiculo"}
+	if strings.Join(ins.Columns, ",") != strings.Join(want, ",") {
+		t.Errorf("colunas = %v\nwant %v (sem a Assinatura)", ins.Columns, want)
+	}
+	if ins.Distinct["NMetrologico.Placa"].Total != 2 || ins.Distinct["NMetrologico.TipoVeiculo"].Values[0].Value != "AUTOMOVEL" {
+		t.Errorf("distintos = %+v", ins.Distinct)
+	}
+}
+
+func TestInspectINIErros(t *testing.T) {
+	env := newTestEnv(t)
+	rec := env.postFiles(t, "/imports/inspect?type=jpeg-ini", upFile{"sem-ini.jpg", "\xFF\xD8\xFF\xC0x\xFF\xD9"})
+	assertStatus(t, rec, http.StatusBadRequest)
+	if !strings.Contains(errorMsg(t, rec), "sem-ini.jpg") {
+		t.Errorf("a mensagem deveria citar a imagem: %q", errorMsg(t, rec))
+	}
+	assertStatus(t, env.postFiles(t, "/imports/inspect?type=jpeg-ini"), http.StatusBadRequest)
+
+	many := make([]upFile, maxInspectINIFiles+1)
+	for i := range many {
+		many[i] = upFile{"x.jpg", jpegWithINI("x", "AAA1A11")}
+	}
+	assertStatus(t, env.postFiles(t, "/imports/inspect?type=jpeg-ini", many...), http.StatusBadRequest)
 }

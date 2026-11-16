@@ -15,8 +15,10 @@ package files
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -131,6 +133,14 @@ func (st *Storage) Store(tmpPath, rel string) error {
 func (st *Storage) Move(fromRel, toRel string) error {
 	if err := os.Rename(st.Abs(fromRel), st.Abs(toRel)); err != nil {
 		return fmt.Errorf("mover %s -> %s: %w", fromRel, toRel, err)
+	}
+	return nil
+}
+
+// Remove apaga um arquivo do dataset. Se ele já não existe, não é erro.
+func (st *Storage) Remove(rel string) error {
+	if err := os.Remove(st.Abs(rel)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("apagar %s: %w", rel, err)
 	}
 	return nil
 }

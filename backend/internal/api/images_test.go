@@ -306,3 +306,45 @@ func TestDiffHistory(t *testing.T) {
 		t.Errorf("sem mudanças deveria gerar 0 entradas, gerou %d", len(got))
 	}
 }
+
+func TestExcluirImagem(t *testing.T) {
+	env := newTestEnv(t)
+	sha := env.seedVerified(t, "verificada") // tem arquivo v2 e histórico
+	other := env.seedPending(t, "outra")
+	file := env.pkgFile(env.db.images[sha].FileName)
+
+	rec := env.do("DELETE", "/images/"+sha, nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+
+	if _, ok := env.db.images[sha]; ok {
+		t.Error("o registro deveria ter sumido")
+	}
+	if _, err := os.Stat(file); !os.IsNotExist(err) {
+		t.Error("o arquivo deveria ter sido apagado")
+	}
+	for _, h := range env.db.history {
+		if h.ImageID == sha {
+			t.Fatal("o histórico da imagem deveria ter sumido")
+		}
+	}
+	if _, ok := env.db.images[other]; !ok {
+		t.Error("a outra imagem não pode ser afetada")
+	}
+
+	assertStatus(t, env.do("DELETE", "/images/"+sha, nil, nil), http.StatusNotFound)
+	assertStatus(t, env.do("DELETE", "/images/nao-e-sha1", nil, nil), http.StatusBadRequest)
+}
+
+func TestExcluirImagemReservadaPorOutro(t *testing.T) {
+	env := newTestEnv(t)
+	sha := env.seedPending(t, "x")
+	env.next(t, "maria", "")
+
+	rec := env.do("DELETE", "/images/"+sha, nil, map[string]string{"X-User": "nathan"})
+	assertStatus(t, rec, http.StatusConflict)
+	if !strings.Contains(errorMsg(t, rec), "maria") {
+		t.Errorf("a mensagem deveria dizer quem está com a imagem: %q", errorMsg(t, rec))
+	}
+	// quem está com ela pode apagar
+	assertStatus(t, env.do("DELETE", "/images/"+sha, nil, map[string]string{"X-User": "maria"}), http.StatusOK)
+}

@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createPackage, importPackageCsv, listImportProfiles, type ImportProfile, type ImportReport } from '../../services/api'
+import { createPackage, imageFiles, importPackageCsv, listImportProfiles, listIniProfiles, uploadImages, type ImportProfile, type ImportReport, type UploadProgress } from '../../services/api'
+import { ImportWarnings } from './ImportWarnings'
+import { UploadStatus } from './UploadStatus'
 import './Packages.css'
 
 export function CreatePackagePage() {
@@ -9,16 +11,20 @@ export function CreatePackagePage() {
   const [name, setName] = useState('')
   const [folder, setFolder] = useState<FileList | null>(null)
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
+  const [iniProfiles, setIniProfiles] = useState<ImportProfile[]>([])
+  const [iniProfile, setIniProfile] = useState('')
   const [profileName, setProfileName] = useState('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [overwrite, setOverwrite] = useState(true)
   const [error, setError] = useState('')
   const [profileError, setProfileError] = useState('')
-  const [saving, setSaving] = useState<'creating' | 'testing' | 'applying' | ''>('')
+  const [saving, setSaving] = useState<'creating' | 'uploading' | 'testing' | 'applying' | ''>('')
+  const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [createdPackageName, setCreatedPackageName] = useState('')
   const [importReport, setImportReport] = useState<ImportReport | null>(null)
 
   useEffect(() => {
+    listIniProfiles().then(setIniProfiles).catch(() => { /* sem perfis de INI: o seletor não aparece */ })
     listImportProfiles()
       .then(setProfiles)
       .catch((requestError: unknown) => setProfileError(
@@ -48,12 +54,27 @@ export function CreatePackagePage() {
       return
     }
 
+    const files = imageFiles(folder)
+    if (files.length === 0) {
+      setError('A pasta selecionada não tem imagens.')
+      return
+    }
+
     setSaving('creating')
     setError('')
     setImportReport(null)
     try {
-      const createdName = await createPackage(name.trim(), folder)
+      // Se o pacote já foi criado numa tentativa anterior, não cria de novo:
+      // o upload pula as imagens que já subiram (duplicadas).
+      const createdName = createdPackageName || await createPackage(name.trim())
       setCreatedPackageName(createdName)
+
+      setSaving('uploading')
+      const result = await uploadImages(createdName, files, setUpload, iniProfile || undefined)
+      if (result.errors.length > 0) {
+        setError(`${result.errors.length} imagem(ns) não subiram. Corrija e clique de novo para reenviar só o que falta.`)
+        return
+      }
       if (!csvFile || !profileName) {
         navigate(`/pacotes/${encodeURIComponent(createdName)}`)
         return
@@ -99,6 +120,7 @@ export function CreatePackagePage() {
         <div className="form-field">
           <label htmlFor="package-name">Nome do pacote</label>
           <input
+            disabled={Boolean(createdPackageName)}
             id="package-name"
             onChange={(event) => setName(event.target.value)}
             placeholder="Ex.: Placas BR - Rodovia Anhanguera"
@@ -121,6 +143,26 @@ export function CreatePackagePage() {
             />
           </label>
         </div>
+        {iniProfiles.length > 0 && (
+          <div className="form-field import-field">
+            <label htmlFor="ini-profile">Ler o INI embutido nas imagens (opcional)</label>
+            <select
+              id="ini-profile"
+              disabled={saving !== '' || Boolean(createdPackageName)}
+              onChange={(event) => setIniProfile(event.target.value)}
+              value={iniProfile}
+            >
+              <option value="">Não preencher pelo INI</option>
+              {iniProfiles.map((profile) => (
+                <option key={profile.name} value={profile.name}>{profile.name}</option>
+              ))}
+            </select>
+            <small className="form-hint">
+              O INI de cada imagem é guardado de qualquer jeito. Com um perfil, ele já preenche os rascunhos no upload
+              (dá para aplicar depois, no detalhe do pacote).
+            </small>
+          </div>
+        )}
         <div className="form-field import-field">
           <label htmlFor="import-profile">Importar anotações do CSV (opcional)</label>
           <select
@@ -153,6 +195,7 @@ export function CreatePackagePage() {
             </label>
           </>
         )}
+        {upload && <UploadStatus progress={upload} />}
         {error && <p className="form-error">{error}</p>}
         {importReport && (
           <div className="import-report">
@@ -163,32 +206,7 @@ export function CreatePackagePage() {
               <span><strong>{importReport.applied}</strong> alterações previstas</span>
               <span><strong>{importReport.not_found_count}</strong> não encontradas</span>
             </div>
-            {(importReport.error_count > 0 || importReport.not_found_count > 0 || importReport.invalid_names.length > 0) && (
-              <p className="import-report__warning">
-                Revise os avisos antes de aplicar. O ensaio não alterou nenhuma imagem.
-              </p>
-            )}
-            {Object.entries(importReport.unmapped).map(([field, values]) => (
-              <p className="import-report__detail" key={field}>
-                <strong>{field}:</strong> valores sem tradução ({Object.keys(values).length})
-              </p>
-            ))}
-            {(importReport.new_equipments.length > 0 || importReport.new_cameras.length > 0) && (
-              <p className="import-report__detail">
-                <strong>Cadastros novos:</strong>{' '}
-                {[...importReport.new_equipments, ...importReport.new_cameras].join(', ')}
-              </p>
-            )}
-            {importReport.errors.slice(0, 5).map((item) => (
-              <p className="import-report__detail import-report__detail--warning" key={`${item.line}-${item.field}-${item.key}`}>
-                Linha {item.line}, {item.field}: {item.error}
-              </p>
-            ))}
-            {importReport.invalid_names.slice(0, 5).map((item) => (
-              <p className="import-report__detail import-report__detail--warning" key={`${item.line}-${item.field}-${item.value}`}>
-                Linha {item.line}, {item.field}: {item.error}
-              </p>
-            ))}
+            <ImportWarnings report={importReport} />
             <button className="button button--primary" disabled={saving !== ''} onClick={() => void handleApplyImport()} type="button">
               {saving === 'applying' ? 'Aplicando...' : 'Aplicar importação e abrir pacote'}
             </button>
@@ -199,7 +217,10 @@ export function CreatePackagePage() {
             Cancelar
           </button>
           <button className="button button--primary" disabled={saving !== '' || Boolean(importReport)} type="submit">
-            {saving === 'creating' ? 'Criando...' : saving === 'testing' ? 'Ensaiando CSV...' : 'Criar pacote'}
+            {saving === 'creating' ? 'Criando...'
+              : saving === 'uploading' ? 'Enviando imagens...'
+                : saving === 'testing' ? 'Ensaiando CSV...'
+                  : createdPackageName ? 'Tentar de novo' : 'Criar pacote'}
           </button>
         </div>
       </form>

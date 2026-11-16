@@ -1,7 +1,8 @@
-import { useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import type { KeyboardEvent } from 'react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { annotationOptions } from '../../data/annotationOptions'
-import { imageFileUrl } from '../../services/api'
+import { imageFileUrl, searchCameras, searchEquipments, type PageResponse } from '../../services/api'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import type { AnnotationForm } from '../../types/annotation'
 import './Annotation.css'
@@ -10,42 +11,132 @@ type SelectFieldProps = {
   label: string
   value: string
   options: readonly (readonly [string, string])[]
+  placeholder?: string // com placeholder, o campo pode ficar vazio
   onChange: (value: string) => void
 }
 
-function SelectField({ label, value, options, onChange }: SelectFieldProps) {
+function SelectField({ label, value, options, placeholder, onChange }: SelectFieldProps) {
+  // Valor que não está na lista (ex.: veio de um import sem tradução). Sem
+  // isto, o navegador mostraria a primeira opção, e escolher essa opção não
+  // dispararia mudança: o valor errado ficaria preso.
+  // O mesmo vale para o valor VAZIO: sem uma opção vazia, o navegador
+  // mostraria a primeira da lista, mas o valor continuaria "".
+  const invalid = value !== '' && !options.some(([option]) => option === value)
+  const empty = value === ''
   return (
-    <label className="annotation-field">
+    <label className={invalid || empty ? 'annotation-field annotation-field--invalid' : 'annotation-field'}>
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+        {invalid && <option value={value}>"{value}" (inválido: escolha outro)</option>}
+        {(empty || placeholder !== undefined) && <option disabled={!empty} value="">{placeholder ?? 'Selecione'}</option>}
+        {options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
       </select>
     </label>
   )
 }
 
-type ComboFieldProps = {
+type AutocompleteFieldProps = {
   label: string
   value: string
-  listId: string
-  suggestions: string[]
+  search: (q: string) => Promise<PageResponse<string>>
   placeholder?: string
   onChange: (value: string) => void
 }
 
-function ComboField({ label, value, listId, suggestions, placeholder, onChange }: ComboFieldProps) {
+// Combobox próprio (o <datalist> do navegador não atualiza a lista aberta
+// quando as sugestões chegam depois, e filtra demais quando já há um valor).
+// Ao focar, mostra a lista toda; ao digitar, busca no backend (300 ms depois
+// da última tecla). Setas + Enter escolhem, Esc fecha.
+function AutocompleteField({ label, value, search, placeholder, onChange }: AutocompleteFieldProps) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+  const [suggestions, setSuggestions] = useState<string[]>([])
+  const [active, setActive] = useState(-1)
+
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    const timer = window.setTimeout(() => {
+      search(query)
+        .then((page) => {
+          if (!alive) return
+          setSuggestions(page.items)
+          setActive(-1)
+        })
+        .catch(() => { if (alive) setSuggestions([]) })
+    }, query ? 300 : 0)
+    return () => {
+      alive = false
+      window.clearTimeout(timer)
+    }
+  }, [open, query, search])
+
+  function choose(name: string) {
+    onChange(name)
+    setOpen(false)
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      setOpen(true)
+      setActive((i) => Math.min(i + 1, suggestions.length - 1))
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      setActive((i) => Math.max(i - 1, 0))
+    } else if (event.key === 'Enter' && open && active >= 0 && suggestions[active]) {
+      event.preventDefault()
+      choose(suggestions[active])
+    } else if (event.key === 'Escape') {
+      setOpen(false)
+    }
+  }
+
   return (
-    <label className="annotation-field">
+    <label className="annotation-field annotation-combobox">
       <span>{label}</span>
       <input
-        list={listId}
-        placeholder={placeholder ?? 'Digite ou selecione'}
+        autoComplete="off"
+        onBlur={() => setOpen(false)}
+        onChange={(event) => {
+          onChange(event.target.value)
+          setQuery(event.target.value)
+          setOpen(true)
+        }}
+        onFocus={() => {
+          setQuery('') // ao entrar no campo, mostra todos (não só o que bate com o valor atual)
+          setOpen(true)
+        }}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder ?? 'Digite para buscar'}
+        role="combobox"
+        aria-expanded={open}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
       />
-      <datalist id={listId}>
-        {suggestions.map((s) => <option key={s} value={s} />)}
-      </datalist>
+      {open && suggestions.length > 0 && (
+        <ul className="annotation-combobox__list" role="listbox">
+          {suggestions.map((name, i) => (
+            <li
+              aria-selected={name === value}
+              className={i === active ? 'annotation-combobox__item annotation-combobox__item--active' : 'annotation-combobox__item'}
+              key={name}
+              // mousedown (e não click): acontece antes do blur que fecha a lista
+              onMouseDown={(event) => {
+                event.preventDefault()
+                choose(name)
+              }}
+              role="option"
+            >
+              {name}
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && query !== '' && suggestions.length === 0 && (
+        <div className="annotation-combobox__list annotation-combobox__empty">
+          Nenhum cadastrado com "{query}". Ao salvar, a tela pergunta se quer cadastrar.
+        </div>
+      )}
     </label>
   )
 }
@@ -64,16 +155,14 @@ export function AnnotationPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   const update = <K extends keyof AnnotationForm>(field: K, value: AnnotationForm[K]) => annotator.updateForm(field, value)
-  const equipmentOptions = codes.equipments ?? []
-  const cameraOptions = codes.cameras ?? []
 
   async function handleDeleteImage() {
     const ok = await annotator.deleteCurrentImage()
     if (ok) setShowDeleteModal(false)
   }
 
-  if (annotator.loading) return <section className="annotation-page annotation-empty">Carregando imagens...</section>
-  if (annotator.error && !image && annotator.images.length === 0) {
+  if (annotator.loading) return <section className="annotation-page annotation-empty">Carregando a fila...</section>
+  if (annotator.error && !image && !annotator.finished) {
     return (
       <section className="annotation-page annotation-empty">
         <h1>Não foi possível abrir a anotação</h1>
@@ -116,9 +205,25 @@ export function AnnotationPage() {
 
       <div className="annotation-layout">
         <div className="annotation-navigation">
-          <button className="button button--secondary" disabled={annotator.selectedIndex === 0} onClick={() => annotator.setSelectedIndex((current) => current - 1)} type="button">← Anterior</button>
-          <span>Imagem {annotator.selectedIndex + 1} de {annotator.images.length}</span>
-          <button className="button button--secondary" disabled={annotator.selectedIndex === annotator.images.length - 1} onClick={() => annotator.setSelectedIndex((current) => current + 1)} type="button">Próxima →</button>
+          <button className="button button--secondary" disabled={!annotator.canGoBack || annotator.saving} onClick={() => void annotator.previous()} type="button">← Anterior</button>
+          <span>
+            {annotator.revisiting
+              ? 'Revendo uma imagem anterior'
+              : `${annotator.progress.pending.toLocaleString('pt-BR')} pendente(s) na fila`}
+          </span>
+          {annotator.revisiting ? (
+            <button className="button button--secondary" disabled={annotator.saving} onClick={() => void annotator.forward()} type="button">Seguinte →</button>
+          ) : (
+            <button
+              className="button button--secondary"
+              disabled={!image || annotator.saving}
+              onClick={() => void annotator.skip()}
+              title="A imagem volta para o fim da fila"
+              type="button"
+            >
+              Pular →
+            </button>
+          )}
         </div>
 
         <main className="annotation-main">
@@ -161,20 +266,18 @@ export function AnnotationPage() {
                 {annotator.message && <p className="annotation-feedback">{annotator.message}</p>}
 
                 <div className="annotation-fields">
-                  <ComboField
+                  <AutocompleteField
                     label="Equipamento"
-                    listId="equipment-list"
                     onChange={(value) => update('equipment', value)}
                     placeholder="Digite o equipamento"
-                    suggestions={equipmentOptions}
+                    search={searchEquipments}
                     value={form.equipment}
                   />
-                  <ComboField
+                  <AutocompleteField
                     label="Câmera"
-                    listId="camera-list"
                     onChange={(value) => update('camera', value)}
                     placeholder="Digite a câmera"
-                    suggestions={cameraOptions}
+                    search={searchCameras}
                     value={form.camera}
                   />
                   <SelectField label="Direção" value={form.direction} options={annotationOptions.direction} onChange={(value) => update('direction', value)} />
@@ -182,7 +285,7 @@ export function AnnotationPage() {
                     <span>Resolução</span>
                     <select value={form.resolution} onChange={(event) => update('resolution', event.target.value)}>
                       <option value="">Selecione</option>
-                      {Object.entries(codes.resolution ?? {}).map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+                      {Object.values(codes.resolution ?? {}).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10)).map((size) => <option key={size} value={size}>{size}</option>)}
                     </select>
                   </label>
                   <SelectField label="Ângulo" value={form.capture_angle} options={annotationOptions.capture_angle} onChange={(value) => update('capture_angle', value)} />
@@ -191,14 +294,19 @@ export function AnnotationPage() {
                   <SelectField label="Clima" value={form.weather} options={annotationOptions.weather} onChange={(value) => update('weather', value)} />
                   <label className="annotation-field">
                     <span>Data e hora da captura</span>
-                    <input type="datetime-local" value={form.captured_at} onChange={(event) => update('captured_at', event.target.value)} />
+                    <input step="1" type="datetime-local" value={form.captured_at} onChange={(event) => update('captured_at', event.target.value)} />
                   </label>
                 </div>
 
+                <p className="annotation-hint">
+                  Equipamento ou câmera novo: digite o nome e salve; a tela pede para confirmar o cadastro.
+                  Para renomear ou desativar, use <Link to="/configurar">Configurar</Link>.
+                </p>
+
                 <label className="annotation-field annotation-condition">
                   <span>Condição</span>
-                  <select value={form.conditions[0] ?? '01'} onChange={(event) => update('conditions', [event.target.value])}>
-                    {annotationOptions.condition.map(([code, name]) => <option key={code} value={code}>{code} — {name}</option>)}
+                  <select value={form.conditions[0] ?? 'no_damage'} onChange={(event) => update('conditions', [event.target.value])}>
+                    {annotationOptions.condition.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
                   </select>
                 </label>
 
@@ -225,7 +333,7 @@ export function AnnotationPage() {
                       <SelectField label="Tipo" value={vehicle.type} options={annotationOptions.type} onChange={(value) => annotator.updateVehicle(index, { type: value })} />
                       <SelectField label="Tipo da placa" value={vehicle.plate_type} options={annotationOptions.plate_type} onChange={(value) => annotator.updateVehicle(index, { plate_type: value })} />
                       <SelectField label="Categoria" value={vehicle.plate_category} options={annotationOptions.plate_category} onChange={(value) => annotator.updateVehicle(index, { plate_category: value })} />
-                      <SelectField label="Cor" value={vehicle.color} options={annotationOptions.color} onChange={(value) => annotator.updateVehicle(index, { color: value })} />
+                      <SelectField label="Cor" value={vehicle.color} options={annotationOptions.color} placeholder="Selecione" onChange={(value) => annotator.updateVehicle(index, { color: value })} />
                     </div>
                   </div>
                 ))}
@@ -238,13 +346,21 @@ export function AnnotationPage() {
                   + Adicionar veículo
                 </button>
 
-                <button className="button button--primary annotation-save" disabled={annotator.saving} onClick={annotator.save} type="button">
+                <button className="button button--primary annotation-save" disabled={annotator.saving} onClick={() => void annotator.save()} type="button">
                   {annotator.saving ? 'Salvando...' : 'Salvar anotação'}
                 </button>
               </div>
             </div>
           ) : (
-            <div className="annotation-empty">Este pacote não possui imagens.</div>
+            <div className="annotation-empty">
+              <h2>Nada pendente na fila</h2>
+              <p>
+                {annotator.progress.total === 0
+                  ? 'Este pacote ainda não tem imagens.'
+                  : 'Todas as imagens livres já foram anotadas. Se alguém está com uma reservada, ela volta para a fila em até 15 minutos.'}
+              </p>
+              {annotator.message && <p className="annotation-feedback">{annotator.message}</p>}
+            </div>
           )}
         </main>
       </div>

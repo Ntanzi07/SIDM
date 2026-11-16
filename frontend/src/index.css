@@ -151,3 +151,30 @@ body {
     transform: scale(1);
   }
 }
+
+/* Seletor de duas opções (CSV / INI), usado em Pacotes e Configurar */
+.import-source {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid #dfe3eb;
+  border-radius: 8px;
+  background: #f6f7fb;
+}
+
+.import-source__option {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #697386;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.import-source__option--active {
+  background: #fff;
+  color: #5963d9;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}

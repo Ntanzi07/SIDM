@@ -1,18 +1,29 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { addPackageImages, deleteImage, deletePackage, importPackageCsv, listImportProfiles, listPackageImages, listPackages, type ImageSummary, type ImportProfile, type ImportReport, type PackageSummary } from '../../services/api'
+import { applyIniProfile, deleteImage, deletePackage, getPackage, imageFiles, importPackageCsv, listImportProfiles, listIniProfiles, listPackageImages, uploadImages, type ImageSummary, type ImportProfile, type ImportReport, type PackageSummary, type UploadProgress } from '../../services/api'
 import type { ChangeEvent, FormEvent } from 'react'
+import { UploadStatus } from './UploadStatus'
+import { ImportWarnings } from './ImportWarnings'
 import './Packages.css'
+
+const PAGE_SIZE = 100
 
 export function PackageDetailPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const [selectedPackage, setSelectedPackage] = useState<PackageSummary | undefined>()
   const [images, setImages] = useState<ImageSummary[]>([])
+  const [imageTotal, setImageTotal] = useState(0)
+  const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
+  const [iniProfiles, setIniProfiles] = useState<ImportProfile[]>([])
+  // De onde vêm os metadados: um CSV enviado agora, ou o INI que já está
+  // guardado em cada imagem (sem arquivo).
+  const [importSource, setImportSource] = useState<'csv' | 'ini'>('csv')
+  const [uploadIniProfile, setUploadIniProfile] = useState('')
   const [importProfile, setImportProfile] = useState('')
   const [importFile, setImportFile] = useState<File | null>(null)
   const [overwriteImport, setOverwriteImport] = useState(true)
@@ -22,18 +33,44 @@ export function PackageDetailPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [deleteConfirmationInput, setDeleteConfirmationInput] = useState('')
 
-  useEffect(() => {
-    const packageName = decodeURIComponent(id ?? '')
-    Promise.all([listPackages(), listPackageImages(packageName)])
-      .then(([packages, packageImages]) => {
-        setSelectedPackage(packages.find((item) => item.name === packageName))
-        setImages(packageImages)
-      })
-      .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o pacote.'))
-      .finally(() => setLoading(false))
-  }, [id])
+  const packageName = decodeURIComponent(id ?? '')
+
+  // Recarrega o resumo e a PRIMEIRA página de imagens (as outras vêm no
+  // "Carregar mais": um pacote pode ter dezenas de milhares).
+  async function refresh() {
+    const [summary, page] = await Promise.all([getPackage(packageName), listPackageImages(packageName, PAGE_SIZE, 0)])
+    setSelectedPackage(summary)
+    setImages(page.items)
+    setImageTotal(page.total)
+  }
 
   useEffect(() => {
+    let active = true
+    Promise.all([getPackage(packageName), listPackageImages(packageName, PAGE_SIZE, 0)])
+      .then(([summary, page]) => {
+        if (!active) return
+        setSelectedPackage(summary)
+        setImages(page.items)
+        setImageTotal(page.total)
+      })
+      .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o pacote.') })
+      .finally(() => { if (active) setLoading(false) })
+    return () => { active = false }
+  }, [packageName])
+
+  function handleLoadMore() {
+    setSaving(true)
+    listPackageImages(packageName, PAGE_SIZE, images.length)
+      .then((page) => {
+        setImages((current) => [...current, ...page.items])
+        setImageTotal(page.total)
+      })
+      .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar mais imagens.'))
+      .finally(() => setSaving(false))
+  }
+
+  useEffect(() => {
+    listIniProfiles().then(setIniProfiles).catch(() => { /* sem perfis de INI: a opção some */ })
     listImportProfiles()
       .then(setProfiles)
       .catch((requestError: unknown) => setImportError(
@@ -43,19 +80,21 @@ export function PackageDetailPage() {
 
   function handleAddImages(event: ChangeEvent<HTMLInputElement>) {
     if (!event.target.files || !selectedPackage) return
+    const files = imageFiles(event.target.files)
+    event.target.value = ''
+    if (files.length === 0) {
+      setError('Nenhuma imagem na seleção.')
+      return
+    }
     setSaving(true)
     setError('')
-    addPackageImages(selectedPackage.name, event.target.files)
-      .then(() => Promise.all([listPackageImages(selectedPackage.name), listPackages()]))
-      .then(([packageImages, packages]) => {
-        setImages(packageImages)
-        setSelectedPackage(packages.find((item) => item.name === selectedPackage.name))
+    uploadImages(selectedPackage.name, files, setUpload, uploadIniProfile || undefined)
+      .then((result) => {
+        if (result.errors.length > 0) setError(`${result.errors.length} imagem(ns) não subiram. Selecione de novo para reenviar: as que já subiram são puladas.`)
+        return refresh()
       })
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível adicionar as imagens.'))
-      .finally(() => {
-        setSaving(false)
-        event.target.value = ''
-      })
+      .finally(() => setSaving(false))
   }
 
   function handleRemoveImage(image: ImageSummary) {
@@ -63,10 +102,10 @@ export function PackageDetailPage() {
     setSaving(true)
     setError('')
     deleteImage(image.sha1)
-      .then(() => Promise.all([listPackageImages(selectedPackage?.name ?? ''), listPackages()]))
-      .then(([packageImages, packages]) => {
-        setImages(packageImages)
-        setSelectedPackage(packages.find((item) => item.name === selectedPackage?.name))
+      .then(() => {
+        setImages((current) => current.filter((item) => item.sha1 !== image.sha1))
+        setImageTotal((total) => total - 1)
+        return getPackage(packageName).then(setSelectedPackage)
       })
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível remover a imagem.'))
       .finally(() => setSaving(false))
@@ -104,15 +143,17 @@ export function PackageDetailPage() {
 
   async function handleImport(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!selectedPackage || !importProfile || !importFile) {
-      setImportError('Selecione um perfil e um arquivo CSV.')
+    if (!selectedPackage || !importProfile || (importSource === 'csv' && !importFile)) {
+      setImportError(importSource === 'csv' ? 'Selecione um perfil e um arquivo CSV.' : 'Selecione um perfil de INI.')
       return
     }
 
     setImportSaving('testing')
     setImportError('')
     try {
-      const report = await importPackageCsv(selectedPackage.name, importProfile, importFile, true, overwriteImport)
+      const report = importSource === 'ini'
+        ? await applyIniProfile(selectedPackage.name, importProfile, true, overwriteImport)
+        : await importPackageCsv(selectedPackage.name, importProfile, importFile as File, true, overwriteImport)
       setImportReport(report)
     } catch (requestError: unknown) {
       setImportError(requestError instanceof Error ? requestError.message : 'Não foi possível ensaiar a importação.')
@@ -122,17 +163,13 @@ export function PackageDetailPage() {
   }
 
   async function handleApplyImport() {
-    if (!selectedPackage || !importProfile || !importFile) return
+    if (!selectedPackage || !importProfile || (importSource === 'csv' && !importFile)) return
     setImportSaving('applying')
     setImportError('')
     try {
-      await importPackageCsv(selectedPackage.name, importProfile, importFile, false, overwriteImport)
-      const [packageImages, packages] = await Promise.all([
-        listPackageImages(selectedPackage.name),
-        listPackages(),
-      ])
-      setImages(packageImages)
-      setSelectedPackage(packages.find((item) => item.name === selectedPackage.name))
+      if (importSource === 'ini') await applyIniProfile(selectedPackage.name, importProfile, false, overwriteImport)
+      else await importPackageCsv(selectedPackage.name, importProfile, importFile as File, false, overwriteImport)
+      await refresh()
       setImportReport(null)
     } catch (requestError: unknown) {
       setImportError(requestError instanceof Error ? requestError.message : 'Não foi possível aplicar a importação.')
@@ -181,13 +218,39 @@ export function PackageDetailPage() {
         <form className="existing-import" onSubmit={(event) => void handleImport(event)}>
           <div className="detail-images__heading">
             <div>
-              <h2>Importar anotações CSV</h2>
-              <p>Preencha os rascunhos deste pacote usando um perfil existente.</p>
+              <h2>Importar anotações</h2>
+              <p>
+                {importSource === 'csv'
+                  ? 'Preencha os rascunhos deste pacote com um CSV, usando um perfil existente.'
+                  : 'Preencha os rascunhos das imagens pendentes com o INI que veio dentro de cada JPEG.'}
+              </p>
             </div>
+            {iniProfiles.length > 0 && (
+              <div className="import-source" role="radiogroup" aria-label="Origem dos metadados">
+                {(['csv', 'ini'] as const).map((source) => (
+                  <button
+                    aria-checked={importSource === source}
+                    className={importSource === source ? 'import-source__option import-source__option--active' : 'import-source__option'}
+                    disabled={importSaving !== ''}
+                    key={source}
+                    onClick={() => {
+                      setImportSource(source)
+                      setImportProfile('')
+                      setImportReport(null)
+                      setImportError('')
+                    }}
+                    role="radio"
+                    type="button"
+                  >
+                    {source === 'csv' ? 'CSV' : 'INI embutido'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
           <div className="existing-import__controls">
             <select
-              aria-label="Perfil CSV"
+              aria-label={importSource === 'csv' ? 'Perfil CSV' : 'Perfil de INI'}
               disabled={importSaving !== ''}
               onChange={(event) => {
                 setImportProfile(event.target.value)
@@ -196,22 +259,22 @@ export function PackageDetailPage() {
               }}
               value={importProfile}
             >
-              <option value="">Selecione um perfil CSV</option>
-              {profiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+              <option value="">{importSource === 'csv' ? 'Selecione um perfil CSV' : 'Selecione um perfil de INI'}</option>
+              {(importSource === 'csv' ? profiles : iniProfiles).map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
             </select>
-            <label className="existing-import__file">
+            {importSource === 'csv' && <label className="existing-import__file">
               <span>{importFile?.name ?? 'Selecionar CSV'}</span>
               <input accept=".csv,text/csv" disabled={importSaving !== ''} onChange={(event) => {
                 setImportFile(event.target.files?.[0] ?? null)
                 setImportReport(null)
                 setImportError('')
               }} type="file" />
-            </label>
+            </label>}
             <label className="import-option">
               <input checked={overwriteImport} disabled={importSaving !== ''} onChange={(event) => setOverwriteImport(event.target.checked)} type="checkbox" />
               <span>Sobrescrever rascunhos</span>
             </label>
-            <button className="button button--secondary" disabled={importSaving !== '' || !importProfile || !importFile} type="submit">
+            <button className="button button--secondary" disabled={importSaving !== '' || !importProfile || (importSource === 'csv' && !importFile)} type="submit">
               {importSaving === 'testing' ? 'Ensaiando...' : 'Ensaiar importação'}
             </button>
           </div>
@@ -221,16 +284,12 @@ export function PackageDetailPage() {
             <div className="import-report">
               <h2>Ensaio da importação</h2>
               <div className="import-report__stats">
-                <span><strong>{importReport.rows}</strong> linhas lidas</span>
+                <span><strong>{importReport.rows}</strong> {importSource === 'csv' ? 'linhas lidas' : 'imagens com INI'}</span>
                 <span><strong>{importReport.matched}</strong> imagens encontradas</span>
                 <span><strong>{importReport.applied}</strong> alterações previstas</span>
                 <span><strong>{importReport.not_found_count}</strong> não encontradas</span>
               </div>
-              {Object.entries(importReport.unmapped).map(([field, values]) => (
-                <p className="import-report__detail" key={field}>
-                  <strong>{field}:</strong> valores sem tradução ({Object.keys(values).length})
-                </p>
-              ))}
+              <ImportWarnings report={importReport} />
               <button className="button button--primary" disabled={importSaving !== ''} onClick={() => void handleApplyImport()} type="button">
                 {importSaving === 'applying' ? 'Aplicando...' : 'Aplicar importação'}
               </button>
@@ -240,13 +299,27 @@ export function PackageDetailPage() {
         <div className="detail-images__heading">
           <div>
             <h2>Imagens do pacote</h2>
-            <p>{images.length} imagem(ns) carregada(s)</p>
+            <p>{imageTotal.toLocaleString('pt-BR')} imagem(ns){images.length < imageTotal && ` · mostrando ${images.length.toLocaleString('pt-BR')}`}</p>
           </div>
+          {iniProfiles.length > 0 && (
+            <select
+              aria-label="Perfil de INI no upload"
+              className="upload-ini-select"
+              disabled={saving}
+              onChange={(event) => setUploadIniProfile(event.target.value)}
+              title="Preenche o rascunho de cada imagem nova com o INI embutido"
+              value={uploadIniProfile}
+            >
+              <option value="">Sem perfil de INI</option>
+              {iniProfiles.map((profile) => <option key={profile.name} value={profile.name}>INI: {profile.name}</option>)}
+            </select>
+          )}
           <label className="button button--secondary upload-images-button">
             {saving ? 'Salvando...' : 'Adicionar imagens'}
-            <input accept="image/*" onChange={handleAddImages} type="file" multiple {...{ webkitdirectory: 'true' }} />
+            <input disabled={saving} onChange={handleAddImages} type="file" multiple {...{ webkitdirectory: 'true' }} />
           </label>
         </div>
+        {upload && <UploadStatus progress={upload} />}
         {images.length > 0 ? (
           <div className="image-list">
             {images.map((image) => (
@@ -261,6 +334,11 @@ export function PackageDetailPage() {
                 </div>
               </div>
             ))}
+            {images.length < imageTotal && (
+              <button className="button button--secondary image-list__more" disabled={saving} onClick={handleLoadMore} type="button">
+                Carregar mais
+              </button>
+            )}
           </div>
         ) : (
           <p>Este pacote ainda não possui imagens carregadas.</p>

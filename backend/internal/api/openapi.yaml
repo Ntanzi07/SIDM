@@ -528,6 +528,29 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [imagens]
+      summary: Excluir imagem (IRREVERSÍVEL)
+      description: Apaga o registro, o histórico e o arquivo. Recusa (409) se outra pessoa está anotando.
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+        - $ref: "#/components/parameters/XUser"
+      responses:
+        "200":
+          description: Apagada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sha1: { type: string }
+                  deleted: { type: boolean }
+                  warnings:
+                    type: array
+                    items: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
 
   /images/{sha1}/file:
     get:
@@ -561,11 +584,20 @@ paths:
   /imports/inspect:
     post:
       tags: [import]
-      summary: Raio-x de um CSV
+      summary: Raio-x de um CSV (ou do INI de algumas imagens)
       description: |
         Para escrever um perfil novo: colunas, linhas de exemplo e os valores
         distintos de cada coluna. Não precisa de perfil.
+
+        Com `type=jpeg-ini`, mande de 1 a 20 imagens no campo `file`: cada
+        imagem vira uma linha, e cada chave do INI embutido (`Secao.Chave`)
+        vira uma coluna. Imagens criptografadas são abertas antes. A
+        `Assinatura` não aparece.
       parameters:
+        - name: type
+          in: query
+          description: "`jpeg-ini` para ler o INI de imagens em vez de um CSV."
+          schema: { type: string, enum: [csv, jpeg-ini], default: csv }
         - name: delimiter
           in: query
           description: Por nome, porque ";" cru é descartado na URL.

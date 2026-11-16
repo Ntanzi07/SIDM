@@ -89,7 +89,17 @@ func (s *Store) InsertImage(ctx context.Context, img *Image) error {
 	return nil
 }
 
-// DeleteImage remove o documento (usado para desfazer um upload que falhou no disco).
+// DeleteImageHistory apaga o histórico de uma imagem (quando ela é excluída).
+func (s *Store) DeleteImageHistory(ctx context.Context, sha1 string) error {
+	_, err := s.db.Collection("image_history").DeleteMany(ctx, bson.D{{Key: "image_id", Value: sha1}})
+	if err != nil {
+		return fmt.Errorf("apagar histórico da imagem %s: %w", sha1, err)
+	}
+	return nil
+}
+
+// DeleteImage remove o documento. Usado ao excluir uma imagem e para desfazer
+// um upload que falhou no disco.
 func (s *Store) DeleteImage(ctx context.Context, sha1 string) error {
 	_, err := s.db.Collection("images").DeleteOne(ctx, bson.D{{Key: "_id", Value: sha1}})
 	if err != nil {
