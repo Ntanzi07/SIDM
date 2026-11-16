@@ -802,3 +802,47 @@ func TestImagemComINI(t *testing.T) {
 		t.Errorf("%d documentos com o campo ini, want 1", n)
 	}
 }
+
+func TestRenomearEApagarPerfil(t *testing.T) {
+	s := testStore(t)
+	ctx := context.Background()
+
+	for _, name := range []string{"perfil-a", "perfil-b"} {
+		p := &importer.Profile{Name: name, CreatedBy: "nathan", UpdatedAt: ms(time.Now())}
+		if err := s.CreateProfile(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := s.RenameProfile(ctx, "perfil-a", "perfil-b", time.Now()); !errors.Is(err, ErrDuplicate) {
+		t.Errorf("para nome existente: err = %v, want ErrDuplicate", err)
+	}
+	if err := s.RenameProfile(ctx, "nao-existe", "x", time.Now()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("inexistente: err = %v, want ErrNotFound", err)
+	}
+
+	now := ms(time.Now().Add(time.Minute))
+	if err := s.RenameProfile(ctx, "perfil-a", "perfil-novo", now); err != nil {
+		t.Fatal(err)
+	}
+	p, err := s.FindProfile(ctx, "perfil-novo")
+	if err != nil || p.Name != "perfil-novo" || p.CreatedBy != "nathan" || !p.UpdatedAt.Equal(now) {
+		t.Errorf("FindProfile = %+v, %v", p, err)
+	}
+	if _, err := s.FindProfile(ctx, "perfil-a"); !errors.Is(err, ErrNotFound) {
+		t.Error("o nome antigo deveria ter sumido")
+	}
+
+	if err := s.DeleteProfile(ctx, "perfil-novo"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FindProfile(ctx, "perfil-novo"); !errors.Is(err, ErrNotFound) {
+		t.Error("deveria ter sido apagado")
+	}
+	if err := s.DeleteProfile(ctx, "perfil-novo"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("apagar duas vezes: err = %v", err)
+	}
+	if _, err := s.FindProfile(ctx, "perfil-b"); err != nil {
+		t.Error("o outro perfil não pode ser afetado")
+	}
+}

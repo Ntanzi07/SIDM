@@ -113,13 +113,19 @@ var (
 	}
 )
 
+// ValidProfileName diz se o nome serve para um perfil: só letras, números e "-".
+func ValidProfileName(name string) bool {
+	_, err := filename.SanitizePackage(name)
+	return err == nil && !strings.Contains(name, " ")
+}
+
 // Validate confere o perfil ANTES de salvar, para um erro de digitação no
 // JSON aparecer na hora, e não no meio de um import de 5000 linhas.
 func (p *Profile) Validate() error {
 	var errs []string
 	add := func(format string, args ...any) { errs = append(errs, fmt.Sprintf(format, args...)) }
 
-	if _, err := filename.SanitizePackage(p.Name); err != nil || strings.Contains(p.Name, " ") {
+	if !ValidProfileName(p.Name) {
 		add("name: use só letras, números e \"-\" (ex: csv-equipamento-8003)")
 	}
 

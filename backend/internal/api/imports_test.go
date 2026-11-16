@@ -131,6 +131,71 @@ func TestReplaceProfile(t *testing.T) {
 	})
 }
 
+func TestRenomearPerfil(t *testing.T) {
+	env := newTestEnv(t)
+	env.withProfile(t)
+
+	rec := env.doJSON("PATCH", "/import-profiles/csv-teste", `{"name":"csv-equipamento-8003"}`)
+	assertStatus(t, rec, http.StatusOK)
+	var p importer.Profile
+	decode(t, rec, &p)
+	if p.Name != "csv-equipamento-8003" || p.Fields["day_time"].Map["N"] != "night" {
+		t.Errorf("perfil renomeado = %+v", p)
+	}
+	if _, ok := env.db.profiles["csv-teste"]; ok {
+		t.Error("o nome antigo deveria ter sumido")
+	}
+	if env.db.profiles["csv-equipamento-8003"].CreatedBy != "nathan" {
+		t.Error("renomear não pode mudar quem criou")
+	}
+
+	// e o import passa a funcionar pelo nome novo
+	env.seedNamed(t, "img001.jpg", "a")
+	csv := "Arquivo;Turno;Clima;DataHora;Placa;Tipo\nimg001.jpg;N;Chuva;03/09/2026 08:25:23;ABC1D23;Carro\n"
+	assertStatus(t, env.postFile(t, "/packages/"+testPkg+"/import?profile=csv-equipamento-8003", "file", csv), http.StatusOK)
+	assertStatus(t, env.postFile(t, "/packages/"+testPkg+"/import?profile=csv-teste", "file", csv), http.StatusNotFound)
+}
+
+func TestRenomearPerfilErros(t *testing.T) {
+	env := newTestEnv(t)
+	env.withProfile(t)
+	env.db.profiles["ocupado"] = importer.Profile{Name: "ocupado"}
+
+	cases := map[string]struct {
+		path, body string
+		status     int
+	}{
+		"nome já existe":    {"/import-profiles/csv-teste", `{"name":"ocupado"}`, http.StatusConflict},
+		"nome com espaço":   {"/import-profiles/csv-teste", `{"name":"csv teste"}`, http.StatusBadRequest},
+		"nome com barra":    {"/import-profiles/csv-teste", `{"name":"../x"}`, http.StatusBadRequest},
+		"nome vazio":        {"/import-profiles/csv-teste", `{"name":""}`, http.StatusBadRequest},
+		"mesmo nome":        {"/import-profiles/csv-teste", `{"name":"csv-teste"}`, http.StatusBadRequest},
+		"conteúdo no PATCH": {"/import-profiles/csv-teste", testProfileJSON, http.StatusBadRequest},
+		"inexistente":       {"/import-profiles/nao-existe", `{"name":"x"}`, http.StatusNotFound},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			assertStatus(t, env.doJSON("PATCH", tc.path, tc.body), tc.status)
+		})
+	}
+	if _, ok := env.db.profiles["csv-teste"]; !ok {
+		t.Error("nenhum erro pode ter mexido no perfil")
+	}
+}
+
+func TestApagarPerfil(t *testing.T) {
+	env := newTestEnv(t)
+	env.withProfile(t)
+
+	rec := env.do("DELETE", "/import-profiles/csv-teste", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	if _, ok := env.db.profiles["csv-teste"]; ok {
+		t.Error("o perfil deveria ter sido apagado")
+	}
+	assertStatus(t, env.do("GET", "/import-profiles/csv-teste", nil, nil), http.StatusNotFound)
+	assertStatus(t, env.do("DELETE", "/import-profiles/csv-teste", nil, nil), http.StatusNotFound)
+}
+
 func TestListEGetProfiles(t *testing.T) {
 	env := newTestEnv(t)
 	env.withProfile(t)

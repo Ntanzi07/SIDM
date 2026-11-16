@@ -34,7 +34,9 @@ import (
 //   POST /import-profiles      cria um perfil de import (o "modelo" de um CSV)
 //   GET  /import-profiles      lista os perfis, paginado
 //   GET  /import-profiles/{name}  um perfil
-//   PUT  /import-profiles/{name}  atualiza um perfil
+//   PUT  /import-profiles/{name}  atualiza um perfil (o JSON inteiro)
+//   PATCH  /import-profiles/{name}  renomeia {"name": "..."}
+//   DELETE /import-profiles/{name}  apaga
 //   POST /packages/{name}/import?profile=X&dry_run=false  importa um CSV para os rascunhos
 //   POST /images/exists        checa hashes antes do upload
 //   POST /images?package=X     upload para o pacote X (pending)
@@ -89,6 +91,8 @@ type Store interface {
 	CreateProfile(ctx context.Context, p *importer.Profile) error
 	FindProfile(ctx context.Context, name string) (*importer.Profile, error)
 	ReplaceProfile(ctx context.Context, p *importer.Profile) error
+	RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error
+	DeleteProfile(ctx context.Context, name string) error
 	ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error)
 	FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]store.Image, error)
 }
@@ -145,6 +149,8 @@ func (s *Server) routes() []route {
 		{"POST", "/import-profiles", s.handleCreateProfile},
 		{"GET", "/import-profiles/{name}", s.handleGetProfile},
 		{"PUT", "/import-profiles/{name}", s.handleReplaceProfile},
+		{"PATCH", "/import-profiles/{name}", s.handleRenameProfile},
+		{"DELETE", "/import-profiles/{name}", s.handleDeleteProfile},
 	}
 }
 

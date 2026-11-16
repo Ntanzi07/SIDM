@@ -364,6 +364,32 @@ func (m *memStore) ReplaceProfile(ctx context.Context, p *importer.Profile) erro
 	return nil
 }
 
+func (m *memStore) RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.profiles[oldName]
+	if !ok {
+		return store.ErrNotFound
+	}
+	if _, taken := m.profiles[newName]; taken {
+		return store.ErrDuplicate
+	}
+	delete(m.profiles, oldName)
+	p.Name, p.UpdatedAt = newName, now
+	m.profiles[newName] = p
+	return nil
+}
+
+func (m *memStore) DeleteProfile(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.profiles[name]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.profiles, name)
+	return nil
+}
+
 func (m *memStore) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

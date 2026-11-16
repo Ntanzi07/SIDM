@@ -94,6 +94,36 @@ func (s *Store) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
 	return nil
 }
 
+// RenameProfile troca o nome de um perfil. Nenhuma imagem guarda o nome do
+// perfil (ele só é usado na hora do upload/import), então não há cascata.
+func (s *Store) RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error {
+	res, err := s.db.Collection("import_profiles").UpdateOne(ctx,
+		bson.D{{Key: "name", Value: oldName}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "name", Value: newName}, {Key: "updated_at", Value: now}}}})
+	if mongo.IsDuplicateKeyError(err) {
+		return ErrDuplicate
+	}
+	if err != nil {
+		return fmt.Errorf("renomear perfil %s: %w", oldName, err)
+	}
+	if res.MatchedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// DeleteProfile apaga um perfil.
+func (s *Store) DeleteProfile(ctx context.Context, name string) error {
+	res, err := s.db.Collection("import_profiles").DeleteOne(ctx, bson.D{{Key: "name", Value: name}})
+	if err != nil {
+		return fmt.Errorf("apagar perfil %s: %w", name, err)
+	}
+	if res.DeletedCount == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 // ListProfiles lista perfis em ordem alfabética, com busca por nome.
 func (s *Store) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
 	coll := s.db.Collection("import_profiles")

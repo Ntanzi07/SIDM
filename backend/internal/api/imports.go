@@ -71,6 +71,65 @@ func (s *Server) handleReplaceProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, p)
 }
 
+// PATCH /import-profiles/{name}   {"name": "novo-nome"}
+// Só renomeia. Para mudar o conteúdo, use o PUT com o JSON inteiro.
+func (s *Server) handleRenameProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	var body struct {
+		Name string `json:"name"`
+	}
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, `JSON inválido: esperado {"name": "..."} (para mudar o conteúdo, use o PUT)`)
+		return
+	}
+	newName := strings.TrimSpace(body.Name)
+	if !importer.ValidProfileName(newName) {
+		writeError(w, http.StatusBadRequest, `name: use só letras, números e "-" (ex: csv-equipamento-8003)`)
+		return
+	}
+	if newName == name {
+		writeError(w, http.StatusBadRequest, "o nome novo é igual ao atual")
+		return
+	}
+
+	err := s.store.RenameProfile(r.Context(), name, newName, time.Now().UTC())
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
+		return
+	case errors.Is(err, store.ErrDuplicate):
+		writeError(w, http.StatusConflict, fmt.Sprintf("já existe um perfil %q", newName))
+		return
+	case err != nil:
+		s.serverError(w, err)
+		return
+	}
+	p, ok := s.profileByName(w, r, newName)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, p)
+}
+
+// DELETE /import-profiles/{name}
+// Nenhuma imagem depende do perfil: os rascunhos que ele já preencheu ficam.
+func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	err := s.store.DeleteProfile(r.Context(), name)
+	if errors.Is(err, store.ErrNotFound) {
+		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
+		return
+	}
+	if err != nil {
+		s.serverError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"name": name, "deleted": true})
+}
+
 // decodeProfile lê e VALIDA o perfil. Os erros de validação vão todos juntos,
 // para a pessoa corrigir o JSON de uma vez.
 func decodeProfile(w http.ResponseWriter, r *http.Request) (*importer.Profile, bool) {
