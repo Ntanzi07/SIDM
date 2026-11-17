@@ -63,6 +63,14 @@ export function Header() {
           className={({ isActive }) =>
             isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
           }
+          to="/tarefas"
+        >
+          Tarefas
+        </NavLink>
+        <NavLink
+          className={({ isActive }) =>
+            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
+          }
           to="/exportar"
         >
           Exportar

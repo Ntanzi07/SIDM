@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -229,7 +231,7 @@ func TestPerfisDeExport(t *testing.T) {
 	for _, p := range list.Items {
 		names = append(names, p.Name)
 	}
-	if strings.Join(names, ",") != "rf-detr,yolo,meu-yolo" || !list.Items[0].Builtin {
+	if strings.Join(names, ",") != "rf-detr,yolo,voc,voc-pastas,meu-yolo" || !list.Items[0].Builtin {
 		t.Errorf("lista = %v", names)
 	}
 
@@ -247,4 +249,101 @@ func TestPerfisDeExport(t *testing.T) {
 
 	assertStatus(t, env.do("DELETE", "/export-profiles/meu-yolo", nil, nil), http.StatusOK)
 	assertStatus(t, env.do("DELETE", "/export-profiles/meu-yolo", nil, nil), http.StatusNotFound)
+}
+
+func TestExportVOCPorPastas(t *testing.T) {
+	env := newTestEnv(t)
+	n1, _, day := seedExport(t, env)
+
+	p, code, msg := preview(t, env, `{"profile":"voc-pastas","task":"veiculos"}`)
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, msg)
+	}
+	// completeBody: caminhão, 1920x1080, mercosul, dianteira; 3 de noite (2 + a do outro pacote) e 1 de dia
+	night, dayDir := "Truck/08-1920x1080/Mercosul/Dianteiro/Noturno", "Truck/08-1920x1080/Mercosul/Dianteiro/Diurno"
+	if p.Layout != "folders" || p.Total != 4 || p.Folders[night] != 3 || p.Folders[dayDir] != 1 {
+		t.Errorf("preview = %+v", p)
+	}
+	// nome no padrão antigo: sha1 + 12 códigos + placa
+	legacy := regexp.MustCompile(`^Truck/08-1920x1080/Mercosul/Dianteiro/(Noturno|Diurno)/[0-9a-f]{40}F08[A-Z_]{5}\d[A-Z_]\d\d[A-Z0-9]{7}\.jpg$`)
+	if len(p.Examples) != 3 || !legacy.MatchString(p.Examples[0]) {
+		t.Errorf("exemplos = %v", p.Examples)
+	}
+
+	form := url.Values{"request": {`{"profile":"voc-pastas","task":"veiculos"}`}}
+	rec := env.do("POST", "/exports/download", strings.NewReader(form.Encode()),
+		map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+	assertStatus(t, rec, http.StatusOK)
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="voc-pastas-`) {
+		t.Errorf("nome do zip = %q", cd)
+	}
+	for _, f := range zr.File {
+		names[f.Name] = true
+	}
+	legacyName := func(sha string) string {
+		for name := range names {
+			if strings.Contains(name, "/"+sha) && strings.HasSuffix(name, ".jpg") {
+				return name
+			}
+		}
+		return ""
+	}
+	n1Name := legacyName(n1)
+	if !legacy.MatchString(n1Name) || !strings.HasPrefix(n1Name, night+"/") {
+		t.Errorf("nome de n1 no zip = %q", n1Name)
+	}
+	for _, f := range []string{
+		strings.TrimSuffix(n1Name, ".jpg") + ".xml",
+		dayDir + "/" + path.Base(legacyName(day)),
+		"labels.txt", "export_info.json",
+	} {
+		if !names[f] {
+			t.Errorf("faltou %s no zip", f)
+		}
+	}
+
+	// pastas customizadas: só um nível, com nome próprio e pasta de desconhecido
+	body := `{"profile":{"name":"x","format":"voc","split":{"train":100,"valid":0,"test":0},"layout":"folders",
+		"folders":[{"field":"weather","names":{"rain":"Chuva"}},{"field":"plate_category","unknown":"sem-categoria"}]},"task":"veiculos"}`
+	if p, code, msg := preview(t, env, body); code != http.StatusOK || p.Folders["Chuva/private"] != 4 {
+		t.Errorf("custom: %d %s %+v", code, msg, p.Folders)
+	}
+	// pastas no COCO: recusado
+	body = `{"profile":{"name":"x","format":"coco","split":{"train":70,"valid":15,"test":15},"layout":"folders","folders":[{"field":"weather"}]},"task":"veiculos"}`
+	if _, code, _ := preview(t, env, body); code != http.StatusBadRequest {
+		t.Errorf("pastas no coco: %d", code)
+	}
+
+	var fields struct {
+		Items []struct {
+			Field  string            `json:"field"`
+			Values map[string]string `json:"values"`
+		} `json:"items"`
+	}
+	decode(t, env.do("GET", "/export-folder-fields", nil, nil), &fields)
+	if len(fields.Items) == 0 || fields.Items[0].Field != "vehicle_type" || fields.Items[0].Values["car"] != "car" {
+		t.Errorf("campos = %+v", fields.Items)
+	}
+}
+
+func TestPadraoInlineMantemONome(t *testing.T) {
+	env := newTestEnv(t)
+	seedExport(t, env)
+	// a tela manda o perfil inteiro; sem mudanças, é o padrão
+	b, _ := export.Builtin("yolo")
+	b.Task = exportTask
+	body, _ := json.Marshal(map[string]any{"profile": b})
+	if p, code, msg := preview(t, env, string(body)); code != http.StatusOK || p.Profile != "yolo" {
+		t.Errorf("sem mudanças: %d %s %q", code, msg, p.Profile)
+	}
+	b.Split = export.Split{Train: 80, Valid: 20}
+	body, _ = json.Marshal(map[string]any{"profile": b})
+	if p, _, _ := preview(t, env, string(body)); p.Profile != "personalizado" {
+		t.Errorf("com mudança: %q", p.Profile)
+	}
 }

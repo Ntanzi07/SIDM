@@ -3,6 +3,7 @@ package export
 import (
 	"archive/zip"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"math"
@@ -22,14 +23,16 @@ type Item struct {
 	Width    int    // tamanho da imagem (as caixas são em pixels dela)
 	Height   int
 	Split    string
+	Dir      string // pasta da imagem no layout por pastas (Profile.Dir); vazio no layout por divisão
 	Boxes    []boxes.Box
 	Open     func() (io.ReadCloser, error) // o arquivo da imagem
 }
 
 // Result é o que foi escrito.
 type Result struct {
-	Images  map[string]int `json:"images"` // por grupo
-	Boxes   map[string]int `json:"boxes"`  // por classe
+	Images  map[string]int `json:"images"`            // por grupo
+	Folders map[string]int `json:"folders,omitempty"` // por pasta (layout por pastas)
+	Boxes   map[string]int `json:"boxes"`             // por classe
 	Missing []string       `json:"missing,omitempty"`
 }
 
@@ -42,6 +45,9 @@ func Write(zw *zip.Writer, p Profile, items []Item, classes []string, info any) 
 		ids[name] = i
 	}
 	res := &Result{Images: map[string]int{}, Boxes: map[string]int{}}
+	if p.Layout == LayoutFolders {
+		res.Folders = map[string]int{}
+	}
 
 	var w datasetWriter
 	switch p.Format {
@@ -49,6 +55,8 @@ func Write(zw *zip.Writer, p Profile, items []Item, classes []string, info any) 
 		w = newCOCOWriter(zw, p.Split, classes)
 	case FormatYOLO:
 		w = &yoloWriter{zw: zw, split: p.Split, classes: classes}
+	case FormatVOC:
+		w = &vocWriter{zw: zw, folders: p.Layout == LayoutFolders, split: p.Split, classes: classes}
 	default:
 		return nil, fmt.Errorf("formato desconhecido %q", p.Format)
 	}
@@ -66,6 +74,9 @@ func Write(zw *zip.Writer, p Profile, items []Item, classes []string, info any) 
 			return res, err
 		}
 		res.Images[it.Split]++
+		if res.Folders != nil {
+			res.Folders[it.Dir]++
+		}
 		for _, b := range it.Boxes {
 			res.Boxes[b.Label]++
 		}
@@ -276,4 +287,109 @@ func (w *yoloWriter) finish() error {
 		fmt.Fprintf(&sb, "  %d: %s\n", i, quoted)
 	}
 	return writeFile(w.zw, "data.yaml", []byte(sb.String()))
+}
+
+// ---------- Pascal VOC ----------
+//
+// Um .xml por imagem, AO LADO dela (mesmo nome, extensão .xml):
+//
+//	por divisão: train/, valid/, test/ (o layout VOC do Roboflow)
+//	por pastas:  a árvore do perfil (ex.: Car/01-640x480/Br/Traseiro/Noturno/)
+//
+// Mais um labels.txt na raiz, com as classes (uma por linha). Coordenadas em
+// pixels inteiros, de 0 a largura/altura (xmax/ymax = borda direita/de baixo).
+
+type vocWriter struct {
+	zw      *zip.Writer
+	folders bool
+	split   Split
+	classes []string
+}
+
+func (w *vocWriter) dir(it Item) string {
+	if w.folders {
+		return it.Dir
+	}
+	return it.Split
+}
+
+func (w *vocWriter) imagePath(it Item) string { return path.Join(w.dir(it), it.FileName) }
+
+type vocAnnotation struct {
+	XMLName   xml.Name    `xml:"annotation"`
+	Folder    string      `xml:"folder"`
+	Filename  string      `xml:"filename"`
+	Path      string      `xml:"path"`
+	Source    vocSource   `xml:"source"`
+	Size      vocSize     `xml:"size"`
+	Segmented int         `xml:"segmented"`
+	Objects   []vocObject `xml:"object"`
+}
+
+type vocSource struct {
+	Database string `xml:"database"`
+}
+
+type vocSize struct {
+	Width  int `xml:"width"`
+	Height int `xml:"height"`
+	Depth  int `xml:"depth"`
+}
+
+type vocObject struct {
+	Name      string `xml:"name"`
+	Pose      string `xml:"pose"`
+	Truncated int    `xml:"truncated"`
+	Difficult int    `xml:"difficult"`
+	Occluded  int    `xml:"occluded"`
+	BndBox    struct {
+		XMin int `xml:"xmin"`
+		YMin int `xml:"ymin"`
+		XMax int `xml:"xmax"`
+		YMax int `xml:"ymax"`
+	} `xml:"bndbox"`
+}
+
+func (w *vocWriter) add(it Item, _ map[string]int) error {
+	dir := w.dir(it)
+	ann := vocAnnotation{
+		Folder: dir, Filename: it.FileName, Path: path.Join(dir, it.FileName),
+		Source: vocSource{Database: "SIDM"},
+		Size:   vocSize{Width: it.Width, Height: it.Height, Depth: 3},
+	}
+	for _, b := range it.Boxes {
+		x, y, bw, bh := rect(b, it.Width, it.Height)
+		obj := vocObject{Name: b.Label, Pose: "Unspecified"}
+		obj.BndBox.XMin, obj.BndBox.YMin = int(math.Round(x)), int(math.Round(y))
+		obj.BndBox.XMax, obj.BndBox.YMax = int(math.Round(x+bw)), int(math.Round(y+bh))
+		if obj.BndBox.XMax <= obj.BndBox.XMin || obj.BndBox.YMax <= obj.BndBox.YMin {
+			continue // menor que meio pixel
+		}
+		if b.Occluded {
+			obj.Occluded = 1
+		}
+		// Caixa encostada na borda: o objeto provavelmente continua fora da imagem.
+		if it.Width > 0 && it.Height > 0 &&
+			(obj.BndBox.XMin <= 0 || obj.BndBox.YMin <= 0 || obj.BndBox.XMax >= it.Width || obj.BndBox.YMax >= it.Height) {
+			obj.Truncated = 1
+		}
+		ann.Objects = append(ann.Objects, obj)
+	}
+	data, err := xml.MarshalIndent(ann, "", "  ")
+	if err != nil {
+		return err
+	}
+	base := strings.TrimSuffix(it.FileName, path.Ext(it.FileName))
+	return writeFile(w.zw, path.Join(dir, base+".xml"), append([]byte(xml.Header), append(data, '\n')...))
+}
+
+func (w *vocWriter) finish() error {
+	if !w.folders {
+		for _, sp := range w.split.Splits() {
+			if _, err := w.zw.CreateHeader(&zip.FileHeader{Name: sp + "/", Modified: time.Now()}); err != nil {
+				return err
+			}
+		}
+	}
+	return writeFile(w.zw, "labels.txt", []byte(strings.Join(w.classes, "\n")+"\n"))
 }

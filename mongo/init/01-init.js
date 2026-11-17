@@ -27,7 +27,20 @@ db.images.createIndex({ weather: 1, captured_at: -1 });
 
 db.image_history.createIndex({ image_id: 1, changed_at: -1 });
 
-// Caixas (bounding boxes) do CVAT: { _id: sha1, package, width, height, boxes: [...] }.
-// O backend também cria este índice ao subir (para bancos criados antes dele).
+// Caixas (bounding boxes) do CVAT, uma entrada por tarefa e imagem:
+// { task, image: sha1, package, width, height, boxes: [...] }.
+// O backend também cria estes índices ao subir (para bancos criados antes dele).
 db.createCollection("image_boxes");
+db.image_boxes.createIndex({ task: 1, image: 1 }, { unique: true });
+db.image_boxes.createIndex({ image: 1 });
 db.image_boxes.createIndex({ package: 1 });
+
+// Tarefas de anotação de caixas (ex.: capacete, placa-letras). As caixas de
+// image_boxes são por (task, image). O backend também cria este índice ao subir.
+db.createCollection("annotation_tasks");
+db.annotation_tasks.createIndex({ name: 1 }, { unique: true });
+
+// Perfis de export (os padrões, rf-detr e yolo, ficam no código).
+// O backend também cria este índice ao subir.
+db.createCollection("export_profiles");
+db.export_profiles.createIndex({ name: 1 }, { unique: true });

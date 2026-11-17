@@ -743,3 +743,17 @@
   font: inherit;
   font-size: 12px;
 }
+
+.image-list__open {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.image-list__open:hover {
+  color: #5963d9;
+  text-decoration: underline;
+}

@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -81,7 +82,15 @@ func TestValidate(t *testing.T) {
 	cases := map[string]Profile{
 		"nome com espaço":     {Name: "meu perfil", Format: FormatCOCO, Split: Split{70, 15, 15}},
 		"nome de padrão":      {Name: "rf-detr", Format: FormatCOCO, Split: Split{70, 15, 15}},
-		"formato":             {Name: "x", Format: "voc", Split: Split{70, 15, 15}},
+		"formato":             {Name: "x", Format: "pascal", Split: Split{70, 15, 15}},
+		"pastas fora do voc":  {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}}},
+		"pastas sem nível":    {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders},
+		"layout desconhecido": {Name: "x", Format: FormatVOC, Split: Split{70, 15, 15}, Layout: "arvore"},
+		"campo desconhecido":  {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "cor"}}},
+		"campo repetido":      {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}, {Field: "day_time"}}},
+		"nome de pasta ruim":  {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time", Names: map[string]string{"day": "a/b"}}}},
+		"valor desconhecido":  {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time", Names: map[string]string{"D": "Dia"}}}},
+		"split com pasta":     {Name: "x", Format: FormatVOC, Split: Split{0, 50, 50}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "split"}}},
 		"não soma 100":        {Name: "x", Format: FormatCOCO, Split: Split{70, 20, 15}},
 		"train zero":          {Name: "x", Format: FormatCOCO, Split: Split{0, 50, 50}},
 		"negativo":            {Name: "x", Format: FormatCOCO, Split: Split{110, -10, 0}},
@@ -96,6 +105,12 @@ func TestValidate(t *testing.T) {
 				t.Errorf("esperava erro de validação, veio %v", err)
 			}
 		})
+	}
+	// pastas sem nível "split": a divisão não importa (só tem que somar 100)
+	pastas := Profile{Name: "x", Format: FormatVOC, Split: Split{0, 0, 100}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "equipment"}}}
+	pastas.Normalize()
+	if err := pastas.Validate(); err != nil {
+		t.Errorf("pastas sem split: %v", err)
 	}
 	for _, b := range Builtins() {
 		if err := b.Validate(); err != nil {
@@ -244,4 +259,157 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+func TestDir(t *testing.T) {
+	p, _ := Builtin("voc-pastas")
+	m := Meta{"vehicle_type": "motorcycle", "resolution": "752x480", "plate_type": "mercosul", "direction": "rear", "day_time": "night"}
+	if got := p.Dir(m, SplitTrain); got != "motorCycle/02-752x480/Mercosul/Traseiro/Noturno" {
+		t.Errorf("Dir = %q", got)
+	}
+	// sem metadado: "Desconhecido" (ou o nome escolhido); valor livre é limpo
+	p.Folders = []FolderLevel{{Field: "direction"}, {Field: "weather", Unknown: "sem-clima"}, {Field: "equipment"}, {Field: "split"}, {Field: "resolution"}}
+	m = Meta{"equipment": `EQ:1/A`, "resolution": "999x1"}
+	if got := p.Dir(m, SplitValid); got != "Desconhecido/sem-clima/EQ_1_A/valid/999x1" {
+		t.Errorf("Dir = %q", got)
+	}
+	if v := FolderValues("resolution"); v["640x480"] != "01-640x480" {
+		t.Errorf("FolderValues(resolution) = %v", v)
+	}
+	if FolderValues("equipment") != nil || len(FolderValues("split")) != 3 {
+		t.Error("FolderValues de campo aberto deveria ser nil; split tem 3")
+	}
+}
+
+func TestWriteVOC(t *testing.T) {
+	t.Run("por divisão", func(t *testing.T) {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		p, _ := Builtin("voc")
+		if _, err := Write(zw, p, items(), []string{"carro", "placa"}, nil); err != nil {
+			t.Fatal(err)
+		}
+		zw.Close()
+		files := readZip(t, buf.Bytes())
+		if files["train/a_v2_x.jpg"] != "A" || files["valid/b.jpg"] != "B" || files["labels.txt"] != "carro\nplaca\n" {
+			t.Errorf("arquivos: %v", keys(files))
+		}
+		if _, ok := files["test/"]; !ok {
+			t.Error("a pasta test/ tem que existir mesmo vazia")
+		}
+		var ann struct {
+			Folder   string `xml:"folder"`
+			Filename string `xml:"filename"`
+			Size     struct {
+				Width  int `xml:"width"`
+				Height int `xml:"height"`
+				Depth  int `xml:"depth"`
+			} `xml:"size"`
+			Objects []struct {
+				Name      string `xml:"name"`
+				Truncated int    `xml:"truncated"`
+				Box       struct {
+					XMin int `xml:"xmin"`
+					YMin int `xml:"ymin"`
+					XMax int `xml:"xmax"`
+					YMax int `xml:"ymax"`
+				} `xml:"bndbox"`
+			} `xml:"object"`
+		}
+		x := files["train/a_v2_x.xml"]
+		if !strings.HasPrefix(x, "<?xml") {
+			t.Errorf("xml sem cabeçalho:\n%s", x)
+		}
+		if err := xml.Unmarshal([]byte(x), &ann); err != nil {
+			t.Fatal(err)
+		}
+		if ann.Folder != "train" || ann.Filename != "a_v2_x.jpg" || ann.Size.Width != 200 || ann.Size.Depth != 3 || len(ann.Objects) != 2 {
+			t.Fatalf("anotação = %+v", ann)
+		}
+		// placa (10,20) 40x10 -> 10,20,50,30; carro na imagem toda -> truncado
+		if o := ann.Objects[0]; o.Name != "placa" || o.Box.XMin != 10 || o.Box.YMin != 20 || o.Box.XMax != 50 || o.Box.YMax != 30 || o.Truncated != 0 {
+			t.Errorf("placa = %+v", o)
+		}
+		if o := ann.Objects[1]; o.Name != "carro" || o.Box.XMax != 200 || o.Truncated != 1 {
+			t.Errorf("carro = %+v", o)
+		}
+	})
+
+	t.Run("por pastas", func(t *testing.T) {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		p, _ := Builtin("voc-pastas")
+		list := items()
+		list[0].Dir = "Car/01-640x480/Br/Traseiro/Noturno"
+		list[1].Dir = "Bus/02-752x480/Mercosul/Dianteiro/Diurno"
+		res, err := Write(zw, p, list, []string{"carro", "placa"}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		zw.Close()
+		files := readZip(t, buf.Bytes())
+		for _, f := range []string{
+			"Car/01-640x480/Br/Traseiro/Noturno/a_v2_x.jpg", "Car/01-640x480/Br/Traseiro/Noturno/a_v2_x.xml",
+			"Bus/02-752x480/Mercosul/Dianteiro/Diurno/b.jpg", "Bus/02-752x480/Mercosul/Dianteiro/Diurno/b.xml",
+		} {
+			if _, ok := files[f]; !ok {
+				t.Errorf("faltou %s (tem: %v)", f, keys(files))
+			}
+		}
+		if _, ok := files["train/"]; ok {
+			t.Error("por pastas não tem train/")
+		}
+		if res.Folders["Car/01-640x480/Br/Traseiro/Noturno"] != 1 || len(res.Missing) != 1 {
+			t.Errorf("result = %+v", res)
+		}
+		if !strings.Contains(files["Bus/02-752x480/Mercosul/Dianteiro/Diurno/b.xml"], "<folder>Bus/02-752x480/Mercosul/Dianteiro/Diurno</folder>") {
+			t.Error("folder errado no xml")
+		}
+	})
+}
+
+func TestFileNameOf(t *testing.T) {
+	p := &Profile{FileName: TemplateLegacy}
+	sha := "02d9314a6112e8b95f97415dc96e5bf0682f3a3f"
+	m := NameMeta(sha, sha+"_v2_x.jpg", "IMG_1.JPG", Meta{
+		"direction": "front", "resolution": "640x480", "capture_angle": "lateral", "day_time": "day",
+		"vehicle_type": "bus", "image_range": "narrow", "plate_type": "br", "plate_category": "rental",
+		"weather": "clear", "condition": "no_damage", "plate": "koy7386",
+	})
+	// o exemplo do padrão antigo
+	if got := p.FileNameOf(m, ".jpg"); got != sha+"F01LDBEB1S01KOY7386.jpg" {
+		t.Errorf("legado = %q", got)
+	}
+	// sem dado: "_" na largura do campo
+	if got := p.FileNameOf(NameMeta(sha, "", "", Meta{"direction": "rear"}), ".jpg"); got != sha+"T"+strings.Repeat("_", 11)+strings.Repeat("_", 7)+".jpg" {
+		t.Errorf("sem dados = %q", got)
+	}
+	// vazio: o nome guardado
+	if got := (&Profile{}).FileNameOf(m, ".jpg"); got != sha+"_v2_x.jpg" {
+		t.Errorf("padrão = %q", got)
+	}
+	// texto fixo, campos livres limpos
+	p.FileName = "{original}-{sha1}_{equipment}"
+	m["equipment"] = "EQ/1"
+	if got := p.FileNameOf(m, ".png"); got != "IMG_1-"+sha+"_EQ_1.png" {
+		t.Errorf("custom = %q", got)
+	}
+
+	for name, tmpl := range map[string]string{
+		"sem sha1":           "{plate}{direction}",
+		"campo desconhecido": "{sha1}{cor}",
+		"barra":              "{sha1}/x",
+		"chave sobrando":     "{sha1}}",
+	} {
+		pr := Profile{Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, FileName: tmpl}
+		pr.Normalize()
+		if err := pr.Validate(); err == nil {
+			t.Errorf("%s: deveria ser inválido", name)
+		}
+	}
+	ok := Profile{Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, FileName: " {name}-{date} "}
+	ok.Normalize()
+	if err := ok.Validate(); err != nil || ok.FileName != "{name}-{date}" {
+		t.Errorf("válido: %v %q", err, ok.FileName)
+	}
 }

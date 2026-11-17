@@ -207,6 +207,14 @@ export function PackageDetailPage() {
         </div>
         <div className="detail-heading__actions">
           <button className="button button--danger" disabled={saving} onClick={handleOpenDeleteModal} type="button">Excluir pacote</button>
+          <button
+            className="button button--secondary"
+            disabled={selectedPackage.verified === 0}
+            onClick={() => navigate(`/pacotes/${encodeURIComponent(selectedPackage.name)}/verificadas`)}
+            type="button"
+          >
+            Ver verificadas
+          </button>
           <button className="button button--primary" onClick={() => navigate(`/pacotes/${encodeURIComponent(selectedPackage.name)}/anotacao`)} type="button">Abrir anotação</button>
         </div>
       </div>
@@ -326,7 +334,16 @@ export function PackageDetailPage() {
           <div className="image-list">
             {images.map((image) => (
               <div className="image-list__item" key={image.sha1}>
-                <span className="image-list__name" title={image.original_name}>{image.original_name}</span>
+                <button
+                  className="image-list__name image-list__open"
+                  onClick={() => navigate(image.status === 'verified'
+                    ? `/pacotes/${encodeURIComponent(selectedPackage.name)}/verificadas?sha1=${image.sha1}`
+                    : `/pacotes/${encodeURIComponent(selectedPackage.name)}/anotacao?imagem=${image.sha1}`)}
+                  title={image.status === 'verified' ? 'Ver a anotação' : 'Abrir na anotação'}
+                  type="button"
+                >
+                  {image.original_name}
+                </button>
                 <div className="image-list__actions">
                   <span className={image.status === 'verified' ? 'image-status image-status--verified' : 'image-status'}>
                     <i className={image.status === 'verified' ? 'status-dot status-dot--verified' : 'status-dot status-dot--pending'} />

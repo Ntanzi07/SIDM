@@ -172,8 +172,14 @@ export async function getPackage(name: string): Promise<PackageSummary | undefin
   return response.items.find((item) => item.name === name)
 }
 
-export async function listPackageImages(packageName: string, limit = 100, skip = 0): Promise<PageResponse<ImageSummary>> {
+export async function listPackageImages(
+  packageName: string,
+  limit = 100,
+  skip = 0,
+  status?: ImageSummary['status'],
+): Promise<PageResponse<ImageSummary>> {
   const query = new URLSearchParams({ package: packageName, limit: String(limit), skip: String(skip) })
+  if (status) query.set('status', status)
   return request<PageResponse<ImageSummary>>(`/images?${query.toString()}`)
 }
 
@@ -199,6 +205,13 @@ export async function nextImage(packageName: string, skip?: string): Promise<Ima
     body: JSON.stringify(skip ? { skip } : {}),
   })
   return image ?? null
+}
+
+// Abre uma imagem específica para edição e reserva para o usuário. Uma
+// VERIFICADA volta para pendente (o arquivo perde o nome v2 até ser
+// verificada de novo); numa pendente, só reserva.
+export async function reopenImage(sha1: string): Promise<ImageDetail> {
+  return request<ImageDetail>(`/images/${encodeURIComponent(sha1)}/reopen`, { method: 'POST' })
 }
 
 // Devolve a imagem para a fila. keepalive: funciona mesmo ao fechar a aba.
@@ -504,6 +517,7 @@ export type Box = {
 }
 
 export type BoxSet = {
+  task: string
   sha1: string
   package: string
   width: number // tamanho da imagem no CVAT: as caixas são em pixels dela
@@ -516,27 +530,31 @@ export type BoxSet = {
 
 export type BoxImportReport = {
   dry_run: boolean
-  package: string
+  task: string
   file: string
+  negatives: boolean
   file_images: number
   file_boxes: number
   labels: Record<string, number>
+  new_labels: string[]
   matched: number
+  packages: Record<string, number>
   not_found: string[]
   not_found_count: number
   ambiguous: string[]
   empty: number
   size_mismatch: Array<{ file_name: string; cvat: string; sidm: string }>
+  will_apply: number
   replaced: number
   applied: number
   applied_boxes: number
   warnings: string[]
 }
 
+// Por tarefa, quantas imagens do pacote estão anotadas nela.
 export type PackageBoxes = {
   package: string
-  images: number
-  labels: Record<string, number>
+  tasks: Array<{ task: string; images: number; boxes: number }>
 }
 
 // O zip com as imagens do pacote, para criar a task no CVAT (os nomes
@@ -549,22 +567,207 @@ export async function getPackageBoxes(packageName: string): Promise<PackageBoxes
   return request<PackageBoxes>(`/packages/${encodeURIComponent(packageName)}/boxes`)
 }
 
-// null: a imagem não tem caixas importadas.
-export async function getImageBoxes(sha1: string): Promise<BoxSet | null> {
-  const response = await fetch(`${API_BASE_URL}/images/${encodeURIComponent(sha1)}/boxes`, {
-    headers: { 'X-User': getUser() || 'anonymous' },
-  })
-  if (response.status === 404) return null
-  if (!response.ok) throw new Error(`Não foi possível carregar as caixas (${response.status}).`)
-  return response.json() as Promise<BoxSet>
+// As caixas da imagem, uma entrada por tarefa (vazio: nenhuma).
+export async function getImageBoxes(sha1: string): Promise<BoxSet[]> {
+  const response = await request<{ items: BoxSet[] }>(`/images/${encodeURIComponent(sha1)}/boxes`)
+  return response.items
 }
 
-// Export COCO 1.0 do CVAT (o zip, ou só o .json). dryRun: só o relatório.
-export async function importBoxes(packageName: string, file: File, dryRun: boolean): Promise<BoxImportReport> {
+// ---------- tarefas de anotação de caixas ----------
+
+export type TaskPackage = { name: string; images: number; verified: number }
+
+export type TaskStats = {
+  images: number // anotadas na tarefa
+  verified: number // dessas, as verificadas (entram no export)
+  negatives: number // anotadas sem nenhuma caixa
+  boxes: number
+  labels: Record<string, number>
+  packages: TaskPackage[]
+}
+
+export type AnnotationTask = {
+  name: string
+  description: string
+  labels: string[]
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+  stats?: TaskStats
+}
+
+export type TaskBody = { name: string; description: string; labels: string[] }
+
+export async function listTasks(): Promise<AnnotationTask[]> {
+  const response = await request<PageResponse<AnnotationTask>>('/tasks')
+  return response.items
+}
+
+export async function getTask(name: string): Promise<AnnotationTask> {
+  return request<AnnotationTask>(`/tasks/${encodeURIComponent(name)}`)
+}
+
+export async function createTask(body: TaskBody): Promise<AnnotationTask> {
+  return request<AnnotationTask>('/tasks', { method: 'POST', body: JSON.stringify(body) })
+}
+
+// Mudar o nome leva junto as caixas e os perfis de export.
+export async function updateTask(oldName: string, body: TaskBody): Promise<AnnotationTask> {
+  return request<AnnotationTask>(`/tasks/${encodeURIComponent(oldName)}`, { method: 'PUT', body: JSON.stringify(body) })
+}
+
+export async function deleteTask(name: string): Promise<{ deleted: string; images: number }> {
+  return request(`/tasks/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// Export COCO 1.0 do CVAT (o zip, ou só o .json) para a tarefa. As imagens
+// são procuradas em todos os pacotes. dryRun: só o relatório. negatives:
+// imagens sem caixa entram como anotadas e vazias.
+export async function importTaskBoxes(task: string, file: File, dryRun: boolean, negatives: boolean): Promise<BoxImportReport> {
   const formData = new FormData()
   formData.append('file', file, file.name)
   return request<BoxImportReport>(
-    `/packages/${encodeURIComponent(packageName)}/boxes/import?dry_run=${String(dryRun)}`,
+    `/tasks/${encodeURIComponent(task)}/import?dry_run=${String(dryRun)}&negatives=${String(negatives)}`,
     { method: 'POST', body: formData },
   )
+}
+
+// ---------- export (datasets RF-DETR / YOLO) ----------
+
+export type ExportSplit = { train: number; valid: number; test: number }
+
+export type ExportFilters = {
+  equipment?: string
+  camera?: string
+  direction?: string
+  day_time?: string
+  weather?: string
+  vehicle_type?: string
+  vehicle_color?: string
+}
+
+// Um nível da árvore de pastas (layout "folders", só VOC).
+export type FolderLevel = {
+  field: string
+  names?: Record<string, string> // valor -> nome da pasta (os que faltam usam o padrão)
+  unknown?: string // pasta das imagens sem o metadado (padrão: Desconhecido)
+}
+
+export type ExportProfile = {
+  name: string
+  description?: string
+  format: 'coco' | 'yolo' | 'voc'
+  layout?: 'split' | 'folders' // split = train/valid/test (padrão)
+  folders?: FolderLevel[]
+  file_name?: string // modelo do nome dos arquivos; vazio = o nome do SIDM (v2)
+  task?: string // tarefa de anotação (os padrões não têm: escolhe na hora)
+  split: ExportSplit
+  packages?: string[]
+  filters: ExportFilters
+  labels: { rename?: Record<string, string>; include?: string[] }
+  builtin?: boolean
+  created_by?: string
+  updated_at?: string
+}
+
+export type ExportPreview = {
+  profile: string
+  task: string
+  format: string
+  layout: string
+  folders: Record<string, number> // imagens por pasta (layout por pastas)
+  examples: string[] // os primeiros nomes de arquivo, como vão sair
+  split: ExportSplit
+  classes: string[]
+  total: number
+  negatives: number // das imagens do dataset, as sem nenhuma caixa
+  images: Record<string, number>
+  boxes: Record<string, number>
+  skipped: { not_annotated: number; without_labels: number }
+  packages: string[]
+}
+
+// Metadados que podem virar pasta, com o nome padrão da pasta de cada valor
+// (values null: campo aberto, a pasta é o próprio valor).
+export type FolderField = { field: string; values: Record<string, string> | null }
+
+export type ExportFieldsInfo = {
+  items: FolderField[]
+  unknown: string
+  name_fields: string[] // campos do modelo de nome dos arquivos
+  legacy_template: string // o padrão antigo: hash + características + placa
+}
+
+export async function getExportFolderFields(): Promise<ExportFieldsInfo> {
+  return request('/export-folder-fields')
+}
+
+export async function listExportProfiles(): Promise<ExportProfile[]> {
+  const response = await request<PageResponse<ExportProfile>>('/export-profiles')
+  return response.items
+}
+
+export async function createExportProfile(profile: ExportProfile): Promise<ExportProfile> {
+  return request<ExportProfile>('/export-profiles', { method: 'POST', body: JSON.stringify(profile) })
+}
+
+export async function updateExportProfile(profile: ExportProfile): Promise<ExportProfile> {
+  return request<ExportProfile>(`/export-profiles/${encodeURIComponent(profile.name)}`, {
+    method: 'PUT',
+    body: JSON.stringify(profile),
+  })
+}
+
+export async function deleteExportProfile(name: string): Promise<void> {
+  await request(`/export-profiles/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+// Sem os campos que o servidor preenche (o perfil vai "inline", como está na tela).
+function exportBody(profile: ExportProfile) {
+  const { builtin: _builtin, created_by: _createdBy, updated_at: _updatedAt, ...rest } = profile
+  void _builtin
+  void _createdBy
+  void _updatedAt
+  return rest
+}
+
+export async function previewExport(profile: ExportProfile): Promise<ExportPreview> {
+  return request<ExportPreview>('/exports/preview', {
+    method: 'POST',
+    body: JSON.stringify({ profile: exportBody(profile) }),
+  })
+}
+
+// O zip pode ter gigas: em vez de baixar pelo fetch (que seguraria tudo na
+// memória), manda um formulário, e o navegador salva direto no disco.
+export function downloadExport(profile: ExportProfile): void {
+  // Alvo: um iframe escondido. Assim a página não sai do lugar (nem se a
+  // resposta for um erro); a tela libera o download só depois da prévia.
+  let frame = document.getElementById('sidm-download-frame') as HTMLIFrameElement | null
+  if (!frame) {
+    frame = document.createElement('iframe')
+    frame.id = 'sidm-download-frame'
+    frame.name = 'sidm-download-frame'
+    frame.style.display = 'none'
+    document.body.appendChild(frame)
+  }
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = `${API_BASE_URL}/exports/download`
+  form.target = frame.name
+  form.style.display = 'none'
+  const field = document.createElement('input')
+  field.type = 'hidden'
+  field.name = 'request'
+  field.value = JSON.stringify({ profile: exportBody(profile) })
+  form.appendChild(field)
+  document.body.appendChild(form)
+  form.submit()
+  form.remove()
+}
+
+// Só os nomes dos pacotes (sem buscar capa).
+export async function listPackageNames(): Promise<string[]> {
+  const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
+  return response.items.map((item) => item.name)
 }

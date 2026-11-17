@@ -1,3 +1,571 @@
+import { useEffect, useMemo, useState } from 'react'
+import { annotationOptions } from '../../data/annotationOptions'
+import {
+  createExportProfile,
+  deleteExportProfile,
+  downloadExport,
+  getExportFolderFields,
+  listExportProfiles,
+  listPackageNames,
+  listTasks,
+  previewExport,
+  updateExportProfile,
+  type AnnotationTask,
+  type ExportFilters,
+  type ExportPreview,
+  type ExportProfile,
+  type ExportFieldsInfo,
+} from '../../services/api'
+import { FileNameTemplate } from './FileNameTemplate'
+import { FolderLevels } from './FolderLevels'
+import { Link } from 'react-router-dom'
+import './Export.css'
+
+const fmt = (n: number) => n.toLocaleString('pt-BR')
+
+const FORMATS = [
+  ['coco', 'RF-DETR (COCO)', 'train/, valid/, test/ com _annotations.coco.json (layout do Roboflow)'],
+  ['yolo', 'YOLO (Ultralytics)', 'images/, labels/ e data.yaml'],
+  ['voc', 'Pascal VOC', 'um .xml por imagem, ao lado dela; em train/valid/test ou em pastas pelos metadados'],
+] as const
+
+// A divisão importa? (por divisão, ou com um nível "split" nas pastas)
+function usesSplit(profile: ExportProfile): boolean {
+  return profile.layout !== 'folders' || (profile.folders ?? []).some((level) => level.field === 'split')
+}
+
+const SPLIT_LABELS = { train: 'Treino', valid: 'Validação', test: 'Teste' } as const
+
+type LabelRow = { label: string; count: number; checked: boolean; rename: string }
+
+function newProfile(): ExportProfile {
+  return { name: '', format: 'coco', split: { train: 70, valid: 15, test: 15 }, filters: {}, labels: {} }
+}
+
+// Perfil sem tarefa (os padrões) e só uma tarefa no sistema: já vem escolhida.
+function withDefaultTask(profile: ExportProfile, tasks: AnnotationTask[]): ExportProfile {
+  if (!profile.task && tasks.length === 1) return { ...profile, task: tasks[0].name }
+  return profile
+}
+
+// As labels de uma tarefa, com quantas caixas cada (as da lista da tarefa e
+// as que têm caixas).
+function taskLabels(task: AnnotationTask | undefined): Record<string, number> {
+  if (!task) return {}
+  const out: Record<string, number> = {}
+  for (const label of task.labels) out[label] = 0
+  return { ...out, ...(task.stats?.labels ?? {}) }
+}
+
+// Linhas da tabela de labels a partir do perfil: cada label da tarefa, se
+// entra e com que nome. Labels do perfil que não existem na tarefa também
+// aparecem (para não sumirem ao salvar).
+function rowsFrom(profile: ExportProfile, existing: Record<string, number>): LabelRow[] {
+  const rename = profile.labels.rename ?? {}
+  const include = profile.labels.include ?? []
+  const names = new Set([...Object.keys(existing), ...Object.keys(rename)])
+  return [...names].sort((a, b) => a.localeCompare(b)).map((label) => {
+    const final = rename[label] ?? label
+    return {
+      label,
+      count: existing[label] ?? 0,
+      checked: include.length === 0 || include.includes(final),
+      rename: rename[label] ?? '',
+    }
+  })
+}
+
+// O caminho de volta: tabela -> regras do perfil.
+function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): ExportProfile['labels'] {
+  const rename: Record<string, string> = {}
+  const finals: string[] = []
+  for (const row of rows) {
+    const final = row.rename.trim() || row.label
+    if (row.rename.trim() && row.rename.trim() !== row.label) rename[row.label] = row.rename.trim()
+    if (row.checked && !finals.includes(final)) finals.push(final)
+  }
+  const allChecked = rows.every((row) => row.checked)
+  // Mantém a ordem que o perfil já tinha (ela define os ids das classes).
+  const ordered = previousInclude
+    ? [...previousInclude.filter((name) => finals.includes(name)), ...finals.filter((name) => !previousInclude.includes(name)).sort()]
+    : [...finals].sort()
+  return {
+    ...(Object.keys(rename).length > 0 ? { rename } : {}),
+    ...(allChecked && !previousInclude?.length ? {} : { include: ordered }),
+  }
+}
+
 export function ExportPage() {
-  return null
+  const [profiles, setProfiles] = useState<ExportProfile[]>([])
+  const [packages, setPackages] = useState<string[]>([])
+  const [tasks, setTasks] = useState<AnnotationTask[]>([])
+  const [folderFields, setFolderFields] = useState<ExportFieldsInfo>({ items: [], unknown: 'Desconhecido', name_fields: [], legacy_template: '' })
+  const [selected, setSelected] = useState<string | null>(null) // nome do perfil salvo/padrão aberto
+  const [draft, setDraft] = useState<ExportProfile>(newProfile())
+  const [rows, setRows] = useState<LabelRow[]>([])
+  const [preview, setPreview] = useState<ExportPreview | null>(null)
+  const [busy, setBusy] = useState<'' | 'preview' | 'save' | 'delete'>('')
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    let active = true
+    Promise.all([listExportProfiles(), listPackageNames(), listTasks(), getExportFolderFields()])
+      .then(([profileList, packageNames, taskList, fields]) => {
+        if (!active) return
+        setProfiles(profileList)
+        setPackages(packageNames)
+        setTasks(taskList)
+        setFolderFields(fields)
+        const first = profileList[0]
+        if (first) {
+          const next = withDefaultTask(structuredClone(first), taskList)
+          setSelected(first.name)
+          setDraft(next)
+          setRows(rowsFrom(next, taskLabels(taskList.find((task) => task.name === next.task))))
+        }
+      })
+      .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o export.') })
+    return () => { active = false }
+  }, [])
+
+  const original = profiles.find((profile) => profile.name === selected)
+  const isBuiltin = Boolean(original?.builtin)
+  const splitSum = draft.split.train + draft.split.valid + draft.split.test
+  const isFolders = draft.format === 'voc' && draft.layout === 'folders'
+  const splitMatters = usesSplit(draft)
+  const fileNameOk = !draft.file_name || /\{(sha1|name)\}/.test(draft.file_name)
+  const foldersOk = (!isFolders || (draft.folders ?? []).length > 0) && fileNameOk
+  const canRun = splitSum === 100 && Boolean(draft.task) && foldersOk
+
+  // O perfil como está na tela (com as labels da tabela).
+  const current = useMemo<ExportProfile>(
+    () => ({ ...draft, labels: labelsFrom(rows, original?.labels.include) }),
+    [draft, rows, original],
+  )
+  const dirty = useMemo(() => !original || JSON.stringify(original) !== JSON.stringify({ ...original, ...current }), [original, current])
+
+  const labelsOf = (name: string | undefined) => taskLabels(tasks.find((task) => task.name === name))
+
+  function open(profile: ExportProfile | null) {
+    const next = withDefaultTask(profile ? structuredClone(profile) : newProfile(), tasks)
+    setSelected(profile?.name ?? null)
+    setDraft(next)
+    setRows(rowsFrom(next, labelsOf(next.task)))
+    setPreview(null)
+    setError('')
+    setMessage('')
+  }
+
+  function change(patch: Partial<ExportProfile>) {
+    setDraft((currentDraft) => ({ ...currentDraft, ...patch }))
+    setPreview(null)
+  }
+
+  // Trocar a tarefa troca a tabela de labels (cada tarefa tem as suas).
+  function changeTask(name: string) {
+    const next = { ...draft, task: name || undefined }
+    setDraft(next)
+    setRows(rowsFrom(next, labelsOf(name)))
+    setPreview(null)
+  }
+
+  function changeFilter(key: keyof ExportFilters, value: string) {
+    setDraft((currentDraft) => {
+      const filters = { ...currentDraft.filters }
+      if (value) filters[key] = value
+      else delete filters[key]
+      return { ...currentDraft, filters }
+    })
+    setPreview(null)
+  }
+
+  function changeRow(index: number, patch: Partial<LabelRow>) {
+    setRows((currentRows) => currentRows.map((row, i) => (i === index ? { ...row, ...patch } : row)))
+    setPreview(null)
+  }
+
+  function togglePackage(name: string) {
+    const list = draft.packages ?? []
+    change({ packages: list.includes(name) ? list.filter((item) => item !== name) : [...list, name] })
+  }
+
+  async function runPreview() {
+    setBusy('preview')
+    setError('')
+    setMessage('')
+    try {
+      setPreview(await previewExport(current))
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível gerar a prévia.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function save() {
+    setBusy('save')
+    setError('')
+    setMessage('')
+    try {
+      const name = current.name.trim().replace(/\s+/g, '-')
+      const profile = { ...current, name }
+      const saved = selected && !isBuiltin && selected === name
+        ? await updateExportProfile(profile)
+        : await createExportProfile(profile)
+      const list = await listExportProfiles()
+      setProfiles(list)
+      setSelected(saved.name)
+      setDraft(structuredClone(saved))
+      setRows(rowsFrom(saved, labelsOf(saved.task)))
+      setMessage(`Perfil "${saved.name}" salvo.`)
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o perfil.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function remove() {
+    if (!selected || isBuiltin || !window.confirm(`Apagar o perfil "${selected}"?`)) return
+    setBusy('delete')
+    try {
+      await deleteExportProfile(selected)
+      const list = await listExportProfiles()
+      setProfiles(list)
+      open(list[0] ?? null)
+      setMessage(`Perfil "${selected}" apagado.`)
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível apagar o perfil.')
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const sameNameAsBuiltin = profiles.some((profile) => profile.builtin && profile.name === draft.name.trim())
+  const canSave = draft.name.trim() !== '' && splitSum === 100 && foldersOk && !sameNameAsBuiltin && (dirty || !selected)
+  const filterSelect = (key: keyof ExportFilters, label: string, options: readonly (readonly [string, string])[]) => (
+    <label className="form-field">
+      <span>{label}</span>
+      <select onChange={(event) => changeFilter(key, event.target.value)} value={draft.filters[key] ?? ''}>
+        <option value="">Qualquer</option>
+        {options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
+      </select>
+    </label>
+  )
+
+  return (
+    <section className="export-page">
+      <div className="page-heading">
+        <div>
+          <h1>Exportar</h1>
+          <p>Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa.</p>
+        </div>
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      {message && <p className="settings-message">{message}</p>}
+
+      <div className="export-layout">
+        <aside className="export-profiles">
+          <span className="export-profiles__title">Perfis</span>
+          {profiles.map((profile) => (
+            <button
+              className={profile.name === selected ? 'export-profile export-profile--active' : 'export-profile'}
+              key={profile.name}
+              onClick={() => open(profile)}
+              type="button"
+            >
+              <strong>{profile.name}</strong>
+              <span>{profile.builtin ? 'padrão' : profile.format === 'coco' ? 'RF-DETR (COCO)' : 'YOLO'}</span>
+            </button>
+          ))}
+          <button className="button button--secondary export-profiles__new" onClick={() => open(null)} type="button">+ Novo perfil</button>
+        </aside>
+
+        <div className="export-editor">
+          <div className="create-card settings-card">
+            <h2>{selected ? (isBuiltin ? `${selected} (padrão)` : selected) : 'Novo perfil'}</h2>
+            {isBuiltin && (
+              <p className="profile-name-hint">
+                Perfil padrão: dá para mudar os campos e exportar, mas para guardar as mudanças, salve com outro nome.
+              </p>
+            )}
+
+            <div className="profile-form-grid">
+              <label className="form-field">
+                <span>Nome</span>
+                <input onChange={(event) => change({ name: event.target.value })} placeholder="Ex.: yolo-placas-noite" value={draft.name} />
+                {sameNameAsBuiltin && dirty && <small className="profile-name-hint">Para salvar, use um nome diferente de "{draft.name}".</small>}
+              </label>
+              <label className="form-field">
+                <span>Descrição (opcional)</span>
+                <input onChange={(event) => change({ description: event.target.value })} value={draft.description ?? ''} />
+              </label>
+            </div>
+
+            <h3>Tarefa</h3>
+            {tasks.length === 0 ? (
+              <p className="form-error">
+                Nenhuma tarefa ainda: crie uma em <Link to="/tarefas">Tarefas</Link> e importe as caixas do CVAT.
+              </p>
+            ) : (
+              <div className="profile-form-grid">
+                <label className="form-field">
+                  <span>As caixas de qual tarefa entram</span>
+                  <select onChange={(event) => changeTask(event.target.value)} value={draft.task ?? ''}>
+                    <option value="">Escolha a tarefa…</option>
+                    {tasks.map((task) => (
+                      <option key={task.name} value={task.name}>
+                        {task.name} ({fmt(task.stats?.verified ?? 0)} verificadas)
+                      </option>
+                    ))}
+                    {draft.task && !tasks.some((task) => task.name === draft.task) && (
+                      <option value={draft.task}>{draft.task} (não existe mais)</option>
+                    )}
+                  </select>
+                </label>
+              </div>
+            )}
+            {isBuiltin && <p className="profile-name-hint">Os perfis padrão servem para qualquer tarefa: escolha na hora.</p>}
+
+            <h3>Formato</h3>
+            <div className="export-formats">
+              {FORMATS.map(([value, label, hint]) => (
+                <label className={draft.format === value ? 'export-format export-format--active' : 'export-format'} key={value}>
+                  <input
+                    checked={draft.format === value}
+                    name="format"
+                    onChange={() => change(value === 'voc' ? { format: value } : { format: value, layout: 'split', folders: undefined })}
+                    type="radio"
+                  />
+                  <strong>{label}</strong>
+                  <span>{hint}</span>
+                </label>
+              ))}
+            </div>
+
+            {draft.format === 'voc' && (
+              <>
+                <h3>Pastas de saída</h3>
+                <div className="export-formats">
+                  <label className={!isFolders ? 'export-format export-format--active' : 'export-format'}>
+                    <input checked={!isFolders} name="layout" onChange={() => change({ layout: 'split', folders: undefined })} type="radio" />
+                    <strong>Por divisão</strong>
+                    <span>train/, valid/ e test/, cada imagem com o seu .xml</span>
+                  </label>
+                  <label className={isFolders ? 'export-format export-format--active' : 'export-format'}>
+                    <input
+                      checked={isFolders}
+                      name="layout"
+                      onChange={() => change({ layout: 'folders', folders: draft.folders?.length ? draft.folders : [{ field: 'vehicle_type' }], split: { train: 100, valid: 0, test: 0 } })}
+                      type="radio"
+                    />
+                    <strong>Por pastas (metadados)</strong>
+                    <span>uma árvore montada com os dados de cada imagem, ex.: Car/01-640x480/Br/Traseiro/Noturno</span>
+                  </label>
+                </div>
+                {isFolders && (
+                  <FolderLevels
+                    fields={folderFields.items}
+                    levels={draft.folders ?? []}
+                    onChange={(folders) => {
+                      // Pôs o nível "Divisão" com tudo em treino: começa em 70/15/15.
+                      const addedSplit = folders.some((level) => level.field === 'split') && !usesSplit(draft)
+                      change(addedSplit && draft.split.train === 100 ? { folders, split: { train: 70, valid: 15, test: 15 } } : { folders })
+                    }}
+                    unknownDefault={folderFields.unknown}
+                  />
+                )}
+              </>
+            )}
+
+            {splitMatters && <>
+            <h3>Divisão</h3>
+            <div className="export-split">
+              {(['train', 'valid', 'test'] as const).map((key) => (
+                <label className="form-field" key={key}>
+                  <span>{SPLIT_LABELS[key]} (%)</span>
+                  <input
+                    max={100}
+                    min={0}
+                    onChange={(event) => change({ split: { ...draft.split, [key]: Math.max(0, Number.parseInt(event.target.value, 10) || 0) } })}
+                    type="number"
+                    value={draft.split[key]}
+                  />
+                </label>
+              ))}
+              <span className={splitSum === 100 ? 'export-split__sum' : 'export-split__sum export-split__sum--bad'}>
+                Soma: {splitSum}%
+              </span>
+            </div>
+            <p className="profile-name-hint">
+              A divisão é fixa por imagem: re-exportar com imagens novas não muda o grupo das antigas.
+              {draft.format === 'yolo' && ' No YOLO, a validação não pode ser 0.'}
+              {isFolders && ' Com o nível "Divisão" nas pastas, train/valid/test viram pastas na posição dele.'}
+            </p>
+            </>}
+
+            <h3>Nome dos arquivos</h3>
+            <FileNameTemplate
+              key={selected ?? 'novo'}
+              fields={folderFields.name_fields}
+              legacy={folderFields.legacy_template}
+              onChange={(fileName) => change({ file_name: fileName || undefined })}
+              value={draft.file_name ?? ''}
+            />
+
+            <h3>Pacotes</h3>
+            <div className="export-packages">
+              <label className="export-check">
+                <input checked={!draft.packages?.length} onChange={() => change({ packages: [] })} type="checkbox" />
+                Todos
+              </label>
+              {packages.map((name) => (
+                <label className="export-check" key={name}>
+                  <input checked={draft.packages?.includes(name) ?? false} onChange={() => togglePackage(name)} type="checkbox" />
+                  {name}
+                </label>
+              ))}
+            </div>
+
+            <h3>Filtros</h3>
+            <div className="profile-form-grid export-filters">
+              {filterSelect('day_time', 'Período', annotationOptions.day_time)}
+              {filterSelect('weather', 'Clima', annotationOptions.weather)}
+              {filterSelect('direction', 'Direção', annotationOptions.direction)}
+              {filterSelect('vehicle_type', 'Tipo de veículo', annotationOptions.type)}
+              {filterSelect('vehicle_color', 'Cor do veículo', annotationOptions.color)}
+              <label className="form-field">
+                <span>Equipamento</span>
+                <input onChange={(event) => changeFilter('equipment', event.target.value.trim())} placeholder="Qualquer" value={draft.filters.equipment ?? ''} />
+              </label>
+              <label className="form-field">
+                <span>Câmera</span>
+                <input onChange={(event) => changeFilter('camera', event.target.value.trim())} placeholder="Qualquer" value={draft.filters.camera ?? ''} />
+              </label>
+            </div>
+
+            <h3>Labels</h3>
+            {!draft.task ? (
+              <p className="profile-name-hint">Escolha a tarefa para ver as labels dela.</p>
+            ) : rows.length === 0 ? (
+              <p className="profile-name-hint">Esta tarefa ainda não tem labels nem caixas.</p>
+            ) : (
+              <table className="export-labels">
+                <thead>
+                  <tr><th>Entra</th><th>Label da tarefa</th><th>Caixas</th><th>Nome no dataset</th></tr>
+                </thead>
+                <tbody>
+                  {rows.map((row, index) => (
+                    <tr className={row.checked ? '' : 'export-labels__off'} key={row.label}>
+                      <td><input checked={row.checked} onChange={(event) => changeRow(index, { checked: event.target.checked })} type="checkbox" /></td>
+                      <td>{row.label}</td>
+                      <td>{fmt(row.count)}</td>
+                      <td>
+                        <input
+                          onChange={(event) => changeRow(index, { rename: event.target.value })}
+                          placeholder={row.label}
+                          value={row.rename}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <p className="profile-name-hint">
+              Dê o mesmo nome a duas labels para juntá-las (ex.: "Placa" e "placa" viram uma classe só).
+            </p>
+
+            <div className="export-actions">
+              <button
+                className="button button--secondary"
+                disabled={busy !== '' || !canRun}
+                onClick={() => void runPreview()}
+                title={!draft.task ? 'Escolha a tarefa antes' : !foldersOk ? 'Escolha pelo menos um nível de pasta' : undefined}
+                type="button"
+              >
+                {busy === 'preview' ? 'Calculando...' : 'Prévia'}
+              </button>
+              <button
+                className="button button--primary"
+                disabled={!preview || preview.total === 0}
+                onClick={() => {
+                  downloadExport(current)
+                  setMessage('O download começa em instantes (o zip é gerado enquanto baixa).')
+                }}
+                title={!preview ? 'Faça a prévia antes' : undefined}
+                type="button"
+              >
+                Baixar zip
+              </button>
+              <span className="export-actions__spacer" />
+              {selected && !isBuiltin && (
+                <button className="button button--danger" disabled={busy !== ''} onClick={() => void remove()} type="button">Apagar perfil</button>
+              )}
+              <button className="button button--secondary" disabled={busy !== '' || !canSave} onClick={() => void save()} type="button">
+                {busy === 'save' ? 'Salvando...' : selected && !isBuiltin && selected === draft.name.trim() ? 'Salvar alterações' : 'Salvar como novo perfil'}
+              </button>
+            </div>
+          </div>
+
+          {preview && (
+            <div className="create-card settings-card export-preview">
+              <h2>Prévia</h2>
+              {preview.total === 0 ? (
+                <p className="form-error">Nenhuma imagem verificada e anotada na tarefa "{preview.task}" passa nestes filtros.</p>
+              ) : (
+                <>
+                  <div className="import-report__stats">
+                    <span><strong>{fmt(preview.total)}</strong> imagens</span>
+                    {preview.negatives > 0 && <span><strong>{fmt(preview.negatives)}</strong> sem objetos</span>}
+                    {preview.layout === 'folders'
+                      ? <span><strong>{fmt(Object.keys(preview.folders ?? {}).length)}</strong> pastas</span>
+                      : (['train', 'valid', 'test'] as const).map((key) => (
+                        <span key={key}><strong>{fmt(preview.images[key] ?? 0)}</strong> {SPLIT_LABELS[key].toLowerCase()}</span>
+                      ))}
+                  </div>
+                  {preview.examples?.length > 0 && (
+                    <div className="export-examples">
+                      <span>Exemplos de nome:</span>
+                      {preview.examples.map((name) => <code key={name}>{name}</code>)}
+                    </div>
+                  )}
+                  {preview.layout === 'folders' && (
+                    <table className="export-labels export-folders">
+                      <thead><tr><th>Pasta</th><th>Imagens</th></tr></thead>
+                      <tbody>
+                        {Object.entries(preview.folders ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([dir, n]) => (
+                          <tr key={dir}><td><code>{dir}/</code></td><td>{fmt(n)}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <table className="export-labels">
+                    <thead><tr>{preview.format !== 'voc' && <th>Id</th>}<th>Classe</th><th>Caixas</th></tr></thead>
+                    <tbody>
+                      {preview.classes.map((name, i) => (
+                        <tr key={name}>
+                          {preview.format !== 'voc' && <td>{preview.format === 'yolo' ? i : i + 1}</td>}
+                          <td>{name}</td>
+                          <td>{fmt(preview.boxes[name] ?? 0)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </>
+              )}
+              {(preview.skipped.not_annotated > 0 || preview.skipped.without_labels > 0) && (
+                <p className="profile-name-hint">
+                  Ficaram de fora: {fmt(preview.skipped.not_annotated)} verificada(s) que não estão na tarefa "{preview.task}"
+                  {preview.skipped.without_labels > 0 && ` e ${fmt(preview.skipped.without_labels)} sem nenhuma das labels escolhidas`}.
+                  Imagens pendentes não entram.
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  )
 }

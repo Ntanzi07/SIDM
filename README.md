@@ -74,6 +74,7 @@ SIDM/
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── boxes/          leitura das caixas exportadas do CVAT (COCO 1.0)
+        ├── export/         datasets de treino: perfis, divisão, COCO (RF-DETR) e YOLO
         ├── store/          Mongo: imagens, pacotes, fila, cadastros, perfis, histórico
         └── api/            handlers HTTP (dependem da interface Store) + openapi.yaml
 ```
@@ -101,6 +102,26 @@ SIDM/
 - **Equipamentos e câmeras** são cadastros no Mongo e entram no nome com o nome real sanitizado
   (espaço vira `-`; só `A-Z a-z 0-9 -`).
 - O `v2` é a versão do padrão. Se um dia o padrão mudar, o parser lê as duas versões.
+
+### Campo desconhecido = posição vazia
+
+Só o sha1 e a versão são obrigatórios. O que a imagem não tem, ou não dá para
+conferir (data, câmera, equipamento, placa ilegível, cor...), fica **vazio** na
+anotação e vira uma **posição vazia** no nome. Nenhum valor real é vazio, então
+nunca há ambiguidade, e o nome continua sendo lido de volta igual.
+
+| Caso | Trecho do nome |
+|---|---|
+| sem câmera | `..._8003-MF4739__F-08-...` |
+| sem data | `..._01__ABC1D23-M-8-T-WHT.jpg` |
+| placa ilegível | `..._20260903T112523Z_-M-8-T-WHT.jpg` |
+| sem veículo nenhum | `..._20260903T112523Z_.jpg` |
+| sem condições | `..._F-08-L-D-E-S__2026...` |
+| só a direção desconhecida | `..._-08-L-D-E-S_...` |
+| tudo desconhecido | `<sha1>_v2___-----___.jpg` |
+
+Um veículo com tudo desconhecido é `----` (é diferente de não ter veículo).
+Na tela de anotação, todo campo tem a opção **"Não informado"**.
 
 ---
 
@@ -134,12 +155,22 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 | `PUT /images/{sha1}` | salva o rascunho, ou verifica com `"complete": true` |
 | `DELETE /images/{sha1}` | apaga a imagem: registro, histórico, caixas e arquivo (recusa se outra pessoa está anotando) |
 | `GET /images/{sha1}/file` | o arquivo da imagem |
-| `GET /images/{sha1}/boxes` | as caixas (CVAT) da imagem |
+| `GET /images/{sha1}/boxes` | as caixas (CVAT) da imagem, em cada tarefa |
 | `POST /images/{sha1}/release` | devolve a imagem para a fila |
+| `POST /images/{sha1}/reopen` | reabre para edição: uma verificada volta a pendente (perde o nome v2) e fica reservada para quem pediu |
 | `POST /imports/inspect` | "raio-x" de um CSV (ou, com `?type=jpeg-ini`, do INI de até 20 imagens): colunas, exemplos e valores distintos |
 | `GET /packages/{name}/cvat.zip` | as imagens do pacote, para criar a task no CVAT |
-| `POST /packages/{name}/boxes/import` | importa o export COCO 1.0 do CVAT; ensaio por padrão |
-| `GET /packages/{name}/boxes` | resumo: imagens com caixas e caixas por label |
+| `GET /packages/{name}/boxes` | por tarefa: imagens do pacote anotadas nela |
+| `GET /tasks` | tarefas de anotação de caixas, com o resumo de cada uma |
+| `POST /tasks` | cria uma tarefa (`name`, `description`, `labels`) |
+| `GET`/`PUT`/`DELETE /tasks/{name}` | uma tarefa: resumo por pacote e label; renomear leva caixas e perfis junto; apagar leva as caixas |
+| `POST /tasks/{name}/import` | importa o export COCO 1.0 do CVAT na tarefa, procurando as imagens em todos os pacotes; ensaio por padrão |
+| `GET /export-profiles` | perfis de export: os padrões (`rf-detr`, `yolo`) e os salvos |
+| `POST /export-profiles` | cria um perfil de export |
+| `GET`/`PUT`/`DELETE /export-profiles/{name}` | um perfil de export (os padrões não mudam) |
+| `POST /exports/preview` | prévia do dataset: imagens por grupo, caixas por classe |
+| `POST /exports/download` | o zip do dataset |
+| `GET /export-folder-fields` | metadados que podem virar pasta no VOC por pastas, com o nome padrão de cada valor |
 | `GET /import-profiles` | lista os perfis de import |
 | `POST /import-profiles` | cria um perfil de import |
 | `GET /import-profiles/{name}` | um perfil |
@@ -200,6 +231,18 @@ caracteres como `.` e `*` são tratados como texto comum.
   nunca recebem a mesma imagem.
 - Toda gravação usa **optimistic locking** pelo `updated_at`: se alguém gravou no meio,
   volta `409` e nada é perdido.
+
+### Ver e reabrir imagens verificadas
+
+No detalhe do pacote, **Ver verificadas** abre as imagens já anotadas, só para
+leitura (com as caixas do CVAT por cima), navegando com anterior/próxima. Clicar
+no nome de uma imagem na lista também abre: as verificadas na visualização, as
+pendentes direto na anotação.
+
+**Editar** chama `POST /images/{sha1}/reopen`: a imagem volta para **pendente**
+(o arquivo perde o nome v2 até ser verificada de novo), a anotação atual fica
+como rascunho, e ela já fica **reservada** para quem clicou, para ninguém pegar
+na fila no meio. A reabertura vai para o histórico. As caixas não mudam.
 
 ### Editar e apagar cadastros e pacotes
 
@@ -370,36 +413,53 @@ explicando o problema, e o campo fica vazio.
 
 ---
 
-## Caixas (bounding boxes) do CVAT
+## Caixas (bounding boxes) do CVAT, por tarefa
 
 O SIDM **não desenha** caixas: elas são anotadas no **CVAT**, e o SIDM guarda o
-resultado, por pacote, para a exportação de treino.
+resultado para a exportação de treino.
 
-1. **Ida:** no detalhe do pacote, **Baixar imagens para o CVAT**
-   (`GET /packages/{nome}/cvat.zip`). As imagens vão com os nomes guardados no
-   SIDM, que começam pelo sha1. Crie a task no CVAT com esse zip.
-2. **No CVAT:** anote (carro, moto, placa, caracteres...) e exporte a task no
-   formato **COCO 1.0**.
-3. **Volta:** no detalhe do pacote, suba o zip exportado (ou só o `.json`) em
-   **Caixas (CVAT)**. Primeiro vem o **ensaio**, depois **Gravar caixas**.
+As caixas são organizadas em **tarefas** (tela **Tarefas**): cada projeto de
+anotação é uma tarefa, com as suas labels. Por exemplo, `capacete`
+(`com_capacete`, `sem_capacete`) e `placa-letras` (`A`…`Z`, `0`…`9`). **A mesma
+imagem pode estar em várias tarefas** sem que uma sobrescreva a outra. Os pacotes
+de uma tarefa não são escolhidos: são os das imagens anotadas nela.
+
+1. **Crie a tarefa** em **Tarefas → + Nova tarefa** (nome em minúsculas, sem
+   espaço; as labels, uma por linha).
+2. **Ida:** baixe as imagens para o CVAT (na tarefa, ou no detalhe do pacote:
+   `GET /packages/{nome}/cvat.zip`). Elas vão com os nomes guardados no SIDM, que
+   começam pelo sha1. Crie a task no CVAT com esse zip (dá para juntar zips de
+   vários pacotes numa task só).
+3. **No CVAT:** anote e exporte a task no formato **COCO 1.0**.
+4. **Volta:** na página da tarefa, em **Importar caixas do CVAT**, suba o zip
+   exportado (ou só o `.json`). Primeiro vem o **ensaio**, depois **Gravar caixas**.
 
 **Regras do import:**
-- **Casamento** pelo nome do arquivo (sem a pasta): se começa com um sha1, é por
-  ele; senão, pelo **nome original**, se for único no pacote. Usar o zip do passo
-  1 evita qualquer ambiguidade.
-- Imagens **sem caixa** no arquivo **não são mexidas**: o CVAT exporta todas as
-  imagens da task, inclusive as que ninguém anotou ainda.
+- As imagens são procuradas no **banco todo** (qualquer pacote). **Casamento** pelo
+  nome do arquivo (sem a pasta): se começa com um sha1, é por ele; senão, pelo
+  **nome original**, só se for único no banco todo (nomes como `IMG_0001.jpg` se
+  repetem entre câmeras: na dúvida, a imagem fica de fora). Usar o zip do passo 2
+  evita qualquer ambiguidade.
+- Imagens **sem caixa** no arquivo: por padrão **não são mexidas**, porque o CVAT
+  exporta todas as imagens da task, inclusive as que ninguém anotou ainda. Marque
+  **"Imagens sem nenhuma caixa entram como sem objetos"** só quando a task do CVAT
+  estiver toda anotada: aí elas entram na tarefa como **negativas** (sem objetos),
+  e o export as inclui sem caixas.
 - Imagens com **tamanho diferente** no CVAT e no SIDM são **puladas** (as caixas
   ficariam no lugar errado).
-- **Reimportar substitui** as caixas da imagem (a task mais nova vale).
+- **Reimportar substitui** as caixas da imagem **naquela tarefa** (as outras
+  tarefas não mudam).
+- Labels que a tarefa ainda não tem são **acrescentadas** à lista dela.
 - Caixas com problema (categoria desconhecida, largura zero) são ignoradas e
   aparecem nos avisos do ensaio.
 
-**Como fica no banco** (coleção `image_boxes`, um documento por imagem, `_id` = sha1):
+**Como fica no banco** (coleção `image_boxes`, um documento por tarefa e imagem;
+as tarefas ficam em `annotation_tasks`):
 
 ```json
 {
-  "_id": "a3f9...", "package": "Noturnas-Setembro", "width": 1920, "height": 1080,
+  "task": "veiculos", "image": "a3f9...", "package": "Noturnas-Setembro",
+  "width": 1920, "height": 1080,
   "boxes": [
     { "label": "carro", "x": 410.5, "y": 220, "w": 820, "h": 610 },
     { "label": "placa", "x": 790, "y": 640, "w": 140, "h": 45, "occluded": true,
@@ -412,8 +472,82 @@ resultado, por pacote, para a exportação de treino.
 
 As caixas ficam em **pixels** (`x, y` = canto superior esquerdo). `occluded` e
 `rotation` vêm do CVAT; outros atributos criados lá ficam em `attributes`.
-Renomear ou apagar o pacote (ou a imagem) leva as caixas junto. Na tela de
-anotação, as caixas aparecem por cima da imagem, só para conferência.
+`"boxes": []` é uma imagem negativa. Renomear ou apagar o pacote (ou a imagem) leva
+as caixas junto; renomear a tarefa leva as caixas e os perfis de export que apontam
+para ela; apagar a tarefa apaga só as caixas dela (as imagens ficam). Na tela de
+anotação e no visualizador, as caixas de todas as tarefas aparecem por cima da
+imagem, só para conferência.
+
+**Caixas de antes das tarefas:** ao subir, o backend move as caixas antigas (um
+conjunto por imagem) para a tarefa **`padrao`**, criada com as labels delas. Dá para
+renomeá-la depois.
+
+---
+
+## Export para treino (RF-DETR, YOLO, Pascal VOC)
+
+Na tela **Exportar**: escolha um perfil e a **tarefa**, veja a **prévia** e baixe
+o zip.
+
+**O que entra:** imagens **verificadas** e **anotadas na tarefa** escolhida que
+passam nos filtros do perfil. As anotadas como "sem objetos" entram sem caixas
+(negativas). Imagens pendentes não entram. Os perfis padrão servem para qualquer
+tarefa; um perfil próprio guarda a tarefa junto.
+
+**Perfis padrão** (não podem ser alterados; para mudar algo, salve com outro nome):
+
+| Perfil | Formato | Divisão |
+|---|---|---|
+| `rf-detr` | COCO no layout do Roboflow: `train/`, `valid/`, `test/`, cada um com as imagens e `_annotations.coco.json` | 70/15/15 |
+| `yolo` | Ultralytics: `images/{train,val,test}`, `labels/{train,val,test}` e `data.yaml` | 70/15/15 |
+| `voc` | Pascal VOC: `train/`, `valid/`, `test/`, cada imagem com o seu `.xml` ao lado | 70/15/15 |
+| `voc-pastas` | Pascal VOC em pastas pelos metadados: `Car/01-640x480/Br/Traseiro/Noturno/` (tipo de veículo / resolução / tipo de placa / direção / período), com o nome no **padrão antigo** | sem divisão |
+
+**Um perfil próprio controla:**
+- **tarefa** (as caixas de qual tarefa entram);
+- **formato e divisão** (porcentagens que somam 100; no YOLO a validação não pode ser 0);
+- **nome dos arquivos**: o do SIDM (v2), o **padrão antigo** (hash +
+  características + placa, ex.: `02d9…3a3fF01LDBEB1S01KOY7386.jpg`) ou um modelo
+  próprio com campos entre chaves, como `placa-{plate}_{sha1}`. Os campos de código
+  (`{direction}`, `{resolution}`, `{capture_angle}`, `{day_time}`, `{vehicle_type}`,
+  `{image_range}`, `{plate_type}`, `{plate_category}`, `{weather}`, `{condition}`,
+  `{vehicle_color}`) saem com o código do nome v2 (F/T, 01…10, …); há também
+  `{sha1}`, `{plate}`, `{captured_at}`, `{date}`, `{name}`, `{original}`,
+  `{package}`, `{equipment}` e `{camera}`. Campo sem valor vira `_` na largura dele
+  (o padrão antigo continua com tamanho fixo); os do veículo vêm do primeiro
+  veículo e a condição é a primeira da imagem. O modelo tem que ter `{sha1}` (ou
+  `{name}`), para os nomes não repetirem. O `.xml`, o `.txt` e o COCO usam o nome
+  novo;
+- **pastas de saída** (só no VOC): **por divisão** (`train/valid/test`) ou **por
+  pastas**, uma árvore com os níveis que você escolhe, na ordem que quiser: tipo de
+  veículo, tipo e categoria da placa, cor, resolução, direção, período, clima,
+  ângulo, alcance, equipamento, câmera, pacote e a própria divisão. Cada valor
+  ganha o nome de pasta que você der (`rear` → `Traseiro`); sem nome, vale o padrão
+  (o próprio valor; na resolução, `01-640x480`). Imagens sem o dado vão para
+  `Desconhecido` (ou o nome escolhido). Os dados do veículo vêm do primeiro veículo
+  da imagem. Sem o nível "Divisão", a divisão não é usada;
+- **pacotes** (vazio = todos);
+- **filtros de metadados** (período, clima, direção, tipo e cor do veículo, equipamento, câmera);
+- **labels**: quais entram e com que nome. Dar o mesmo nome a duas labels junta as
+  classes (`Placa` e `placa` viram `placa`). A ordem das classes define os ids
+  (YOLO começa em 0, COCO em 1) e aparece na prévia.
+
+**A divisão é fixa por imagem:** o grupo (train/valid/test) de cada imagem vem do
+sha1. Re-exportar com imagens novas não move uma imagem do test para o train, então
+dá para comparar treinos.
+
+**No zip:**
+- `export_info.json` com o perfil usado, a data, quem exportou e as contagens;
+- `FALTANDO.txt`, se alguma imagem não pôde ser lida do disco;
+- caixas **rotacionadas** do CVAT viram o menor retângulo reto que as contém (COCO e
+  YOLO de detecção só têm caixa reta);
+- o YOLO sai pronto para `yolo train data=data.yaml` depois de descompactar;
+- no VOC, cada imagem tem o seu `.xml` ao lado (coordenadas em pixels inteiros:
+  `xmin, ymin, xmax, ymax`; `truncated` = caixa encostada na borda; `occluded` vem
+  do CVAT), e um `labels.txt` na raiz lista as classes.
+
+O zip é gerado enquanto baixa: não ocupa disco no servidor, e o navegador salva
+direto no disco.
 
 ---
 
@@ -568,13 +702,11 @@ go tool cover -html=cover.out
 
 ## Próximos passos
 
-- [ ] **Export** (`POST /export`): zip das imagens filtradas ou de um pacote
 - [ ] **Login próprio** (usuário + senha bcrypt + sessão) no lugar do `X-User`
 - [ ] Embutir o Swagger UI no binário (hoje vem de um CDN; não abre em rede sem internet)
 - [ ] Graceful shutdown
 - [ ] Validador `$jsonSchema` no Mongo
 - [ ] Regra para veículo com placa ilegível
 - [ ] Detectar o perfil de INI sozinho, pelo modelo do equipamento (`Metrologico.Modelo`)
-- [ ] **Export para o RF-DETR** (COCO, 70/15/15) a partir das caixas do CVAT
 - [ ] Caixa da placa que vem no INI (`OCRPosicaoLeitura`) como caixa pré-anotada
 - [ ] Leitor de EXIF para o import

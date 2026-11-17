@@ -1,0 +1,64 @@
+.tasks-page .export-editor {
+  display: grid;
+  gap: 18px;
+}
+
+.tasks-page .create-card h2 {
+  margin-bottom: 12px;
+}
+
+.tasks-page .import-report__stats {
+  margin-bottom: 14px;
+}
+
+.tasks-page a.export-profile {
+  color: inherit;
+  text-decoration: none;
+}
+
+.tasks-labels {
+  margin-top: 14px;
+}
+
+.tasks-labels textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid #dfe3eb;
+  border-radius: 8px;
+  background: #fff;
+  color: #283247;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+}
+
+.tasks-labels textarea:focus {
+  border-color: #8189de;
+  outline: none;
+}
+
+.tasks-label-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.tasks-label-tools .profile-name-hint {
+  margin: 0;
+}
+
+.tasks-bad {
+  color: #c2410c;
+}
+
+.tasks-negatives {
+  margin-top: 14px;
+}
+
+.tasks-page a.button {
+  text-decoration: none;
+  text-align: center;
+}

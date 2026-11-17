@@ -10,6 +10,7 @@ import {
   imageFileUrl,
   nextImage,
   releaseImage,
+  reopenImage,
   saveAnnotation,
   searchCameras,
   searchEquipments,
@@ -144,7 +145,9 @@ function messageOf(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-export function useAnnotator(packageName: string) {
+// initialSha1: abre esta imagem primeiro (ex.: "Editar" numa verificada),
+// em vez da próxima da fila. Depois de salvar, segue pela fila normalmente.
+export function useAnnotator(packageName: string, initialSha1?: string) {
   const [codes, setCodes] = useState<CodesResponse>({})
   const [summary, setSummary] = useState<PackageSummary>()
   const [image, setImage] = useState<ImageDetail | null>(null)
@@ -203,7 +206,16 @@ export function useAnnotator(packageName: string) {
         setCodes(codesResponse)
         setSummary(packageSummary)
         const bySize = new Set(Object.values(codesResponse.resolution ?? {}))
-        await pull(undefined, bySize)
+        if (initialSha1) {
+          const detail = await reopenImage(initialSha1)
+          if (!active) return
+          setFinished(false)
+          await show(detail, bySize)
+          setHistory([detail.sha1])
+          setPosition(0)
+        } else {
+          await pull(undefined, bySize)
+        }
       })
       .catch((requestError: unknown) => { if (active) setError(messageOf(requestError, 'Não foi possível abrir a fila.')) })
       .finally(() => { if (active) setLoading(false) })
@@ -219,7 +231,7 @@ export function useAnnotator(packageName: string) {
       window.removeEventListener('pagehide', release)
       release()
     }
-  }, [packageName, pull])
+  }, [initialSha1, packageName, pull, show])
 
   const run = useCallback(async (action: () => Promise<void>, fallback: string) => {
     setSaving(true)
@@ -280,10 +292,11 @@ export function useAnnotator(packageName: string) {
     setForm((currentForm) => ({ ...currentForm, vehicles: [...currentForm.vehicles, defaultVehicle()] }))
   }, [])
 
+  // Pode ficar sem nenhum veículo (imagem sem veículo, ou sem como identificar).
   const removeVehicle = useCallback((index: number) => {
     setForm((currentForm) => ({
       ...currentForm,
-      vehicles: currentForm.vehicles.length > 1 ? currentForm.vehicles.filter((_, i) => i !== index) : currentForm.vehicles,
+      vehicles: currentForm.vehicles.filter((_, i) => i !== index),
     }))
   }, [])
 
@@ -304,20 +317,15 @@ export function useAnnotator(packageName: string) {
   const save = useCallback(() => run(async () => {
     if (!image) return
     const vehicles = form.vehicles.map((vehicle) => ({ ...vehicle, plate: vehicle.plate.replace(/\s/g, '').toUpperCase() }))
+    // Nenhum campo é obrigatório: vazio = não informado. Só o que veio
+    // preenchido precisa ser válido.
+    if (form.captured_at && !localInputToISO(form.captured_at)) {
+      throw new Error('Data e hora inválidas.')
+    }
     const capturedAt = localInputToISO(form.captured_at)
-    const missing = [
-      !form.equipment && 'equipamento',
-      !form.camera && 'câmera',
-      !form.resolution && 'resolução',
-      !capturedAt && 'data/hora',
-      vehicles.some((vehicle) => !vehicle.plate) && 'placa',
-      vehicles.some((vehicle) => !vehicle.type) && 'tipo do veículo',
-      vehicles.some((vehicle) => !vehicle.plate_type) && 'tipo da placa',
-      vehicles.some((vehicle) => !vehicle.plate_category) && 'categoria da placa',
-      vehicles.some((vehicle) => !vehicle.color) && 'cor',
-    ].filter(Boolean)
-    if (missing.length > 0) {
-      throw new Error(`Preencha: ${missing.join(', ')}.`)
+    const badPlate = vehicles.find((vehicle) => vehicle.plate && !/^[A-Z0-9]{7}$/.test(vehicle.plate))
+    if (badPlate) {
+      throw new Error(`Placa "${badPlate.plate}" inválida: são 7 letras/números. Se não dá para ler, deixe vazio.`)
     }
     const invalid = invalidValues(form, vehicles)
     if (invalid.length > 0) {
@@ -325,8 +333,8 @@ export function useAnnotator(packageName: string) {
     }
     // Equipamento e câmera precisam estar cadastrados (o backend confere).
     // Se não estiverem, a pessoa confirma o cadastro aqui mesmo.
-    const equipment = await ensureRegistered('equipment', form.equipment)
-    const camera = await ensureRegistered('camera', form.camera)
+    const equipment = form.equipment.trim() ? await ensureRegistered('equipment', form.equipment) : ''
+    const camera = form.camera.trim() ? await ensureRegistered('camera', form.camera) : ''
     setForm((currentForm) => ({ ...currentForm, equipment, camera }))
     await saveAnnotation(image.sha1, { ...form, equipment, camera, vehicles }, capturedAt)
     const wasRevisiting = position < history.length - 1

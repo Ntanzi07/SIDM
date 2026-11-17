@@ -20,6 +20,7 @@ import (
 const (
 	FormatCOCO = "coco" // layout do Roboflow, o que o RF-DETR lê: train/valid/test com _annotations.coco.json
 	FormatYOLO = "yolo" // Ultralytics: images/, labels/ e data.yaml
+	FormatVOC  = "voc"  // Pascal VOC: um .xml por imagem, ao lado dela
 )
 
 // Nomes dos grupos da divisão.
@@ -35,6 +36,13 @@ type Profile struct {
 	Description string `json:"description,omitempty" bson:"description,omitempty"`
 	Format      string `json:"format" bson:"format"`
 	Split       Split  `json:"split" bson:"split"`
+	// Layout: "split" (train/valid/test, o padrão) ou "folders" (árvore de
+	// pastas pelos metadados, nos níveis de Folders; só VOC).
+	Layout  string        `json:"layout,omitempty" bson:"layout,omitempty"`
+	Folders []FolderLevel `json:"folders,omitempty" bson:"folders,omitempty"`
+	// FileName: modelo do nome dos arquivos de saída (ver rename.go). Vazio =
+	// o nome guardado no SIDM (v2).
+	FileName string `json:"file_name,omitempty" bson:"file_name,omitempty"`
 	// Task: a tarefa de anotação cujas caixas entram. Vazio = escolher na
 	// hora de exportar (os perfis padrão servem para qualquer tarefa).
 	Task string `json:"task,omitempty" bson:"task,omitempty"`
@@ -91,6 +99,22 @@ func Builtins() []Profile {
 			Name: "yolo", Format: FormatYOLO, Split: Split{70, 15, 15}, Builtin: true,
 			Description: "YOLO (Ultralytics): images/, labels/ e data.yaml, 70/15/15, todas as labels e pacotes.",
 		},
+		{
+			Name: "voc", Format: FormatVOC, Split: Split{70, 15, 15}, Layout: LayoutSplit, Builtin: true,
+			Description: "Pascal VOC: train/valid/test, cada imagem com o seu .xml ao lado, 70/15/15.",
+		},
+		{
+			Name: "voc-pastas", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Builtin: true,
+			Description: "Pascal VOC em pastas: tipo de veículo / resolução / tipo de placa / direção / período (sem divisão), com o nome no padrão antigo (hash + características + placa).",
+			FileName:    TemplateLegacy,
+			Folders: []FolderLevel{
+				{Field: "vehicle_type", Names: map[string]string{"car": "Car", "bus": "Bus", "truck": "Truck", "motorcycle": "motorCycle"}},
+				{Field: "resolution"},
+				{Field: "plate_type", Names: map[string]string{"br": "Br", "mercosul": "Mercosul"}},
+				{Field: "direction", Names: map[string]string{"front": "Dianteiro", "rear": "Traseiro"}},
+				{Field: "day_time", Names: map[string]string{"day": "Diurno", "night": "Noturno"}},
+			},
+		},
 	}
 }
 
@@ -119,6 +143,8 @@ func (p *Profile) Normalize() {
 	p.Description = strings.TrimSpace(p.Description)
 	p.Format = strings.ToLower(strings.TrimSpace(p.Format))
 	p.Task = strings.TrimSpace(p.Task)
+	p.normalizeFolders()
+	p.normalizeFileName()
 	pkgs := p.Packages[:0:0]
 	for _, name := range p.Packages {
 		if name = strings.TrimSpace(name); name != "" {
@@ -158,12 +184,16 @@ func (p *Profile) Validate() error {
 	if _, builtin := Builtin(p.Name); builtin && !p.Builtin {
 		add("name: %q é um perfil padrão do sistema; use outro nome", p.Name)
 	}
-	if p.Format != FormatCOCO && p.Format != FormatYOLO {
-		add("format: use %q (RF-DETR) ou %q", FormatCOCO, FormatYOLO)
+	if p.Format != FormatCOCO && p.Format != FormatYOLO && p.Format != FormatVOC {
+		add("format: use %q (RF-DETR), %q ou %q (Pascal VOC)", FormatCOCO, FormatYOLO, FormatVOC)
 	}
+	p.validateFolders(add)
+	p.validateFileName(add)
 	s := p.Split
 	if s.Train < 0 || s.Valid < 0 || s.Test < 0 || s.Train+s.Valid+s.Test != 100 {
 		add("split: as porcentagens têm que ser positivas e somar 100 (veio %d/%d/%d)", s.Train, s.Valid, s.Test)
+	} else if !p.usesSplit() {
+		// pastas sem nível "split": a divisão não é usada
 	} else if s.Train == 0 {
 		add("split: train não pode ser 0")
 	} else if p.Format == FormatYOLO && s.Valid == 0 {

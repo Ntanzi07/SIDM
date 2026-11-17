@@ -1,0 +1,163 @@
+.viewer-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 32px 48px;
+}
+
+.viewer-page .back-button {
+  margin-bottom: 0;
+}
+
+.viewer-header {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+
+.viewer-header__title h1 {
+  margin: 0;
+  color: #283247;
+  font-size: 20px;
+}
+
+.viewer-header__title p {
+  margin: 2px 0 0;
+  color: #7d8798;
+  font-size: 13px;
+}
+
+.viewer-nav {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.viewer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.viewer-image {
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border: 1px solid #e5e8ef;
+  border-radius: 10px;
+  background: #f1f3f7;
+}
+
+.viewer-image__meta {
+  margin: 12px 0 0;
+  color: #7d8798;
+  font-size: 12px;
+}
+
+.viewer-card {
+  padding: 22px;
+  border: 1px solid #e5e8ef;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.viewer-card__heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.viewer-card__heading h2 {
+  display: inline;
+  margin: 0 10px 0 0;
+  color: #283247;
+  font-size: 18px;
+}
+
+.viewer-card h3 {
+  margin: 20px 0 10px;
+  color: #283247;
+  font-size: 14px;
+}
+
+.viewer-badge {
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #e7f6ee;
+  color: #1f8a57;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.viewer-badge--pending {
+  background: #fdf3dc;
+  color: #a46a00;
+}
+
+.viewer-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.viewer-field span {
+  display: block;
+  color: #7d8798;
+  font-size: 11px;
+}
+
+.viewer-field strong {
+  color: #283247;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.viewer-field--unknown strong {
+  color: #a7afbd;
+  font-weight: 500;
+}
+
+.viewer-vehicle {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border: 1px solid #edf0f4;
+  border-radius: 8px;
+}
+
+.viewer-vehicle strong {
+  color: #283247;
+  font-size: 14px;
+  letter-spacing: 0.04em;
+}
+
+.viewer-vehicle span {
+  color: #697386;
+  font-size: 12px;
+}
+
+.viewer-filename {
+  margin: 18px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid #edf0f4;
+  color: #8a93a3;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.viewer-empty {
+  color: #7d8798;
+  font-size: 13px;
+}
+
+@media (max-width: 900px) {
+  .viewer-layout {
+    grid-template-columns: 1fr;
+  }
+}

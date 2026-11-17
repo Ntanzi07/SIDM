@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { annotationOptions } from '../../data/annotationOptions'
-import { getImageBoxes, imageFileUrl, searchCameras, searchEquipments, type BoxSet, type PageResponse } from '../../services/api'
+import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
+import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
+import { searchCameras, searchEquipments, type PageResponse } from '../../services/api'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import type { AnnotationForm } from '../../types/annotation'
 import './Annotation.css'
@@ -11,24 +13,22 @@ type SelectFieldProps = {
   label: string
   value: string
   options: readonly (readonly [string, string])[]
-  placeholder?: string // com placeholder, o campo pode ficar vazio
   onChange: (value: string) => void
 }
 
-function SelectField({ label, value, options, placeholder, onChange }: SelectFieldProps) {
+// Todo campo pode ficar "Não informado" (vazio): imagem sem dado, ou que não
+// dá para conferir. No nome v2, vira uma posição vazia.
+function SelectField({ label, value, options, onChange }: SelectFieldProps) {
   // Valor que não está na lista (ex.: veio de um import sem tradução). Sem
   // isto, o navegador mostraria a primeira opção, e escolher essa opção não
   // dispararia mudança: o valor errado ficaria preso.
-  // O mesmo vale para o valor VAZIO: sem uma opção vazia, o navegador
-  // mostraria a primeira da lista, mas o valor continuaria "".
   const invalid = value !== '' && !options.some(([option]) => option === value)
-  const empty = value === ''
   return (
-    <label className={invalid || empty ? 'annotation-field annotation-field--invalid' : 'annotation-field'}>
+    <label className={`annotation-field${invalid ? ' annotation-field--invalid' : ''}${value === '' ? ' annotation-field--unknown' : ''}`}>
       <span>{label}</span>
       <select value={value} onChange={(event) => onChange(event.target.value)}>
         {invalid && <option value={value}>"{value}" (inválido: escolha outro)</option>}
-        {(empty || placeholder !== undefined) && <option disabled={!empty} value="">{placeholder ?? 'Selecione'}</option>}
+        <option value="">Não informado</option>
         {options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
       </select>
     </label>
@@ -141,57 +141,6 @@ function AutocompleteField({ label, value, search, placeholder, onChange }: Auto
   )
 }
 
-// Cor fixa por label (a mesma label tem sempre a mesma cor).
-const BOX_COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d']
-function colorOf(label: string): string {
-  let hash = 0
-  for (const char of label) hash = (hash * 31 + char.charCodeAt(0)) | 0
-  return BOX_COLORS[Math.abs(hash) % BOX_COLORS.length]
-}
-
-// A imagem com as caixas do CVAT por cima (só para conferir). As caixas são
-// em pixels da imagem no CVAT: viram porcentagem para acompanhar o tamanho
-// em que a imagem aparece na tela.
-function ImageWithBoxes({ sha1, alt, set, show }: { sha1: string; alt: string; set: BoxSet | null; show: boolean }) {
-  return (
-    <div className="annotation-boxes-frame">
-      <img alt={alt} src={imageFileUrl(sha1)} />
-      {show && set && set.width > 0 && set.height > 0 && set.boxes.map((box, i) => (
-        <div
-          className="annotation-box"
-          key={i}
-          style={{
-            left: `${(box.x / set.width) * 100}%`,
-            top: `${(box.y / set.height) * 100}%`,
-            width: `${(box.w / set.width) * 100}%`,
-            height: `${(box.h / set.height) * 100}%`,
-            borderColor: colorOf(box.label),
-            borderStyle: box.occluded ? 'dashed' : 'solid',
-            transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
-          }}
-          title={[box.label, box.occluded ? 'oculta' : '', ...Object.entries(box.attributes ?? {}).map(([k, v]) => `${k}: ${String(v)}`)].filter(Boolean).join(' · ')}
-        >
-          <span style={{ background: colorOf(box.label) }}>{box.label}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// As caixas da imagem aberta (null: sem caixas, ou ainda carregando).
-function useImageBoxes(sha1: string | undefined): BoxSet | null {
-  const [loaded, setLoaded] = useState<{ sha1?: string; set: BoxSet | null }>({ set: null })
-  useEffect(() => {
-    if (!sha1) return
-    let active = true
-    getImageBoxes(sha1)
-      .then((set) => { if (active) setLoaded({ sha1, set }) })
-      .catch(() => { if (active) setLoaded({ sha1, set: null }) })
-    return () => { active = false }
-  }, [sha1])
-  return loaded.sha1 === sha1 ? loaded.set : null
-}
-
 function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
@@ -200,12 +149,13 @@ export function AnnotationPage() {
   const navigate = useNavigate()
   const { id } = useParams()
   const packageName = decodeURIComponent(id ?? '')
-  const annotator = useAnnotator(packageName)
+  const [searchParams] = useSearchParams()
+  const annotator = useAnnotator(packageName, searchParams.get('imagem') ?? undefined)
   const { image, form, codes } = annotator
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showBoxes, setShowBoxes] = useState(true)
-  const boxSet = useImageBoxes(annotator.image?.sha1)
+  const boxSets = useImageBoxes(annotator.image?.sha1)
 
   const update = <K extends keyof AnnotationForm>(field: K, value: AnnotationForm[K]) => annotator.updateForm(field, value)
 
@@ -285,17 +235,17 @@ export function AnnotationPage() {
               <div className="annotation-preview-column">
                 <div className="annotation-preview-card">
                   <div className="annotation-preview">
-                    <ImageWithBoxes alt={image.original_name} set={boxSet} sha1={image.sha1} show={showBoxes} />
+                    <ImageWithBoxes alt={image.original_name} sets={boxSets} sha1={image.sha1} show={showBoxes} />
                   </div>
                   <div className="annotation-image-meta">
                     <div>
                       <strong>{image.original_name}</strong>
                       <span>
                         {formatSize(image.size)} · {image.ext}
-                        {boxSet && boxSet.boxes.length > 0 && (
-                          <label className="annotation-boxes-toggle">
+                        {boxSets.length > 0 && (
+                          <label className="annotation-boxes-toggle" title="Caixas do CVAT, por tarefa">
                             <input checked={showBoxes} onChange={(event) => setShowBoxes(event.target.checked)} type="checkbox" />
-                            {boxSet.boxes.length} caixa(s) do CVAT
+                            {describeBoxSets(boxSets)}
                           </label>
                         )}
                       </span>
@@ -345,7 +295,7 @@ export function AnnotationPage() {
                   <label className="annotation-field">
                     <span>Resolução</span>
                     <select value={form.resolution} onChange={(event) => update('resolution', event.target.value)}>
-                      <option value="">Selecione</option>
+                      <option value="">Não informado</option>
                       {Object.values(codes.resolution ?? {}).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10)).map((size) => <option key={size} value={size}>{size}</option>)}
                     </select>
                   </label>
@@ -360,13 +310,15 @@ export function AnnotationPage() {
                 </div>
 
                 <p className="annotation-hint">
+                  Nenhum campo é obrigatório: deixe vazio (ou "Não informado") o que a imagem não tem ou não dá para conferir.
                   Equipamento ou câmera novo: digite o nome e salve; a tela pede para confirmar o cadastro.
                   Para renomear ou desativar, use <Link to="/configurar">Configurar</Link>.
                 </p>
 
                 <label className="annotation-field annotation-condition">
                   <span>Condição</span>
-                  <select value={form.conditions[0] ?? 'no_damage'} onChange={(event) => update('conditions', [event.target.value])}>
+                  <select value={form.conditions[0] ?? ''} onChange={(event) => update('conditions', event.target.value ? [event.target.value] : [])}>
+                    <option value="">Não informado</option>
                     {annotationOptions.condition.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
                   </select>
                 </label>
@@ -376,28 +328,29 @@ export function AnnotationPage() {
                   <div className="vehicle-row" key={index}>
                     <div className="vehicle-row-header">
                       <h3>Veículo {index + 1}</h3>
-                      {form.vehicles.length > 1 && (
-                        <button
-                          className="button button--danger button--sm"
-                          onClick={() => annotator.removeVehicle(index)}
-                          type="button"
-                        >
-                          Remover
-                        </button>
-                      )}
+                      <button
+                        className="button button--danger button--sm"
+                        onClick={() => annotator.removeVehicle(index)}
+                        type="button"
+                      >
+                        Remover
+                      </button>
                     </div>
                     <div className="annotation-fields">
                       <label className="annotation-field">
                         <span>Placa</span>
-                        <input required value={vehicle.plate} onChange={(event) => annotator.updateVehicle(index, { plate: event.target.value.toUpperCase() })} />
+                        <input placeholder="Ilegível? Deixe vazio" value={vehicle.plate} onChange={(event) => annotator.updateVehicle(index, { plate: event.target.value.toUpperCase() })} />
                       </label>
                       <SelectField label="Tipo" value={vehicle.type} options={annotationOptions.type} onChange={(value) => annotator.updateVehicle(index, { type: value })} />
                       <SelectField label="Tipo da placa" value={vehicle.plate_type} options={annotationOptions.plate_type} onChange={(value) => annotator.updateVehicle(index, { plate_type: value })} />
                       <SelectField label="Categoria" value={vehicle.plate_category} options={annotationOptions.plate_category} onChange={(value) => annotator.updateVehicle(index, { plate_category: value })} />
-                      <SelectField label="Cor" value={vehicle.color} options={annotationOptions.color} placeholder="Selecione" onChange={(value) => annotator.updateVehicle(index, { color: value })} />
+                      <SelectField label="Cor" value={vehicle.color} options={annotationOptions.color} onChange={(value) => annotator.updateVehicle(index, { color: value })} />
                     </div>
                   </div>
                 ))}
+                {form.vehicles.length === 0 && (
+                  <p className="annotation-hint">Nenhum veículo nesta imagem.</p>
+                )}
 
                 <button
                   className="button button--secondary annotation-add-vehicle"

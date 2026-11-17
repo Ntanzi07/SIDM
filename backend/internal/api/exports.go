@@ -18,7 +18,7 @@ import (
 	"SIDM/internal/store"
 )
 
-// Export de datasets de treino (RF-DETR / YOLO).
+// Export de datasets de treino (RF-DETR / YOLO / Pascal VOC).
 //
 //	GET    /export-profiles            perfis padrão (rf-detr, yolo) + os salvos
 //	POST   /export-profiles            cria um perfil
@@ -27,6 +27,7 @@ import (
 //	DELETE /export-profiles/{name}     apaga (os padrões não)
 //	POST   /exports/preview            o que vai sair: imagens por grupo, caixas por classe
 //	POST   /exports/download           o zip do dataset
+//	GET    /export-folder-fields       metadados que podem virar pasta (layout por pastas)
 //
 // Entram as imagens VERIFICADAS e ANOTADAS NA TAREFA escolhida que passam
 // nos filtros do perfil (as anotadas sem nenhuma caixa entram como negativas).
@@ -162,6 +163,27 @@ func (s *Server) handleDeleteExportProfile(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"name": name, "deleted": true})
 }
 
+// GET /export-folder-fields
+// Os campos do modelo de nome dos arquivos (name_fields, legacy_template) e
+// os metadados que podem virar nível de pasta (layout por pastas), com os
+// valores possíveis e o nome padrão da pasta de cada um (null = campo aberto,
+// como equipamento e câmera: a pasta é o próprio valor).
+func (s *Server) handleExportFolderFields(w http.ResponseWriter, r *http.Request) {
+	type field struct {
+		Field  string            `json:"field"`
+		Values map[string]string `json:"values"`
+	}
+	out := make([]field, 0, len(export.FolderFields))
+	for _, f := range export.FolderFields {
+		out = append(out, field{Field: f, Values: export.FolderValues(f)})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"items": out, "unknown": export.DefaultUnknown,
+		// campos do modelo de nome dos arquivos de saída, e o padrão antigo
+		"name_fields": export.NameFields(), "legacy_template": export.TemplateLegacy,
+	})
+}
+
 // exportRequest: {"profile": "rf-detr", "task": "capacete"} (um perfil
 // salvo/padrão) ou {"profile": {...}, "task": ...} (um perfil montado na
 // tela, sem salvar). "task" vale mais que a tarefa do perfil; se nenhum dos
@@ -230,11 +252,27 @@ func (s *Server) parseExportRequest(w http.ResponseWriter, r *http.Request) (*ex
 		return nil, "", false
 	}
 	// Perfil montado na tela e ainda não salvo: o nome só vai no nome do zip.
-	if _, builtin := export.Builtin(p.Name); builtin || p.Name == "" {
+	// Um padrão sem mudanças (só a tarefa escolhida) é o próprio padrão.
+	if b, builtin := export.Builtin(p.Name); builtin && sameProfile(p, b) {
+		b.Task = p.Task
+		return &b, req.Task, true
+	} else if builtin || p.Name == "" {
 		p.Name = "personalizado"
 	}
 	vp, ok := validExportProfile(w, &p)
 	return vp, req.Task, ok
+}
+
+// sameProfile: os dois perfis geram o mesmo dataset (a tarefa não conta: os
+// padrões não têm tarefa).
+func sameProfile(a, b export.Profile) bool {
+	for _, p := range []*export.Profile{&a, &b} {
+		p.Builtin, p.Task, p.CreatedBy, p.UpdatedAt = false, "", "", time.Time{}
+		p.Normalize()
+	}
+	ja, _ := json.Marshal(a)
+	jb, _ := json.Marshal(b)
+	return bytes.Equal(ja, jb)
 }
 
 // exportPreview é o resumo do que vai sair.
@@ -242,11 +280,14 @@ type exportPreview struct {
 	Profile   string         `json:"profile"`
 	Task      string         `json:"task"`
 	Format    string         `json:"format"`
+	Layout    string         `json:"layout"`
 	Split     export.Split   `json:"split"`
 	Classes   []string       `json:"classes"`
 	Total     int            `json:"total"`     // imagens no dataset
 	Negatives int            `json:"negatives"` // dessas, as sem nenhuma caixa (anotadas como vazias)
 	Images    map[string]int `json:"images"`    // por grupo
+	Folders   map[string]int `json:"folders"`   // por pasta (layout por pastas; vazio no por divisão)
+	Examples  []string       `json:"examples"`  // os primeiros nomes de arquivo, como vão sair
 	Boxes     map[string]int `json:"boxes"`     // por classe
 	Skipped   exportSkipped  `json:"skipped"`
 	Packages  []string       `json:"packages"` // os que entraram (vazio no perfil = todos)
@@ -260,8 +301,8 @@ type exportSkipped struct {
 // collectExport passa pelas imagens do perfil e monta os itens do dataset.
 func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export.Item, *exportPreview, error) {
 	prev := &exportPreview{
-		Profile: p.Name, Task: p.Task, Format: p.Format, Split: p.Split,
-		Images: map[string]int{}, Boxes: map[string]int{}, Packages: p.Packages,
+		Profile: p.Name, Task: p.Task, Format: p.Format, Layout: p.Layout, Split: p.Split,
+		Images: map[string]int{}, Folders: map[string]int{}, Examples: []string{}, Boxes: map[string]int{}, Packages: p.Packages,
 	}
 	if prev.Packages == nil {
 		prev.Packages = []string{}
@@ -301,11 +342,16 @@ func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export
 					prev.Skipped.NotAnnotated++
 					continue
 				}
+				stored := path.Base(img.Path)
+				meta := imageMeta(&img)
 				item := export.Item{
-					SHA1: img.SHA1, FileName: path.Base(img.Path),
-					Width: set.Width, Height: set.Height,
-					Split: export.SplitOf(img.SHA1, p.Split),
-					Open:  s.opener(img.Path),
+					SHA1: img.SHA1, Width: set.Width, Height: set.Height,
+					FileName: p.FileNameOf(export.NameMeta(img.SHA1, stored, img.OriginalName, meta), path.Ext(stored)),
+					Split:    export.SplitOf(img.SHA1, p.Split),
+					Open:     s.opener(img.Path),
+				}
+				if p.Layout == export.LayoutFolders {
+					item.Dir = p.Dir(meta, item.Split)
 				}
 				for _, b := range set.Boxes {
 					if name, ok := labels.Map(b.Label); ok {
@@ -322,7 +368,13 @@ func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export
 					continue
 				}
 				items = append(items, item)
+				if len(prev.Examples) < 3 {
+					prev.Examples = append(prev.Examples, path.Join(item.Dir, item.FileName))
+				}
 				prev.Images[item.Split]++
+				if item.Dir != "" {
+					prev.Folders[item.Dir]++
+				}
 				for _, b := range item.Boxes {
 					prev.Boxes[b.Label]++
 				}
@@ -335,6 +387,29 @@ func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export
 	prev.Total = len(items)
 	prev.Classes = labels.Classes(seen)
 	return items, prev, nil
+}
+
+// imageMeta: os metadados da imagem que viram pasta ou parte do nome de
+// saída (os do veículo vêm do primeiro veículo; a condição é a primeira).
+func imageMeta(img *store.Image) export.Meta {
+	m := export.Meta{
+		"resolution": img.Resolution, "direction": img.Direction, "day_time": img.DayTime,
+		"weather": img.Weather, "capture_angle": img.CaptureAngle, "image_range": img.ImageRange,
+		"equipment": img.Equipment, "camera": img.Camera, "package": img.Package,
+	}
+	if len(img.Vehicles) > 0 {
+		v := img.Vehicles[0]
+		m["vehicle_type"], m["plate_type"], m["plate_category"], m["vehicle_color"] = v.Type, v.PlateType, v.PlateCategory, v.Color
+		m["plate"] = v.Plate
+	}
+	if len(img.Conditions) > 0 {
+		m["condition"] = img.Conditions[0]
+	}
+	if img.CapturedAt != nil {
+		t := img.CapturedAt.UTC()
+		m["captured_at"], m["date"] = t.Format("20060102T150405Z"), t.Format("20060102")
+	}
+	return m
 }
 
 func (s *Server) opener(rel string) func() (io.ReadCloser, error) {

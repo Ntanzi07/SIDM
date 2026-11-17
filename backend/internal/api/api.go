@@ -184,6 +184,7 @@ func (s *Server) routes() []route {
 		{"PUT", "/tasks/{name}", s.handleReplaceTask},
 		{"DELETE", "/tasks/{name}", s.handleDeleteTask},
 		{"POST", "/tasks/{name}/import", s.handleImportTask},
+		{"GET", "/export-folder-fields", s.handleExportFolderFields},
 		{"GET", "/export-profiles", s.handleListExportProfiles},
 		{"POST", "/export-profiles", s.handleCreateExportProfile},
 		{"GET", "/export-profiles/{name}", s.handleGetExportProfile},

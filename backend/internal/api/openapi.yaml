@@ -25,11 +25,11 @@ tags:
     description: Import de metadados por CSV, usando perfis.
   - name: export
     description: |
-      Datasets de treino (RF-DETR / YOLO). Entram as imagens **verificadas** e
+      Datasets de treino (RF-DETR / YOLO / Pascal VOC). Entram as imagens **verificadas** e
       **anotadas na tarefa** escolhida que passam nos filtros do perfil (as
       anotadas sem nenhuma caixa entram como negativas). A divisão
       train/valid/test é **fixa por imagem** (pelo sha1). Perfis padrão:
-      `rf-detr` e `yolo`.
+      `rf-detr`, `yolo`, `voc` e `voc-pastas`.
   - name: caixas
     description: |
       Caixas (bounding boxes) anotadas no CVAT, por **tarefa** (ex.: `capacete`,
@@ -485,6 +485,42 @@ paths:
               schema: { $ref: "#/components/schemas/BoxImportReport" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /export-folder-fields:
+    get:
+      tags: [export]
+      summary: Metadados que podem virar pasta (layout por pastas, VOC)
+      description: |
+        Para montar os níveis de pasta de um perfil `layout: folders`. `values`
+        traz cada valor possível e o nome padrão da pasta (na resolução,
+        `01-640x480`); `null` = campo aberto (equipamento, câmera, pacote): a
+        pasta é o próprio valor. Os campos do veículo vêm do primeiro veículo
+        da imagem; `split` é o grupo da divisão (train/valid/test).
+      responses:
+        "200":
+          description: Os campos.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unknown: { type: string, example: Desconhecido, description: Pasta padrão das imagens sem o metadado. }
+                  name_fields:
+                    type: array
+                    items: { type: string }
+                    description: Campos aceitos no modelo de nome dos arquivos (file_name).
+                  legacy_template: { type: string, description: O padrão antigo (hash + características + placa). }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        field: { type: string, example: direction }
+                        values:
+                          type: object
+                          nullable: true
+                          additionalProperties: { type: string }
+                          example: { front: front, rear: rear }
 
   /export-profiles:
     get:
@@ -1220,7 +1256,35 @@ components:
       properties:
         name: { type: string, example: yolo-placas-noite }
         description: { type: string }
-        format: { type: string, enum: [coco, yolo], description: "coco = RF-DETR (layout do Roboflow)." }
+        format: { type: string, enum: [coco, yolo, voc], description: "coco = RF-DETR (layout do Roboflow); voc = Pascal VOC (um .xml por imagem, ao lado dela)." }
+        file_name:
+          type: string
+          example: "{sha1}{direction}{resolution}{capture_angle}{day_time}{vehicle_type}{image_range}{plate_type}{plate_category}{weather}{condition}{plate}"
+          description: |
+            Modelo do nome dos arquivos de saída (a extensão é a do arquivo guardado);
+            vazio = o nome do SIDM (v2). Campos entre chaves (ver name_fields em
+            GET /export-folder-fields); os de código saem com o código do nome v2
+            (direção F/T, resolução 01…10, …). Campo sem valor vira "_" na largura
+            dele. Tem que ter {sha1} ou {name}.
+        layout:
+          type: string
+          enum: [split, folders]
+          default: split
+          description: "split = train/valid/test; folders = árvore de pastas pelos metadados (só VOC; a divisão só vale com um nível split)."
+        folders:
+          type: array
+          description: Níveis de pasta, na ordem (layout folders).
+          items:
+            type: object
+            required: [field]
+            properties:
+              field: { type: string, example: direction, description: "Um dos campos de GET /export-folder-fields." }
+              names:
+                type: object
+                additionalProperties: { type: string }
+                description: Valor -> nome da pasta (os que faltam usam o nome padrão).
+                example: { front: Dianteiro, rear: Traseiro }
+              unknown: { type: string, description: "Pasta das imagens sem o metadado (padrão: Desconhecido)." }
         task: { type: string, description: "Tarefa de anotação (vazio = escolher na hora de exportar)." }
         split:
           type: object
@@ -1281,6 +1345,7 @@ components:
         profile: { type: string }
         task: { type: string }
         format: { type: string }
+        layout: { type: string }
         split:
           type: object
           properties:
@@ -1297,6 +1362,14 @@ components:
           type: object
           additionalProperties: { type: integer }
           description: Imagens por grupo (train/valid/test).
+        folders:
+          type: object
+          additionalProperties: { type: integer }
+          description: Imagens por pasta (layout folders).
+        examples:
+          type: array
+          items: { type: string }
+          description: Os primeiros nomes de arquivo, como vão sair (com a pasta).
         boxes:
           type: object
           additionalProperties: { type: integer }

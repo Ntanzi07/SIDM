@@ -6,6 +6,8 @@ import { CreatePackagePage } from '../pages/Packages/CreatePackagePage'
 import { PackageDetailPage } from '../pages/Packages/PackageDetailPage'
 import { AnnotationPage } from '../pages/Annotation/AnnotationPage'
 import { SettingsPage } from '../pages/Settings/SettingsPage'
+import { ImageViewerPage } from '../pages/Viewer/ImageViewerPage'
+import { TasksPage } from '../pages/Tasks/TasksPage'
 
 export function Router() {
   return (
@@ -18,6 +20,9 @@ export function Router() {
           <Route path="/configurar" element={<SettingsPage />} />
           <Route path="/pacotes/:id" element={<PackageDetailPage />} />
           <Route path="/pacotes/:id/anotacao" element={<AnnotationPage />} />
+          <Route path="/pacotes/:id/verificadas" element={<ImageViewerPage />} />
+          <Route path="/tarefas" element={<TasksPage />} />
+          <Route path="/tarefas/:name" element={<TasksPage />} />
           <Route path="/exportar" element={<ExportPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
