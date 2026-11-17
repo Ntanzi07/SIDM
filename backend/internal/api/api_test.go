@@ -44,6 +44,7 @@ type memStore struct {
 	profiles   map[string]importer.Profile
 	images     map[string]store.Image
 	history    []store.HistoryEntry
+	boxSets    map[string]store.BoxSet
 	lastFilter store.ImageFilter
 	lastSearch searchCall
 
@@ -58,6 +59,7 @@ func newMemStore() *memStore {
 		equipments: map[string]bool{},
 		cameras:    map[string]bool{},
 		packages:   map[string]store.Package{},
+		boxSets:    map[string]store.BoxSet{},
 		profiles:   map[string]importer.Profile{},
 		images:     map[string]store.Image{},
 	}
@@ -531,6 +533,12 @@ func (m *memStore) RenamePackage(ctx context.Context, oldName, newName string) (
 			n++
 		}
 	}
+	for id, set := range m.boxSets {
+		if set.Package == oldName {
+			set.Package = newName
+			m.boxSets[id] = set
+		}
+	}
 	return n, nil
 }
 
@@ -554,8 +562,68 @@ func (m *memStore) DeletePackage(ctx context.Context, name string) (int64, error
 		}
 	}
 	m.history = kept
+	for id, set := range m.boxSets {
+		if set.Package == name {
+			delete(m.boxSets, id)
+		}
+	}
 	delete(m.packages, name)
 	return int64(len(deleted)), nil
+}
+
+func (m *memStore) ReplaceBoxSets(ctx context.Context, sets []store.BoxSet) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, set := range sets {
+		m.boxSets[set.ImageID] = set
+	}
+	return nil
+}
+
+func (m *memStore) FindBoxSet(ctx context.Context, sha1 string) (*store.BoxSet, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	set, ok := m.boxSets[sha1]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return &set, nil
+}
+
+func (m *memStore) BoxImageIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := map[string]bool{}
+	for _, id := range ids {
+		if _, ok := m.boxSets[id]; ok {
+			out[id] = true
+		}
+	}
+	return out, nil
+}
+
+func (m *memStore) DeleteBoxSet(ctx context.Context, sha1 string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.boxSets, sha1)
+	return nil
+}
+
+func (m *memStore) BoxLabelCounts(ctx context.Context, pkg string) (int64, map[string]int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var images int64
+	labels := map[string]int64{}
+	for _, set := range m.boxSets {
+		if set.Package != pkg {
+			continue
+		}
+		images++
+		for _, b := range set.Boxes {
+			labels[b.Label]++
+		}
+	}
+	return images, labels, nil
 }
 
 // ---------- helpers ----------

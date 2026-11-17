@@ -34,10 +34,15 @@ func New(ctx context.Context, uri, dbName string) (*Store, error) {
 	}
 
 	// Deu certo: monta o Store
-	return &Store{
+	s := &Store{
 		client: client,
 		db:     client.Database(dbName),
-	}, nil
+	}
+	if err := s.ensureBoxIndexes(ctx); err != nil {
+		_ = client.Disconnect(context.Background())
+		return nil, err
+	}
+	return s, nil
 }
 
 func (s *Store) Ping(ctx context.Context) error {

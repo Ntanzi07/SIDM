@@ -65,7 +65,7 @@ SIDM/
 │   └── dataset/
 │       ├── <pacote-1>/     <sha1>.jpg (pending) e <nome v2>.jpg (verified)
 │       └── <pacote-2>/
-├── frontend/               TODO
+├── frontend/               React + Vite (veja frontend/PLAN.md)
 └── backend/                Go
     ├── cmd/server/         main: lê o .env, conecta no Mongo, sobe o HTTP
     └── internal/
@@ -73,6 +73,7 @@ SIDM/
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
+        ├── boxes/          leitura das caixas exportadas do CVAT (COCO 1.0)
         ├── store/          Mongo: imagens, pacotes, fila, cadastros, perfis, histórico
         └── api/            handlers HTTP (dependem da interface Store) + openapi.yaml
 ```
@@ -131,9 +132,14 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 | `POST /images/exists` | `{"sha1s": [...]}` → quais já existem (e em que pacote) e quais faltam |
 | `GET /images/{sha1}` | detalhe de uma imagem (inclui o rascunho salvo) |
 | `PUT /images/{sha1}` | salva o rascunho, ou verifica com `"complete": true` |
+| `DELETE /images/{sha1}` | apaga a imagem: registro, histórico, caixas e arquivo (recusa se outra pessoa está anotando) |
 | `GET /images/{sha1}/file` | o arquivo da imagem |
+| `GET /images/{sha1}/boxes` | as caixas (CVAT) da imagem |
 | `POST /images/{sha1}/release` | devolve a imagem para a fila |
-| `POST /imports/inspect` | "raio-x" de um CSV: colunas, exemplos e valores distintos |
+| `POST /imports/inspect` | "raio-x" de um CSV (ou, com `?type=jpeg-ini`, do INI de até 20 imagens): colunas, exemplos e valores distintos |
+| `GET /packages/{name}/cvat.zip` | as imagens do pacote, para criar a task no CVAT |
+| `POST /packages/{name}/boxes/import` | importa o export COCO 1.0 do CVAT; ensaio por padrão |
+| `GET /packages/{name}/boxes` | resumo: imagens com caixas e caixas por label |
 | `GET /import-profiles` | lista os perfis de import |
 | `POST /import-profiles` | cria um perfil de import |
 | `GET /import-profiles/{name}` | um perfil |
@@ -364,6 +370,53 @@ explicando o problema, e o campo fica vazio.
 
 ---
 
+## Caixas (bounding boxes) do CVAT
+
+O SIDM **não desenha** caixas: elas são anotadas no **CVAT**, e o SIDM guarda o
+resultado, por pacote, para a exportação de treino.
+
+1. **Ida:** no detalhe do pacote, **Baixar imagens para o CVAT**
+   (`GET /packages/{nome}/cvat.zip`). As imagens vão com os nomes guardados no
+   SIDM, que começam pelo sha1. Crie a task no CVAT com esse zip.
+2. **No CVAT:** anote (carro, moto, placa, caracteres...) e exporte a task no
+   formato **COCO 1.0**.
+3. **Volta:** no detalhe do pacote, suba o zip exportado (ou só o `.json`) em
+   **Caixas (CVAT)**. Primeiro vem o **ensaio**, depois **Gravar caixas**.
+
+**Regras do import:**
+- **Casamento** pelo nome do arquivo (sem a pasta): se começa com um sha1, é por
+  ele; senão, pelo **nome original**, se for único no pacote. Usar o zip do passo
+  1 evita qualquer ambiguidade.
+- Imagens **sem caixa** no arquivo **não são mexidas**: o CVAT exporta todas as
+  imagens da task, inclusive as que ninguém anotou ainda.
+- Imagens com **tamanho diferente** no CVAT e no SIDM são **puladas** (as caixas
+  ficariam no lugar errado).
+- **Reimportar substitui** as caixas da imagem (a task mais nova vale).
+- Caixas com problema (categoria desconhecida, largura zero) são ignoradas e
+  aparecem nos avisos do ensaio.
+
+**Como fica no banco** (coleção `image_boxes`, um documento por imagem, `_id` = sha1):
+
+```json
+{
+  "_id": "a3f9...", "package": "Noturnas-Setembro", "width": 1920, "height": 1080,
+  "boxes": [
+    { "label": "carro", "x": 410.5, "y": 220, "w": 820, "h": 610 },
+    { "label": "placa", "x": 790, "y": 640, "w": 140, "h": 45, "occluded": true,
+      "attributes": { "caractere": "A" } }
+  ],
+  "source": { "tool": "cvat", "format": "coco", "file": "task_12.zip", "file_name": "a3f9....jpg" },
+  "imported_by": "nathan", "imported_at": "2026-11-17T11:40:00Z"
+}
+```
+
+As caixas ficam em **pixels** (`x, y` = canto superior esquerdo). `occluded` e
+`rotation` vêm do CVAT; outros atributos criados lá ficam em `attributes`.
+Renomear ou apagar o pacote (ou a imagem) leva as caixas junto. Na tela de
+anotação, as caixas aparecem por cima da imagem, só para conferência.
+
+---
+
 ## Imagens criptografadas
 
 O upload **detecta e abre sozinho** os arquivos criptografados pelos equipamentos:
@@ -515,7 +568,6 @@ go tool cover -html=cover.out
 
 ## Próximos passos
 
-- [ ] **Frontend** (React): pacotes, upload, anotação com a fila, busca, import
 - [ ] **Export** (`POST /export`): zip das imagens filtradas ou de um pacote
 - [ ] **Login próprio** (usuário + senha bcrypt + sessão) no lugar do `X-User`
 - [ ] Embutir o Swagger UI no binário (hoje vem de um CDN; não abre em rede sem internet)
@@ -523,6 +575,6 @@ go tool cover -html=cover.out
 - [ ] Validador `$jsonSchema` no Mongo
 - [ ] Regra para veículo com placa ilegível
 - [ ] Detectar o perfil de INI sozinho, pelo modelo do equipamento (`Metrologico.Modelo`)
-- [ ] `/imports/inspect` aceitar um JPEG e mostrar as chaves do INI
-- [ ] Caixa da placa (`OCRPosicaoLeitura`) e marcações próprias, com export para o RF-DETR (COCO, 70/15/15)
+- [ ] **Export para o RF-DETR** (COCO, 70/15/15) a partir das caixas do CVAT
+- [ ] Caixa da placa que vem no INI (`OCRPosicaoLeitura`) como caixa pré-anotada
 - [ ] Leitor de EXIF para o import

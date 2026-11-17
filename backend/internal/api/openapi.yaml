@@ -23,6 +23,11 @@ tags:
     description: Fila de trabalho compartilhada (várias pessoas anotando o mesmo pacote).
   - name: import
     description: Import de metadados por CSV, usando perfis.
+  - name: caixas
+    description: |
+      Caixas (bounding boxes) anotadas no CVAT, por pacote. O SIDM não desenha
+      caixas: manda as imagens para o CVAT (cvat.zip) e importa o export
+      COCO 1.0 de volta.
 
 paths:
   /health:
@@ -295,6 +300,86 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /packages/{name}/cvat.zip:
+    get:
+      tags: [caixas]
+      summary: Imagens do pacote para o CVAT
+      description: |
+        Um zip com as imagens do pacote, com os nomes guardados no SIDM (que
+        começam pelo sha1). Use-o para criar a task no CVAT: assim, o export de
+        volta casa com as imagens sem ambiguidade. Imagens que não puderam ser
+        incluídas são listadas em `FALTANDO.txt` dentro do zip.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+      responses:
+        "200":
+          description: O zip.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /packages/{name}/boxes/import:
+    post:
+      tags: [caixas]
+      summary: Importar caixas do CVAT (COCO 1.0)
+      description: |
+        Mande o export da task do CVAT no formato **COCO 1.0** (o zip, ou só o
+        `.json`). Por padrão é um **ensaio** (`dry_run=true`): nada é gravado.
+
+        Casamento: pelo nome do arquivo (sem pasta). Se começa pelo sha1, é por
+        ele; senão, pelo nome original, se for único no pacote.
+
+        - Imagens **sem caixa** no arquivo não são mexidas (o CVAT exporta todas
+          as imagens da task, inclusive as não anotadas).
+        - Imagens cujo **tamanho** no CVAT difere do arquivo guardado são puladas.
+        - Reimportar **substitui** as caixas da imagem.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+        - $ref: "#/components/parameters/XUser"
+        - name: dry_run
+          in: query
+          schema: { type: boolean, default: true }
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: "Zip do CVAT ou o .json (COCO 1.0)." }
+      responses:
+        "200":
+          description: Relatório.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BoxImportReport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /packages/{name}/boxes:
+    get:
+      tags: [caixas]
+      summary: Resumo das caixas do pacote
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+      responses:
+        "200":
+          description: Imagens com caixas e caixas por label.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  package: { type: string }
+                  images: { type: integer }
+                  labels:
+                    type: object
+                    additionalProperties: { type: integer }
+                    example: { placa: 120, carro: 98, moto: 22 }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /packages/{name}/next:
     post:
       tags: [fila]
@@ -551,6 +636,20 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
+
+  /images/{sha1}/boxes:
+    get:
+      tags: [caixas]
+      summary: Caixas de uma imagem
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+      responses:
+        "200":
+          description: As caixas, em pixels da imagem.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BoxSet" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /images/{sha1}/file:
     get:
@@ -833,6 +932,80 @@ components:
       type: object
       properties:
         error: { type: string }
+
+    Box:
+      type: object
+      properties:
+        label: { type: string, example: placa }
+        x: { type: number, description: "Canto superior esquerdo, em pixels." }
+        y: { type: number }
+        w: { type: number, description: Largura em pixels. }
+        h: { type: number, description: Altura em pixels. }
+        occluded: { type: boolean }
+        rotation: { type: number, description: "Graus, sentido horário (como no CVAT)." }
+        attributes:
+          type: object
+          additionalProperties: true
+          description: "Atributos criados no CVAT (ex.: { caractere: A })."
+
+    BoxSet:
+      type: object
+      properties:
+        sha1: { type: string }
+        package: { type: string }
+        width: { type: integer }
+        height: { type: integer }
+        boxes:
+          type: array
+          items: { $ref: "#/components/schemas/Box" }
+        source:
+          type: object
+          properties:
+            tool: { type: string, example: cvat }
+            format: { type: string, example: coco }
+            file: { type: string, description: Arquivo importado. }
+            file_name: { type: string, description: Nome da imagem dentro do arquivo. }
+        imported_by: { type: string }
+        imported_at: { type: string, format: date-time }
+
+    BoxImportReport:
+      type: object
+      properties:
+        dry_run: { type: boolean }
+        package: { type: string }
+        file: { type: string }
+        file_images: { type: integer, description: Imagens no arquivo. }
+        file_boxes: { type: integer, description: Caixas válidas no arquivo. }
+        labels:
+          type: object
+          additionalProperties: { type: integer }
+          description: Caixas por label, das imagens que serão gravadas.
+        matched: { type: integer, description: Imagens do arquivo encontradas no pacote. }
+        not_found:
+          type: array
+          items: { type: string }
+          description: Até 20 nomes não encontrados.
+        not_found_count: { type: integer }
+        ambiguous:
+          type: array
+          items: { type: string }
+          description: Nome original repetido no pacote.
+        empty: { type: integer, description: "Encontradas, mas sem caixa: não mexidas." }
+        size_mismatch:
+          type: array
+          items:
+            type: object
+            properties:
+              file_name: { type: string }
+              cvat: { type: string, example: 1280x720 }
+              sidm: { type: string, example: 1920x1080 }
+        replaced: { type: integer, description: Já tinham caixas (substituídas ao aplicar). }
+        applied: { type: integer }
+        applied_boxes: { type: integer }
+        warnings:
+          type: array
+          items: { type: string }
+          description: Caixas ignoradas na leitura do arquivo.
 
     RegistryReport:
       type: object

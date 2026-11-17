@@ -489,3 +489,82 @@ export async function applyIniProfile(
     { method: 'POST' },
   )
 }
+
+// ---------- caixas (bounding boxes) do CVAT ----------
+
+export type Box = {
+  label: string
+  x: number // pixels, canto superior esquerdo
+  y: number
+  w: number
+  h: number
+  occluded?: boolean
+  rotation?: number // graus, sentido horário (CVAT)
+  attributes?: Record<string, unknown>
+}
+
+export type BoxSet = {
+  sha1: string
+  package: string
+  width: number // tamanho da imagem no CVAT: as caixas são em pixels dela
+  height: number
+  boxes: Box[]
+  source: { tool: string; format: string; file: string; file_name: string }
+  imported_by: string
+  imported_at: string
+}
+
+export type BoxImportReport = {
+  dry_run: boolean
+  package: string
+  file: string
+  file_images: number
+  file_boxes: number
+  labels: Record<string, number>
+  matched: number
+  not_found: string[]
+  not_found_count: number
+  ambiguous: string[]
+  empty: number
+  size_mismatch: Array<{ file_name: string; cvat: string; sidm: string }>
+  replaced: number
+  applied: number
+  applied_boxes: number
+  warnings: string[]
+}
+
+export type PackageBoxes = {
+  package: string
+  images: number
+  labels: Record<string, number>
+}
+
+// O zip com as imagens do pacote, para criar a task no CVAT (os nomes
+// começam pelo sha1, e é assim que o export volta casando).
+export function cvatZipUrl(packageName: string): string {
+  return `${API_BASE_URL}/packages/${encodeURIComponent(packageName)}/cvat.zip`
+}
+
+export async function getPackageBoxes(packageName: string): Promise<PackageBoxes> {
+  return request<PackageBoxes>(`/packages/${encodeURIComponent(packageName)}/boxes`)
+}
+
+// null: a imagem não tem caixas importadas.
+export async function getImageBoxes(sha1: string): Promise<BoxSet | null> {
+  const response = await fetch(`${API_BASE_URL}/images/${encodeURIComponent(sha1)}/boxes`, {
+    headers: { 'X-User': getUser() || 'anonymous' },
+  })
+  if (response.status === 404) return null
+  if (!response.ok) throw new Error(`Não foi possível carregar as caixas (${response.status}).`)
+  return response.json() as Promise<BoxSet>
+}
+
+// Export COCO 1.0 do CVAT (o zip, ou só o .json). dryRun: só o relatório.
+export async function importBoxes(packageName: string, file: File, dryRun: boolean): Promise<BoxImportReport> {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+  return request<BoxImportReport>(
+    `/packages/${encodeURIComponent(packageName)}/boxes/import?dry_run=${String(dryRun)}`,
+    { method: 'POST', body: formData },
+  )
+}

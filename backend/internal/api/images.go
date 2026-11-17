@@ -162,7 +162,7 @@ func (req annotationRequest) applyTo(img *store.Image) {
 }
 
 // DELETE /images/{sha1}
-// Apaga a imagem: o registro, o histórico e o arquivo. Sem volta.
+// Apaga a imagem: o registro, o histórico, as caixas e o arquivo. Sem volta.
 // Se outra pessoa está anotando, recusa (409).
 func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	img, ok := s.imageFromPath(w, r)
@@ -185,6 +185,10 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteImageHistory(ctx, img.SHA1); err != nil {
 		s.logError(err)
 		warnings = append(warnings, "a imagem foi apagada, mas o histórico dela não")
+	}
+	if err := s.store.DeleteBoxSet(ctx, img.SHA1); err != nil {
+		s.logError(err)
+		warnings = append(warnings, "a imagem foi apagada, mas as caixas dela não")
 	}
 	if err := s.files.Remove(img.Path); err != nil {
 		s.logError(err)

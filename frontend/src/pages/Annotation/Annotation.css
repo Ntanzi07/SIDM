@@ -85,6 +85,44 @@
   object-fit: contain;
 }
 
+/* A moldura tem exatamente o tamanho da imagem na tela: as caixas (em %)
+   ficam no lugar certo em qualquer tamanho. */
+.annotation-boxes-frame {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+  line-height: 0;
+}
+
+.annotation-box {
+  position: absolute;
+  box-sizing: border-box;
+  border: 2px solid;
+  transform-origin: center;
+  pointer-events: auto;
+}
+
+.annotation-box span {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  padding: 1px 4px;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.annotation-boxes-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 10px;
+  color: #5963d9;
+  cursor: pointer;
+}
+
 .annotation-image-meta,
 .annotation-form-heading {
   display: flex;

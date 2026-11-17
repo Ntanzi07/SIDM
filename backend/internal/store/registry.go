@@ -132,6 +132,10 @@ func (s *Store) RenamePackage(ctx context.Context, oldName, newName string) (int
 	if err != nil {
 		return 0, fmt.Errorf("renomear o pacote nas imagens: %w", err)
 	}
+	if _, err := s.boxes().UpdateMany(ctx, bson.D{{Key: "package", Value: oldName}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "package", Value: newName}}}}); err != nil {
+		return imgs.ModifiedCount, fmt.Errorf("renomear o pacote nas caixas: %w", err)
+	}
 	return imgs.ModifiedCount, nil
 }
 
@@ -166,7 +170,10 @@ func (s *Store) DeletePackage(ctx context.Context, name string) (int64, error) {
 		}
 	}
 
-	// 2. As imagens.
+	// 2. As caixas (CVAT) e as imagens.
+	if _, err := s.boxes().DeleteMany(ctx, filter); err != nil {
+		return 0, fmt.Errorf("apagar caixas do pacote %s: %w", name, err)
+	}
 	res, err := images.DeleteMany(ctx, filter)
 	if err != nil {
 		return 0, fmt.Errorf("apagar imagens do pacote %s: %w", name, err)

@@ -35,7 +35,11 @@ import (
 //   GET  /import-profiles      lista os perfis, paginado
 //   GET  /import-profiles/{name}  um perfil
 //   PUT  /import-profiles/{name}  atualiza um perfil (o JSON inteiro)
-//   DELETE /images/{sha1}         apaga a imagem (registro, histórico e arquivo)
+//   DELETE /images/{sha1}         apaga a imagem (registro, histórico, caixas e arquivo)
+//   GET  /images/{sha1}/boxes     caixas (CVAT) de uma imagem
+//   GET  /packages/{name}/cvat.zip         imagens do pacote para o CVAT
+//   POST /packages/{name}/boxes/import     importa o COCO 1.0 do CVAT (ensaio por padrão)
+//   GET  /packages/{name}/boxes            resumo das caixas do pacote
 //   PATCH  /import-profiles/{name}  renomeia {"name": "..."}
 //   DELETE /import-profiles/{name}  apaga
 //   POST /packages/{name}/import?profile=X&dry_run=false  importa um CSV para os rascunhos
@@ -82,6 +86,13 @@ type Store interface {
 	InsertImage(ctx context.Context, img *store.Image) error
 	DeleteImage(ctx context.Context, sha1 string) error
 	DeleteImageHistory(ctx context.Context, sha1 string) error
+
+	// Caixas (bounding boxes) do CVAT
+	ReplaceBoxSets(ctx context.Context, sets []store.BoxSet) error
+	FindBoxSet(ctx context.Context, sha1 string) (*store.BoxSet, error)
+	BoxImageIDs(ctx context.Context, ids []string) (map[string]bool, error)
+	DeleteBoxSet(ctx context.Context, sha1 string) error
+	BoxLabelCounts(ctx context.Context, pkg string) (int64, map[string]int64, error)
 	FindImage(ctx context.Context, sha1 string) (*store.Image, error)
 	ReplaceImage(ctx context.Context, img *store.Image, prevUpdatedAt time.Time) error
 	ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*store.Image, error)
@@ -144,6 +155,10 @@ func (s *Server) routes() []route {
 		{"GET", "/images/{sha1}", s.handleGetImage},
 		{"PUT", "/images/{sha1}", s.handleAnnotate},
 		{"DELETE", "/images/{sha1}", s.handleDeleteImage},
+		{"GET", "/images/{sha1}/boxes", s.handleImageBoxes},
+		{"GET", "/packages/{name}/boxes", s.handlePackageBoxes},
+		{"POST", "/packages/{name}/boxes/import", s.handleImportBoxes},
+		{"GET", "/packages/{name}/cvat.zip", s.handleCVATZip},
 		{"GET", "/images/{sha1}/file", s.handleImageFile},
 		{"POST", "/images/{sha1}/release", s.handleRelease},
 

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { annotationOptions } from '../../data/annotationOptions'
-import { imageFileUrl, searchCameras, searchEquipments, type PageResponse } from '../../services/api'
+import { getImageBoxes, imageFileUrl, searchCameras, searchEquipments, type BoxSet, type PageResponse } from '../../services/api'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import type { AnnotationForm } from '../../types/annotation'
 import './Annotation.css'
@@ -141,6 +141,57 @@ function AutocompleteField({ label, value, search, placeholder, onChange }: Auto
   )
 }
 
+// Cor fixa por label (a mesma label tem sempre a mesma cor).
+const BOX_COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d']
+function colorOf(label: string): string {
+  let hash = 0
+  for (const char of label) hash = (hash * 31 + char.charCodeAt(0)) | 0
+  return BOX_COLORS[Math.abs(hash) % BOX_COLORS.length]
+}
+
+// A imagem com as caixas do CVAT por cima (só para conferir). As caixas são
+// em pixels da imagem no CVAT: viram porcentagem para acompanhar o tamanho
+// em que a imagem aparece na tela.
+function ImageWithBoxes({ sha1, alt, set, show }: { sha1: string; alt: string; set: BoxSet | null; show: boolean }) {
+  return (
+    <div className="annotation-boxes-frame">
+      <img alt={alt} src={imageFileUrl(sha1)} />
+      {show && set && set.width > 0 && set.height > 0 && set.boxes.map((box, i) => (
+        <div
+          className="annotation-box"
+          key={i}
+          style={{
+            left: `${(box.x / set.width) * 100}%`,
+            top: `${(box.y / set.height) * 100}%`,
+            width: `${(box.w / set.width) * 100}%`,
+            height: `${(box.h / set.height) * 100}%`,
+            borderColor: colorOf(box.label),
+            borderStyle: box.occluded ? 'dashed' : 'solid',
+            transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
+          }}
+          title={[box.label, box.occluded ? 'oculta' : '', ...Object.entries(box.attributes ?? {}).map(([k, v]) => `${k}: ${String(v)}`)].filter(Boolean).join(' · ')}
+        >
+          <span style={{ background: colorOf(box.label) }}>{box.label}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// As caixas da imagem aberta (null: sem caixas, ou ainda carregando).
+function useImageBoxes(sha1: string | undefined): BoxSet | null {
+  const [loaded, setLoaded] = useState<{ sha1?: string; set: BoxSet | null }>({ set: null })
+  useEffect(() => {
+    if (!sha1) return
+    let active = true
+    getImageBoxes(sha1)
+      .then((set) => { if (active) setLoaded({ sha1, set }) })
+      .catch(() => { if (active) setLoaded({ sha1, set: null }) })
+    return () => { active = false }
+  }, [sha1])
+  return loaded.sha1 === sha1 ? loaded.set : null
+}
+
 function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
 }
@@ -153,6 +204,8 @@ export function AnnotationPage() {
   const { image, form, codes } = annotator
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
+  const [showBoxes, setShowBoxes] = useState(true)
+  const boxSet = useImageBoxes(annotator.image?.sha1)
 
   const update = <K extends keyof AnnotationForm>(field: K, value: AnnotationForm[K]) => annotator.updateForm(field, value)
 
@@ -232,12 +285,20 @@ export function AnnotationPage() {
               <div className="annotation-preview-column">
                 <div className="annotation-preview-card">
                   <div className="annotation-preview">
-                    <img alt={image.original_name} src={imageFileUrl(image.sha1)} />
+                    <ImageWithBoxes alt={image.original_name} set={boxSet} sha1={image.sha1} show={showBoxes} />
                   </div>
                   <div className="annotation-image-meta">
                     <div>
                       <strong>{image.original_name}</strong>
-                      <span>{formatSize(image.size)} · {image.ext}</span>
+                      <span>
+                        {formatSize(image.size)} · {image.ext}
+                        {boxSet && boxSet.boxes.length > 0 && (
+                          <label className="annotation-boxes-toggle">
+                            <input checked={showBoxes} onChange={(event) => setShowBoxes(event.target.checked)} type="checkbox" />
+                            {boxSet.boxes.length} caixa(s) do CVAT
+                          </label>
+                        )}
+                      </span>
                     </div>
                     <button
                       className="button button--danger button--sm"

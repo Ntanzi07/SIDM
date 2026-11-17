@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { applyIniProfile, deleteImage, deletePackage, getPackage, imageFiles, importPackageCsv, listImportProfiles, listIniProfiles, listPackageImages, uploadImages, type ImageSummary, type ImportProfile, type ImportReport, type PackageSummary, type UploadProgress } from '../../services/api'
 import type { ChangeEvent, FormEvent } from 'react'
 import { UploadStatus } from './UploadStatus'
+import { BoxesSection } from './BoxesSection'
 import { ImportWarnings } from './ImportWarnings'
 import './Packages.css'
 
@@ -296,6 +297,7 @@ export function PackageDetailPage() {
             </div>
           )}
         </form>
+        <BoxesSection packageName={selectedPackage.name} />
         <div className="detail-images__heading">
           <div>
             <h2>Imagens do pacote</h2>
