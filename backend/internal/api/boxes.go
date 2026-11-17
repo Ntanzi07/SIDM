@@ -14,35 +14,39 @@ import (
 	"path"
 	"sort"
 	"strings"
-	"time"
 
 	"SIDM/internal/boxes"
 	"SIDM/internal/importer"
 	"SIDM/internal/store"
 )
 
-// Caixas (bounding boxes) anotadas no CVAT, por pacote.
+// Caixas (bounding boxes) anotadas no CVAT. O import é por TAREFA (ver
+// tasks.go); aqui ficam o casamento das imagens, o zip para o CVAT e as
+// consultas.
 //
 //	GET  /packages/{name}/cvat.zip       as imagens do pacote, para criar a task no CVAT
-//	POST /packages/{name}/boxes/import   importa o export COCO 1.0 do CVAT (ensaio por padrão)
-//	GET  /packages/{name}/boxes          resumo: imagens com caixas e caixas por label
-//	GET  /images/{sha1}/boxes            as caixas de uma imagem
+//	GET  /packages/{name}/boxes          por tarefa: imagens do pacote anotadas nela
+//	GET  /images/{sha1}/boxes            as caixas de uma imagem, em todas as tarefas
 
 // boxImportReport é o resultado do import (no ensaio e na aplicação).
 type boxImportReport struct {
 	DryRun        bool             `json:"dry_run"`
-	Package       string           `json:"package"`
+	Task          string           `json:"task"`
 	File          string           `json:"file"`
+	Negatives     bool             `json:"negatives"`   // imagens sem caixas entram como negativas?
 	FileImages    int              `json:"file_images"` // imagens no arquivo
 	FileBoxes     int              `json:"file_boxes"`  // caixas válidas no arquivo
-	Labels        map[string]int   `json:"labels"`      // caixas por label (só das imagens casadas)
-	Matched       int              `json:"matched"`     // imagens do arquivo que estão no pacote
+	Labels        map[string]int   `json:"labels"`      // caixas por label (só das imagens que serão gravadas)
+	NewLabels     []string         `json:"new_labels"`  // labels que não estão na tarefa (são acrescentadas)
+	Matched       int              `json:"matched"`     // imagens do arquivo encontradas no SIDM
+	Packages      map[string]int   `json:"packages"`    // das que serão gravadas, quantas por pacote
 	NotFound      []string         `json:"not_found"`   // até 20 nomes
 	NotFoundCount int              `json:"not_found_count"`
-	Ambiguous     []string         `json:"ambiguous"`     // nome original repetido no pacote
-	Empty         int              `json:"empty"`         // casadas, mas sem nenhuma caixa: não mexidas
+	Ambiguous     []string         `json:"ambiguous"`     // nome original repetido no banco
+	Empty         int              `json:"empty"`         // encontradas, mas sem nenhuma caixa no arquivo
 	SizeMismatch  []sizeMismatch   `json:"size_mismatch"` // tamanho no CVAT ≠ arquivo: puladas
-	Replaced      int              `json:"replaced"`      // já tinham caixas (serão/foram substituídas)
+	WillApply     int              `json:"will_apply"`    // imagens que serão gravadas
+	Replaced      int              `json:"replaced"`      // dessas, as que já estavam na tarefa (serão substituídas)
 	Applied       int              `json:"applied"`       // imagens gravadas (0 no ensaio)
 	AppliedBoxes  int              `json:"applied_boxes"`
 	Warnings      []string         `json:"warnings"` // caixas ignoradas na leitura
@@ -62,70 +66,27 @@ type boxImportMatch struct {
 
 const maxNotFoundListed = 20
 
-// POST /packages/{name}/boxes/import?dry_run=true   (multipart, campo "file")
-// dry_run=true (padrão): só o relatório. dry_run=false: grava.
+// matchBoxes casa as imagens do arquivo com as do SIDM (em TODOS os pacotes)
+// e monta o relatório.
 //
-// Casamento de cada imagem do arquivo com o pacote, pelo nome do arquivo
-// (sem pasta): se começa com um sha1 (o zip do SIDM para o CVAT usa os nomes
-// guardados, que começam pelo sha1), é por ele; se não, pelo nome original,
-// quando ele é único no pacote.
+// Casamento pelo nome do arquivo (sem pasta): se começa com um sha1 (o zip do
+// SIDM para o CVAT usa os nomes guardados, que começam pelo sha1), é por ele;
+// se não, pelo nome original, só quando ele é único no banco todo (nomes como
+// IMG_0001.jpg se repetem entre câmeras: na dúvida, a imagem fica de fora).
 //
-// Imagens sem nenhuma caixa no arquivo NÃO são mexidas: o CVAT exporta todas
-// as imagens da task, inclusive as que ninguém anotou ainda. Imagens cujo
-// tamanho no CVAT é diferente do arquivo guardado são puladas (as caixas
-// estariam no lugar errado).
-func (s *Server) handleImportBoxes(w http.ResponseWriter, r *http.Request) {
-	pkg, ok := s.packageByName(w, r, r.PathValue("name"))
-	if !ok {
-		return
-	}
-	dryRun := r.URL.Query().Get("dry_run") != "false"
-
-	fileName, data, ok := readUploadedFile(w, r, boxes.MaxFileBytes)
-	if !ok {
-		return
-	}
-	parsed, err := boxes.Read(data)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	rep, err := s.matchBoxes(r, pkg.Name, parsed)
-	if err != nil {
-		s.serverError(w, err)
-		return
-	}
-	rep.DryRun, rep.Package, rep.File = dryRun, pkg.Name, fileName
-
-	if !dryRun && len(rep.matched) > 0 {
-		now := time.Now().UTC()
-		user := userFrom(r)
-		sets := make([]store.BoxSet, 0, len(rep.matched))
-		for _, m := range rep.matched {
-			sets = append(sets, store.BoxSet{
-				ImageID: m.img.SHA1, Package: pkg.Name,
-				Width: m.boxes.Width, Height: m.boxes.Height, Boxes: m.boxes.Boxes,
-				Source:     store.BoxSource{Tool: "cvat", Format: "coco", File: fileName, FileName: m.boxes.FileName},
-				ImportedBy: user, ImportedAt: now,
-			})
-			rep.AppliedBoxes += len(m.boxes.Boxes)
-		}
-		if err := s.store.ReplaceBoxSets(r.Context(), sets); err != nil {
-			s.serverError(w, err)
-			return
-		}
-		rep.Applied = len(sets)
-	}
-	writeJSON(w, http.StatusOK, rep)
-}
-
-// matchBoxes casa as imagens do arquivo com as do pacote e monta o relatório.
-func (s *Server) matchBoxes(r *http.Request, pkg string, f *boxes.File) (*boxImportReport, error) {
+// Imagens sem nenhuma caixa no arquivo: com negatives=false (padrão) NÃO são
+// mexidas, porque o CVAT exporta todas as imagens da task, inclusive as que
+// ninguém anotou ainda. Com negatives=true entram como anotadas sem objetos
+// (use só quando a task do CVAT estiver toda anotada). Imagens cujo tamanho no
+// CVAT é diferente do arquivo guardado são puladas (as caixas ficariam no
+// lugar errado).
+func (s *Server) matchBoxes(r *http.Request, task *store.Task, f *boxes.File, negatives bool) (*boxImportReport, error) {
 	ctx := r.Context()
 	rep := &boxImportReport{
-		FileImages: len(f.Images), FileBoxes: f.Boxes, Labels: map[string]int{},
-		NotFound: []string{}, Ambiguous: []string{}, SizeMismatch: []sizeMismatch{}, Warnings: f.Warnings,
+		Task: task.Name, Negatives: negatives,
+		FileImages: len(f.Images), FileBoxes: f.Boxes, Labels: map[string]int{}, NewLabels: []string{},
+		Packages: map[string]int{}, NotFound: []string{}, Ambiguous: []string{}, SizeMismatch: []sizeMismatch{},
+		Warnings: f.Warnings,
 	}
 	if rep.Warnings == nil {
 		rep.Warnings = []string{}
@@ -145,11 +106,11 @@ func (s *Server) matchBoxes(r *http.Request, pkg string, f *boxes.File) (*boxImp
 			names = append(names, base)
 		}
 	}
-	bySHA, err := s.store.FindImagesByKeys(ctx, pkg, importer.MatchBySHA1, shas)
+	bySHA, err := s.store.FindImagesByKeys(ctx, "", importer.MatchBySHA1, shas)
 	if err != nil {
 		return nil, err
 	}
-	byName, err := s.store.FindImagesByKeys(ctx, pkg, importer.MatchByOriginalName, names)
+	byName, err := s.store.FindImagesByKeys(ctx, "", importer.MatchByOriginalName, names)
 	if err != nil {
 		return nil, err
 	}
@@ -192,23 +153,38 @@ func (s *Server) matchBoxes(r *http.Request, pkg string, f *boxes.File) (*boxImp
 
 		if len(fi.Boxes) == 0 {
 			rep.Empty++
-			continue
+			if !negatives {
+				continue
+			}
 		}
 		if mismatch, ok := s.checkSize(img, fi); !ok {
 			rep.SizeMismatch = append(rep.SizeMismatch, mismatch)
 			continue
 		}
 		rep.matched = append(rep.matched, boxImportMatch{img: img, boxes: fi})
+		rep.Packages[img.Package]++
 		for _, b := range fi.Boxes {
 			rep.Labels[b.Label]++
 		}
 	}
+	rep.WillApply = len(rep.matched)
+
+	known := make(map[string]bool, len(task.Labels))
+	for _, l := range task.Labels {
+		known[l] = true
+	}
+	for l := range rep.Labels {
+		if !known[l] {
+			rep.NewLabels = append(rep.NewLabels, l)
+		}
+	}
+	sort.Strings(rep.NewLabels)
 
 	ids := make([]string, len(rep.matched))
 	for i, m := range rep.matched {
 		ids[i] = m.img.SHA1
 	}
-	existing, err := s.store.BoxImageIDs(ctx, ids)
+	existing, err := s.store.FindBoxSets(ctx, task.Name, ids)
 	if err != nil {
 		return nil, err
 	}
@@ -305,35 +281,33 @@ func readUploadedFile(w http.ResponseWriter, r *http.Request, limit int64) (stri
 }
 
 // GET /images/{sha1}/boxes
+// As caixas da imagem em cada tarefa ({"items": [...]}, vazio se nenhuma).
 func (s *Server) handleImageBoxes(w http.ResponseWriter, r *http.Request) {
 	img, ok := s.imageFromPath(w, r)
 	if !ok {
 		return
 	}
-	set, err := s.store.FindBoxSet(r.Context(), img.SHA1)
-	if errors.Is(err, store.ErrNotFound) {
-		writeError(w, http.StatusNotFound, "esta imagem não tem caixas importadas")
-		return
-	}
+	sets, err := s.store.FindImageBoxSets(r.Context(), img.SHA1)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, set)
+	writeJSON(w, http.StatusOK, map[string]any{"items": sets})
 }
 
 // GET /packages/{name}/boxes
+// Por tarefa, quantas imagens do pacote estão anotadas nela.
 func (s *Server) handlePackageBoxes(w http.ResponseWriter, r *http.Request) {
 	pkg, ok := s.packageByName(w, r, r.PathValue("name"))
 	if !ok {
 		return
 	}
-	images, labels, err := s.store.BoxLabelCounts(r.Context(), pkg.Name)
+	counts, err := s.store.PackageBoxCounts(r.Context(), pkg.Name)
 	if err != nil {
 		s.serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"package": pkg.Name, "images": images, "labels": labels})
+	writeJSON(w, http.StatusOK, map[string]any{"package": pkg.Name, "tasks": counts})
 }
 
 // GET /packages/{name}/cvat.zip

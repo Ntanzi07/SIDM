@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"SIDM/internal/files"
 	"SIDM/internal/store"
 )
 
@@ -83,4 +84,61 @@ func (s *Server) handleRelease(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// POST /images/{sha1}/reopen   (X-User obrigatório)
+// Reabre uma imagem para edição: uma VERIFICADA volta para pendente (o
+// arquivo perde o nome v2 e volta a ser <sha1>.ext; os metadados ficam como
+// rascunho) e já fica reservada para quem pediu, para ninguém pegar na fila
+// no meio. Numa PENDENTE, só reserva (é o "abrir esta imagem" da tela).
+// As caixas do CVAT não mudam: são guardadas pelo sha1.
+func (s *Server) handleReopen(w http.ResponseWriter, r *http.Request) {
+	user := r.Header.Get("X-User")
+	if user == "" {
+		writeError(w, http.StatusBadRequest, "informe quem está anotando no header X-User")
+		return
+	}
+	img, ok := s.imageFromPath(w, r)
+	if !ok {
+		return
+	}
+	now := time.Now().UTC()
+	if img.ClaimedByOther(user, now) {
+		writeError(w, http.StatusConflict, fmt.Sprintf("imagem está sendo anotada por %s", img.ClaimedBy))
+		return
+	}
+
+	before := *img
+	until := now.Add(claimLease)
+	img.ClaimedBy, img.ClaimedUntil = user, &until
+	img.UpdatedAt = now
+
+	moved := false
+	if img.Status == store.StatusVerified {
+		pendingPath := files.PendingPath(img.Package, img.SHA1, img.Ext)
+		if err := s.files.Move(img.Path, pendingPath); err != nil {
+			s.serverError(w, err)
+			return
+		}
+		moved = true
+		img.Path, img.FileName, img.Status = pendingPath, "", store.StatusPending
+	}
+
+	if err := s.store.ReplaceImage(r.Context(), img, before.UpdatedAt); err != nil {
+		if moved { // banco e disco não podem divergir
+			_ = s.files.Move(img.Path, before.Path)
+		}
+		if errors.Is(err, store.ErrConflict) {
+			writeError(w, http.StatusConflict, "a imagem foi alterada por outra pessoa agora mesmo: recarregue")
+			return
+		}
+		s.serverError(w, err)
+		return
+	}
+	if moved {
+		if err := s.store.InsertHistory(r.Context(), diffHistory(&before, img, user)); err != nil {
+			s.logError(err)
+		}
+	}
+	writeJSON(w, http.StatusOK, img)
 }

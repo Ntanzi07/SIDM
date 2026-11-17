@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"SIDM/internal/filename"
 	"SIDM/internal/store"
 )
 
@@ -237,9 +238,7 @@ func TestAnnotateInvalido(t *testing.T) {
 		wantMsg string
 	}{
 		{"código desconhecido", completeBody(func(b map[string]any) { b["day_time"] = "tarde" }), "período"},
-		{"sem data", completeBody(func(b map[string]any) { delete(b, "captured_at") }), "captured_at"},
-		{"sem veículos", completeBody(func(b map[string]any) { b["vehicles"] = []any{} }), "veículos"},
-		{"sem condições", completeBody(func(b map[string]any) { b["conditions"] = []string{} }), "condições"},
+		{"condição vazia na lista", completeBody(func(b map[string]any) { b["conditions"] = []string{"glare", ""} }), "condição vazia"},
 		{"equipamento não cadastrado", completeBody(func(b map[string]any) { b["equipment"] = "9999-XX" }), "não cadastrado"},
 		{"câmera não cadastrada", completeBody(func(b map[string]any) { b["camera"] = "outra-cam" }), "não cadastrada"},
 		{"placa inválida", completeBody(func(b map[string]any) {
@@ -347,4 +346,43 @@ func TestExcluirImagemReservadaPorOutro(t *testing.T) {
 	}
 	// quem está com ela pode apagar
 	assertStatus(t, env.do("DELETE", "/images/"+sha, nil, map[string]string{"X-User": "maria"}), http.StatusOK)
+}
+
+// Nenhum campo é obrigatório para verificar: o que não deu para saber fica
+// vazio, e no nome v2 vira uma posição vazia.
+func TestVerificarComCamposDesconhecidos(t *testing.T) {
+	cases := []struct {
+		name   string
+		body   string
+		inName string // trecho esperado no nome do arquivo
+	}{
+		{"sem data", completeBody(func(b map[string]any) { delete(b, "captured_at") }), "_05.07__ABC1D23-"},
+		{"sem veículo", completeBody(func(b map[string]any) { b["vehicles"] = []any{} }), "Z_.jpg"},
+		{"sem condições", completeBody(func(b map[string]any) { b["conditions"] = []string{} }), "-C__2026"},
+		{"sem equipamento e câmera", completeBody(func(b map[string]any) { b["equipment"] = ""; b["camera"] = "" }), "_v2___F-"},
+		{"placa ilegível", completeBody(func(b map[string]any) {
+			b["vehicles"] = []map[string]string{{"plate": "", "plate_type": "", "plate_category": "", "type": "truck", "color": ""}}
+		}), "Z_---T-.jpg"},
+		{"tudo desconhecido", `{"complete": true}`, "_v2___-----___.jpg"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			env := newTestEnv(t)
+			sha := env.seedPending(t, "conteudo")
+
+			rec := env.doJSON("PUT", "/images/"+sha, tc.body)
+			assertStatus(t, rec, http.StatusOK)
+			img := env.db.images[sha]
+			if img.Status != store.StatusVerified || !strings.Contains(img.FileName, tc.inName) {
+				t.Errorf("status=%s nome=%q (esperava conter %q)", img.Status, img.FileName, tc.inName)
+			}
+			if _, err := os.Stat(env.pkgFile(img.FileName)); err != nil {
+				t.Error("o arquivo deveria ter o nome novo")
+			}
+			// o nome volta a ser lido certinho (ex.: num upload em outro SIDM)
+			if _, err := filename.Parse(img.FileName); err != nil {
+				t.Errorf("Parse(%q): %v", img.FileName, err)
+			}
+		})
+	}
 }

@@ -204,8 +204,11 @@ func applyMeta(img *store.Image, m filename.ImageMeta) {
 	img.ImageRange = m.ImageRange
 	img.Weather = m.Weather
 	img.Conditions = m.Conditions
-	t := m.CapturedAt
-	img.CapturedAt = &t
+	img.CapturedAt = nil
+	if !m.CapturedAt.IsZero() { // posição vazia no nome = data desconhecida
+		t := m.CapturedAt
+		img.CapturedAt = &t
+	}
 	img.Vehicles = make([]store.Vehicle, 0, len(m.Vehicles))
 	for _, v := range m.Vehicles {
 		img.Vehicles = append(img.Vehicles, store.Vehicle{

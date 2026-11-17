@@ -38,9 +38,11 @@ func New(ctx context.Context, uri, dbName string) (*Store, error) {
 		client: client,
 		db:     client.Database(dbName),
 	}
-	if err := s.ensureBoxIndexes(ctx); err != nil {
-		_ = client.Disconnect(context.Background())
-		return nil, err
+	for _, ensure := range []func(context.Context) error{s.ensureTaskIndexes, s.ensureBoxIndexes, s.ensureExportIndexes} {
+		if err := ensure(ctx); err != nil {
+			_ = client.Disconnect(context.Background())
+			return nil, err
+		}
 	}
 	return s, nil
 }

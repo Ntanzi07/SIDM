@@ -159,7 +159,8 @@ func (s *Store) ListProfiles(ctx context.Context, q string, limit, skip int64) (
 	return out, total, nil
 }
 
-// FindImagesByKeys busca as imagens de um pacote pela chave do import:
+// FindImagesByKeys busca as imagens de um pacote (pkg "" = de todos) pela
+// chave do import:
 // by = "original_name" (nome do arquivo antes do upload) ou "sha1".
 // Pode voltar mais de uma imagem por nome original (duas pastas diferentes
 // com um "img001.jpg" cada): quem chama decide o que fazer.
@@ -178,9 +179,9 @@ func (s *Store) FindImagesByKeys(ctx context.Context, pkg, by string, keys []str
 		if end > len(keys) {
 			end = len(keys)
 		}
-		filter := bson.D{
-			{Key: "package", Value: pkg},
-			{Key: field, Value: bson.D{{Key: "$in", Value: keys[start:end]}}},
+		filter := bson.D{{Key: field, Value: bson.D{{Key: "$in", Value: keys[start:end]}}}}
+		if pkg != "" { // "" = em todos os pacotes (import de caixas numa tarefa)
+			filter = append(filter, bson.E{Key: "package", Value: pkg})
 		}
 		cur, err := s.db.Collection("images").Find(ctx, filter)
 		if err != nil {

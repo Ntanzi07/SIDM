@@ -186,7 +186,7 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		s.logError(err)
 		warnings = append(warnings, "a imagem foi apagada, mas o histórico dela não")
 	}
-	if err := s.store.DeleteBoxSet(ctx, img.SHA1); err != nil {
+	if err := s.store.DeleteImageBoxSets(ctx, img.SHA1); err != nil {
 		s.logError(err)
 		warnings = append(warnings, "a imagem foi apagada, mas as caixas dela não")
 	}
@@ -281,11 +281,11 @@ func (s *Server) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 
 // finalName valida a anotação completa e devolve o nome v2 (com extensão).
 // Se algo estiver errado, devolve a mensagem para o usuário.
+//
+// Nenhum campo é obrigatório: o que não deu para saber (sem data, placa
+// ilegível, câmera desconhecida...) fica vazio, e no nome vira uma posição
+// vazia. O que VEM preenchido tem que ser válido.
 func (s *Server) finalName(r *http.Request, img *store.Image) (string, string) {
-	if img.CapturedAt == nil {
-		return "", "captured_at é obrigatório para concluir"
-	}
-
 	meta := metaFromImage(img)
 
 	// O Format já valida todos os códigos e formatos.
@@ -296,11 +296,15 @@ func (s *Server) finalName(r *http.Request, img *store.Image) (string, string) {
 
 	// O Format só valida o FORMATO do equipamento/câmera; aqui conferimos o cadastro.
 	ctx := r.Context()
-	if ok, err := s.store.EquipmentExists(ctx, img.Equipment); err != nil || !ok {
-		return "", fmt.Sprintf("equipamento %q não cadastrado", img.Equipment)
+	if img.Equipment != "" {
+		if ok, err := s.store.EquipmentExists(ctx, img.Equipment); err != nil || !ok {
+			return "", fmt.Sprintf("equipamento %q não cadastrado", img.Equipment)
+		}
 	}
-	if ok, err := s.store.CameraExists(ctx, img.Camera); err != nil || !ok {
-		return "", fmt.Sprintf("câmera %q não cadastrada", img.Camera)
+	if img.Camera != "" {
+		if ok, err := s.store.CameraExists(ctx, img.Camera); err != nil || !ok {
+			return "", fmt.Sprintf("câmera %q não cadastrada", img.Camera)
+		}
 	}
 
 	return base + img.Ext, ""

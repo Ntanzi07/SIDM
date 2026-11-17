@@ -18,12 +18,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"SIDM/internal/boxes"
+	"SIDM/internal/export"
 	"SIDM/internal/files"
 	"SIDM/internal/importer"
 	"SIDM/internal/store"
@@ -44,7 +47,9 @@ type memStore struct {
 	profiles   map[string]importer.Profile
 	images     map[string]store.Image
 	history    []store.HistoryEntry
-	boxSets    map[string]store.BoxSet
+	boxSets    map[string]store.BoxSet // chave: tarefa + "|" + sha1
+	tasks      map[string]store.Task
+	exportProf map[string]export.Profile
 	lastFilter store.ImageFilter
 	lastSearch searchCall
 
@@ -60,6 +65,8 @@ func newMemStore() *memStore {
 		cameras:    map[string]bool{},
 		packages:   map[string]store.Package{},
 		boxSets:    map[string]store.BoxSet{},
+		tasks:      map[string]store.Task{},
+		exportProf: map[string]export.Profile{},
 		profiles:   map[string]importer.Profile{},
 		images:     map[string]store.Image{},
 	}
@@ -317,7 +324,9 @@ func (m *memStore) ListImages(ctx context.Context, f store.ImageFilter) ([]store
 	out := []store.Image{}
 	for _, img := range m.images {
 		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
-			(f.Equipment == "" || img.Equipment == f.Equipment) && (f.Camera == "" || img.Camera == f.Camera) {
+			(f.Equipment == "" || img.Equipment == f.Equipment) && (f.Camera == "" || img.Camera == f.Camera) &&
+			(f.DayTime == "" || img.DayTime == f.DayTime) && (f.Weather == "" || img.Weather == f.Weather) &&
+			(f.Direction == "" || img.Direction == f.Direction) {
 			out = append(out, img)
 		}
 	}
@@ -431,7 +440,7 @@ func (m *memStore) FindImagesByKeys(ctx context.Context, pkg, by string, keys []
 		if by == importer.MatchBySHA1 {
 			k = img.SHA1
 		}
-		if img.Package == pkg && want[k] {
+		if (pkg == "" || img.Package == pkg) && want[k] {
 			out = append(out, img)
 		}
 	}
@@ -571,59 +580,259 @@ func (m *memStore) DeletePackage(ctx context.Context, name string) (int64, error
 	return int64(len(deleted)), nil
 }
 
+func boxKey(task, sha1 string) string { return task + "|" + sha1 }
+
 func (m *memStore) ReplaceBoxSets(ctx context.Context, sets []store.BoxSet) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, set := range sets {
-		m.boxSets[set.ImageID] = set
+		if set.Boxes == nil {
+			set.Boxes = []boxes.Box{}
+		}
+		m.boxSets[boxKey(set.Task, set.ImageID)] = set
 	}
 	return nil
 }
 
-func (m *memStore) FindBoxSet(ctx context.Context, sha1 string) (*store.BoxSet, error) {
+func (m *memStore) FindImageBoxSets(ctx context.Context, sha1 string) ([]store.BoxSet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	set, ok := m.boxSets[sha1]
-	if !ok {
-		return nil, store.ErrNotFound
+	out := []store.BoxSet{}
+	for _, set := range m.boxSets {
+		if set.ImageID == sha1 {
+			out = append(out, set)
+		}
 	}
-	return &set, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
+	return out, nil
 }
 
-func (m *memStore) BoxImageIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+func (m *memStore) FindBoxSets(ctx context.Context, task string, ids []string) (map[string]store.BoxSet, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	out := map[string]bool{}
+	out := map[string]store.BoxSet{}
 	for _, id := range ids {
-		if _, ok := m.boxSets[id]; ok {
-			out[id] = true
+		if set, ok := m.boxSets[boxKey(task, id)]; ok {
+			out[id] = set
 		}
 	}
 	return out, nil
 }
 
-func (m *memStore) DeleteBoxSet(ctx context.Context, sha1 string) error {
+func (m *memStore) DeleteImageBoxSets(ctx context.Context, sha1 string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	delete(m.boxSets, sha1)
+	for k, set := range m.boxSets {
+		if set.ImageID == sha1 {
+			delete(m.boxSets, k)
+		}
+	}
 	return nil
 }
 
-func (m *memStore) BoxLabelCounts(ctx context.Context, pkg string) (int64, map[string]int64, error) {
+func (m *memStore) PackageBoxCounts(ctx context.Context, pkg string) ([]store.PackageTaskCount, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var images int64
-	labels := map[string]int64{}
+	by := map[string]*store.PackageTaskCount{}
 	for _, set := range m.boxSets {
 		if set.Package != pkg {
 			continue
 		}
-		images++
-		for _, b := range set.Boxes {
-			labels[b.Label]++
+		c := by[set.Task]
+		if c == nil {
+			c = &store.PackageTaskCount{Task: set.Task}
+			by[set.Task] = c
+		}
+		c.Images++
+		c.Boxes += int64(len(set.Boxes))
+	}
+	out := []store.PackageTaskCount{}
+	for _, c := range by {
+		out = append(out, *c)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
+	return out, nil
+}
+
+func (m *memStore) CreateTask(ctx context.Context, t *store.Task) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[t.Name]; ok {
+		return store.ErrDuplicate
+	}
+	m.tasks[t.Name] = *t
+	return nil
+}
+
+func (m *memStore) FindTask(ctx context.Context, name string) (*store.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[name]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	t.Labels = append([]string{}, t.Labels...)
+	return &t, nil
+}
+
+func (m *memStore) ListTasks(ctx context.Context) ([]store.Task, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []store.Task{}
+	for _, t := range m.tasks {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+func (m *memStore) UpdateTask(ctx context.Context, oldName string, t *store.Task) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[oldName]; !ok {
+		return store.ErrNotFound
+	}
+	if oldName != t.Name {
+		if _, ok := m.tasks[t.Name]; ok {
+			return store.ErrDuplicate
+		}
+		for k, set := range m.boxSets {
+			if set.Task == oldName {
+				delete(m.boxSets, k)
+				set.Task = t.Name
+				m.boxSets[boxKey(t.Name, set.ImageID)] = set
+			}
+		}
+		for name, p := range m.exportProf {
+			if p.Task == oldName {
+				p.Task = t.Name
+				m.exportProf[name] = p
+			}
+		}
+		delete(m.tasks, oldName)
+	}
+	m.tasks[t.Name] = *t
+	return nil
+}
+
+func (m *memStore) AddTaskLabels(ctx context.Context, name string, labels []string, now time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tasks[name]
+	if !ok {
+		return store.ErrNotFound
+	}
+	for _, l := range labels {
+		if !slices.Contains(t.Labels, l) {
+			t.Labels = append(t.Labels, l)
 		}
 	}
-	return images, labels, nil
+	t.UpdatedAt = now
+	m.tasks[name] = t
+	return nil
+}
+
+func (m *memStore) DeleteTask(ctx context.Context, name string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.tasks[name]; !ok {
+		return 0, store.ErrNotFound
+	}
+	var n int64
+	for k, set := range m.boxSets {
+		if set.Task == name {
+			delete(m.boxSets, k)
+			n++
+		}
+	}
+	delete(m.tasks, name)
+	return n, nil
+}
+
+func (m *memStore) TaskStats(ctx context.Context, task string) (*store.TaskStats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	st := &store.TaskStats{Labels: map[string]int64{}, Packages: []store.TaskPackage{}}
+	by := map[string]*store.TaskPackage{}
+	for _, set := range m.boxSets {
+		if set.Task != task {
+			continue
+		}
+		p := by[set.Package]
+		if p == nil {
+			p = &store.TaskPackage{Name: set.Package}
+			by[set.Package] = p
+		}
+		p.Images++
+		st.Images++
+		if m.images[set.ImageID].Status == store.StatusVerified {
+			p.Verified++
+			st.Verified++
+		}
+		if len(set.Boxes) == 0 {
+			st.Negatives++
+		}
+		for _, b := range set.Boxes {
+			st.Labels[b.Label]++
+			st.Boxes++
+		}
+	}
+	for _, p := range by {
+		st.Packages = append(st.Packages, *p)
+	}
+	sort.Slice(st.Packages, func(i, j int) bool { return st.Packages[i].Name < st.Packages[j].Name })
+	return st, nil
+}
+
+func (m *memStore) CreateExportProfile(ctx context.Context, p *export.Profile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.exportProf[p.Name]; ok {
+		return store.ErrDuplicate
+	}
+	m.exportProf[p.Name] = *p
+	return nil
+}
+
+func (m *memStore) FindExportProfile(ctx context.Context, name string) (*export.Profile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	p, ok := m.exportProf[name]
+	if !ok {
+		return nil, store.ErrNotFound
+	}
+	return &p, nil
+}
+
+func (m *memStore) ReplaceExportProfile(ctx context.Context, p *export.Profile) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.exportProf[p.Name]; !ok {
+		return store.ErrNotFound
+	}
+	m.exportProf[p.Name] = *p
+	return nil
+}
+
+func (m *memStore) DeleteExportProfile(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.exportProf[name]; !ok {
+		return store.ErrNotFound
+	}
+	delete(m.exportProf, name)
+	return nil
+}
+
+func (m *memStore) ListExportProfiles(ctx context.Context) ([]export.Profile, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []export.Profile{}
+	for _, p := range m.exportProf {
+		out = append(out, p)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
 }
 
 // ---------- helpers ----------

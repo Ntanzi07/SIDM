@@ -23,11 +23,19 @@ tags:
     description: Fila de trabalho compartilhada (várias pessoas anotando o mesmo pacote).
   - name: import
     description: Import de metadados por CSV, usando perfis.
+  - name: export
+    description: |
+      Datasets de treino (RF-DETR / YOLO). Entram as imagens **verificadas** e
+      **anotadas na tarefa** escolhida que passam nos filtros do perfil (as
+      anotadas sem nenhuma caixa entram como negativas). A divisão
+      train/valid/test é **fixa por imagem** (pelo sha1). Perfis padrão:
+      `rf-detr` e `yolo`.
   - name: caixas
     description: |
-      Caixas (bounding boxes) anotadas no CVAT, por pacote. O SIDM não desenha
-      caixas: manda as imagens para o CVAT (cvat.zip) e importa o export
-      COCO 1.0 de volta.
+      Caixas (bounding boxes) anotadas no CVAT, por **tarefa** (ex.: `capacete`,
+      `placa-letras`): a mesma imagem pode estar em várias tarefas sem uma
+      sobrescrever a outra. O SIDM não desenha caixas: manda as imagens para o
+      CVAT (cvat.zip) e importa o export COCO 1.0 de volta, na tarefa.
 
 paths:
   /health:
@@ -319,27 +327,147 @@ paths:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /packages/{name}/boxes/import:
+  /packages/{name}/boxes:
+    get:
+      tags: [caixas]
+      summary: Tarefas em que o pacote tem imagens anotadas
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+      responses:
+        "200":
+          description: Por tarefa, imagens do pacote anotadas nela e total de caixas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  package: { type: string }
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        task: { type: string }
+                        images: { type: integer }
+                        boxes: { type: integer }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks:
+    get:
+      tags: [caixas]
+      summary: Tarefas de anotação (com o resumo de cada uma)
+      responses:
+        "200":
+          description: Todas as tarefas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/TaskView" }
     post:
       tags: [caixas]
-      summary: Importar caixas do CVAT (COCO 1.0)
+      summary: Criar tarefa
+      parameters:
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskBody" }
+      responses:
+        "201":
+          description: Criada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /tasks/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, example: capacete }
+    get:
+      tags: [caixas]
+      summary: Uma tarefa, com os pacotes e as caixas por label
+      responses:
+        "200":
+          description: A tarefa.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TaskView" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [caixas]
+      summary: Atualizar tarefa
+      description: Mudar o nome leva junto as caixas e os perfis de export que apontam para ela.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TaskBody" }
+      responses:
+        "200":
+          description: Atualizada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Task" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+    delete:
+      tags: [caixas]
+      summary: Apagar tarefa e as caixas dela
+      responses:
+        "200":
+          description: Apagada.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: string }
+                  images: { type: integer, description: Imagens que tinham caixas na tarefa. }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /tasks/{name}/import:
+    post:
+      tags: [caixas]
+      summary: Importar caixas do CVAT (COCO 1.0) na tarefa
       description: |
         Mande o export da task do CVAT no formato **COCO 1.0** (o zip, ou só o
         `.json`). Por padrão é um **ensaio** (`dry_run=true`): nada é gravado.
 
-        Casamento: pelo nome do arquivo (sem pasta). Se começa pelo sha1, é por
-        ele; senão, pelo nome original, se for único no pacote.
+        As imagens são procuradas no **banco todo** (qualquer pacote), pelo nome
+        do arquivo (sem pasta): se começa pelo sha1, é por ele; senão, pelo
+        nome original, só se for único no banco.
 
-        - Imagens **sem caixa** no arquivo não são mexidas (o CVAT exporta todas
-          as imagens da task, inclusive as não anotadas).
+        - Imagens **sem caixa** no arquivo: com `negatives=false` (padrão) não
+          são mexidas (o CVAT exporta todas as imagens da task, inclusive as não
+          anotadas). Com `negatives=true` entram como anotadas e vazias: use só
+          com a task do CVAT toda anotada.
         - Imagens cujo **tamanho** no CVAT difere do arquivo guardado são puladas.
-        - Reimportar **substitui** as caixas da imagem.
+        - Reimportar **substitui** as caixas da imagem nesta tarefa (as outras
+          tarefas não mudam).
+        - Labels que a tarefa ainda não tem são **acrescentadas** a ela.
       parameters:
-        - $ref: "#/components/parameters/PackageName"
+        - name: name
+          in: path
+          required: true
+          schema: { type: string }
         - $ref: "#/components/parameters/XUser"
         - name: dry_run
           in: query
           schema: { type: boolean, default: true }
+        - name: negatives
+          in: query
+          schema: { type: boolean, default: false }
       requestBody:
         required: true
         content:
@@ -358,26 +486,143 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
-  /packages/{name}/boxes:
+  /export-profiles:
     get:
-      tags: [caixas]
-      summary: Resumo das caixas do pacote
-      parameters:
-        - $ref: "#/components/parameters/PackageName"
+      tags: [export]
+      summary: Listar perfis de export
+      description: Os padrões (`rf-detr`, `yolo`, com `builtin` true) e os salvos.
       responses:
         "200":
-          description: Imagens com caixas e caixas por label.
+          description: Perfis.
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  package: { type: string }
-                  images: { type: integer }
-                  labels:
-                    type: object
-                    additionalProperties: { type: integer }
-                    example: { placa: 120, carro: 98, moto: 22 }
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ExportProfile" }
+    post:
+      tags: [export]
+      summary: Criar perfil de export
+      parameters:
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportProfile" }
+      responses:
+        "201":
+          description: Criado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /export-profiles/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, example: rf-detr }
+    get:
+      tags: [export]
+      summary: Um perfil de export
+      responses:
+        "200":
+          description: O perfil.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportProfile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [export]
+      summary: Atualizar perfil de export
+      description: Os perfis padrão não podem ser alterados (salve uma cópia com outro nome).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportProfile" }
+      responses:
+        "200":
+          description: Atualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportProfile" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [export]
+      summary: Apagar perfil de export
+      responses:
+        "200":
+          description: Apagado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  deleted: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /exports/preview:
+    post:
+      tags: [export]
+      summary: Prévia do dataset
+      description: O que vai sair, sem gerar o zip. `profile` é o nome de um perfil ou um perfil inteiro (montado na tela, sem salvar).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportRequest" }
+      responses:
+        "200":
+          description: Prévia.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ExportPreview" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /exports/download:
+    post:
+      tags: [export]
+      summary: Baixar o dataset (zip)
+      description: |
+        Gera o zip enquanto baixa. Também aceita o pedido como formulário
+        (`application/x-www-form-urlencoded`, campo `request` com o mesmo JSON),
+        para o navegador salvar direto no disco.
+
+        - **coco** (RF-DETR): `train/`, `valid/`, `test/`, cada um com as imagens e
+          `_annotations.coco.json`.
+        - **yolo** (Ultralytics): `images/{train,val,test}`, `labels/{train,val,test}`
+          e `data.yaml`.
+
+        Sempre vai junto um `export_info.json` (perfil, data, contagens). Caixas
+        rotacionadas viram o menor retângulo reto que as contém.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ExportRequest" }
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                request: { type: string, description: 'O mesmo JSON, ex.: {"profile":"yolo"}' }
+      responses:
+        "200":
+          description: O zip.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /packages/{name}/next:
@@ -595,6 +840,12 @@ paths:
         - `complete: false`: salva o rascunho (continua pending, não renomeia).
         - `complete: true`: valida tudo, renomeia para o padrão v2 e marca verified.
 
+        **Nenhum campo é obrigatório.** O que a imagem não tem, ou não dá para
+        conferir (sem data, placa ilegível, câmera desconhecida, nenhum veículo),
+        fica vazio (`""`, `null` ou lista vazia) e vira uma **posição vazia** no
+        nome v2. O que vem preenchido tem que ser válido (código existente, placa
+        com 7 caracteres, equipamento/câmera cadastrados).
+
         Usa optimistic locking: se alguém gravou no meio, responde 409.
       parameters:
         - $ref: "#/components/parameters/SHA1"
@@ -637,18 +888,48 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
 
+  /images/{sha1}/reopen:
+    post:
+      tags: [fila]
+      summary: Reabrir para edição
+      description: |
+        Uma imagem **verificada** volta para **pendente**: o arquivo perde o nome v2
+        (volta a ser `<sha1>.ext`) e os metadados ficam como rascunho. Já fica
+        **reservada** para quem pediu (15 min, como na fila), para ninguém pegar
+        no meio. Numa pendente, só reserva. As caixas do CVAT não mudam.
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+        - name: X-User
+          in: header
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: A imagem, agora pendente e reservada.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Image" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /images/{sha1}/boxes:
     get:
       tags: [caixas]
-      summary: Caixas de uma imagem
+      summary: Caixas de uma imagem (em todas as tarefas)
       parameters:
         - $ref: "#/components/parameters/SHA1"
       responses:
         "200":
-          description: As caixas, em pixels da imagem.
+          description: As caixas, em pixels da imagem, uma entrada por tarefa (vazio se nenhuma).
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/BoxSet" }
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/BoxSet" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /images/{sha1}/file:
@@ -933,6 +1214,102 @@ components:
       properties:
         error: { type: string }
 
+    ExportProfile:
+      type: object
+      required: [name, format, split]
+      properties:
+        name: { type: string, example: yolo-placas-noite }
+        description: { type: string }
+        format: { type: string, enum: [coco, yolo], description: "coco = RF-DETR (layout do Roboflow)." }
+        task: { type: string, description: "Tarefa de anotação (vazio = escolher na hora de exportar)." }
+        split:
+          type: object
+          description: Porcentagens, somam 100. No YOLO, valid > 0.
+          properties:
+            train: { type: integer, example: 70 }
+            valid: { type: integer, example: 15 }
+            test: { type: integer, example: 15 }
+        packages:
+          type: array
+          items: { type: string }
+          description: Pacotes que entram (vazio = todos).
+        filters:
+          type: object
+          description: Mesmos valores da anotação (vazio = qualquer).
+          properties:
+            equipment: { type: string }
+            camera: { type: string }
+            direction: { type: string, example: rear }
+            day_time: { type: string, example: night }
+            weather: { type: string, example: rain }
+            vehicle_type: { type: string }
+            vehicle_color: { type: string }
+        labels:
+          type: object
+          properties:
+            rename:
+              type: object
+              additionalProperties: { type: string }
+              description: Label do CVAT -> classe. Dois nomes iguais juntam as classes.
+              example: { Placa: placa }
+            include:
+              type: array
+              items: { type: string }
+              description: Classes que entram, NA ORDEM dos ids (vazio = todas, em ordem alfabética).
+              example: [carro, moto, placa]
+        builtin: { type: boolean, readOnly: true }
+        created_by: { type: string, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    ExportRequest:
+      type: object
+      required: [profile]
+      properties:
+        profile:
+          description: Nome de um perfil (padrão ou salvo) ou o perfil inteiro.
+          oneOf:
+            - { type: string, example: rf-detr }
+            - { $ref: "#/components/schemas/ExportProfile" }
+        task:
+          type: string
+          example: capacete
+          description: Tarefa cujas caixas entram. Vale mais que a do perfil; um dos dois é obrigatório.
+
+    ExportPreview:
+      type: object
+      properties:
+        profile: { type: string }
+        task: { type: string }
+        format: { type: string }
+        split:
+          type: object
+          properties:
+            train: { type: integer }
+            valid: { type: integer }
+            test: { type: integer }
+        classes:
+          type: array
+          items: { type: string }
+          description: Na ordem dos ids (YOLO começa em 0, COCO em 1).
+        total: { type: integer }
+        negatives: { type: integer, description: Das imagens do dataset, as sem nenhuma caixa. }
+        images:
+          type: object
+          additionalProperties: { type: integer }
+          description: Imagens por grupo (train/valid/test).
+        boxes:
+          type: object
+          additionalProperties: { type: integer }
+          description: Caixas por classe.
+        skipped:
+          type: object
+          properties:
+            not_annotated: { type: integer, description: Verificadas, mas não anotadas na tarefa. }
+            without_labels: { type: integer, description: "Com caixas, mas nenhuma das classes escolhidas." }
+        packages:
+          type: array
+          items: { type: string }
+
     Box:
       type: object
       properties:
@@ -951,6 +1328,7 @@ components:
     BoxSet:
       type: object
       properties:
+        task: { type: string }
         sha1: { type: string }
         package: { type: string }
         width: { type: integer }
@@ -972,15 +1350,24 @@ components:
       type: object
       properties:
         dry_run: { type: boolean }
-        package: { type: string }
+        task: { type: string }
         file: { type: string }
+        negatives: { type: boolean }
         file_images: { type: integer, description: Imagens no arquivo. }
         file_boxes: { type: integer, description: Caixas válidas no arquivo. }
         labels:
           type: object
           additionalProperties: { type: integer }
           description: Caixas por label, das imagens que serão gravadas.
-        matched: { type: integer, description: Imagens do arquivo encontradas no pacote. }
+        new_labels:
+          type: array
+          items: { type: string }
+          description: Labels que a tarefa não tinha (acrescentadas ao aplicar).
+        matched: { type: integer, description: Imagens do arquivo encontradas no SIDM. }
+        packages:
+          type: object
+          additionalProperties: { type: integer }
+          description: Das imagens que serão gravadas, quantas por pacote.
         not_found:
           type: array
           items: { type: string }
@@ -989,8 +1376,8 @@ components:
         ambiguous:
           type: array
           items: { type: string }
-          description: Nome original repetido no pacote.
-        empty: { type: integer, description: "Encontradas, mas sem caixa: não mexidas." }
+          description: Nome original repetido no banco.
+        empty: { type: integer, description: "Encontradas, mas sem caixa no arquivo (gravadas só com negatives=true)." }
         size_mismatch:
           type: array
           items:
@@ -999,13 +1386,61 @@ components:
               file_name: { type: string }
               cvat: { type: string, example: 1280x720 }
               sidm: { type: string, example: 1920x1080 }
-        replaced: { type: integer, description: Já tinham caixas (substituídas ao aplicar). }
+        will_apply: { type: integer, description: Imagens que serão gravadas. }
+        replaced: { type: integer, description: Dessas, as que já estavam na tarefa (substituídas ao aplicar). }
         applied: { type: integer }
         applied_boxes: { type: integer }
         warnings:
           type: array
           items: { type: string }
           description: Caixas ignoradas na leitura do arquivo.
+
+    TaskBody:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, pattern: "^[a-z0-9][a-z0-9_-]{0,63}$", example: placa-letras }
+        description: { type: string }
+        labels:
+          type: array
+          items: { type: string }
+          example: [com_capacete, sem_capacete]
+
+    Task:
+      type: object
+      properties:
+        name: { type: string }
+        description: { type: string }
+        labels:
+          type: array
+          items: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    TaskView:
+      allOf:
+        - $ref: "#/components/schemas/Task"
+        - type: object
+          properties:
+            stats:
+              type: object
+              properties:
+                images: { type: integer, description: Imagens anotadas na tarefa. }
+                verified: { type: integer, description: Dessas, as verificadas (entram no export). }
+                negatives: { type: integer, description: Anotadas sem nenhuma caixa. }
+                boxes: { type: integer }
+                labels:
+                  type: object
+                  additionalProperties: { type: integer }
+                packages:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      images: { type: integer }
+                      verified: { type: integer }
 
     RegistryReport:
       type: object

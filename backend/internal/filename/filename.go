@@ -36,6 +36,16 @@ type ImageMeta struct {
 // Padrão v2:
 // <sha1>_v2_<equipamento>_<camera>_<dir>-<res>-<angle>-<daytime>-<range>-<weather>_<cond.cond>_<YYYYMMDDTHHMMSSZ>_<placa-tipo-cat-veic-cor>.<placa-...>.<ext>
 // Split por "_" deve dar exatamente 8 partes.
+//
+// Campo DESCONHECIDO = posição vazia (só o sha1 e a versão são obrigatórios).
+// Nenhum valor real é vazio (nomes cadastrados, códigos e placas têm pelo
+// menos um caractere), então o vazio nunca é ambíguo. Exemplos:
+//   sem câmera:          ..._8003-MF4739__T-08-...
+//   sem data:            ..._01__ABC1D23-M-8-C-WHT.jpg
+//   sem placa:           ..._-M-8-C-WHT.jpg
+//   sem veículo nenhum:  ..._20260903T112523Z_.jpg
+//   sem condições:       ..._T-08-L-N-E-S__2026...
+// Um veículo com tudo desconhecido é "----" (diferente de não ter veículo).
 
 // CurrentVersion é a versão do padrão que o Format gera.
 const CurrentVersion = currentVersion
@@ -81,10 +91,10 @@ func Parse(name string) (ImageMeta, error) {
 	}
 	m.Version = parts[1]
 
-	if m.Equipment, err = validateName(parts[2], maxEquipmentLen, "equipamento"); err != nil {
+	if m.Equipment, err = optionalName(parts[2], maxEquipmentLen, "equipamento"); err != nil {
 		return ImageMeta{}, err
 	}
-	if m.Camera, err = validateName(parts[3], maxCameraLen, "câmera"); err != nil {
+	if m.Camera, err = optionalName(parts[3], maxCameraLen, "câmera"); err != nil {
 		return ImageMeta{}, err
 	}
 	if err = parseImageAttrs(parts[4], &m); err != nil {
@@ -93,8 +103,10 @@ func Parse(name string) (ImageMeta, error) {
 	if m.Conditions, err = parseConditions(parts[5]); err != nil {
 		return ImageMeta{}, err
 	}
-	if m.CapturedAt, err = time.Parse(dateLayout, parts[6]); err != nil {
-		return ImageMeta{}, fmt.Errorf("data inválida %q: %w", parts[6], err)
+	if parts[6] != "" { // vazio = data desconhecida (CapturedAt fica zero)
+		if m.CapturedAt, err = time.Parse(dateLayout, parts[6]); err != nil {
+			return ImageMeta{}, fmt.Errorf("data inválida %q: %w", parts[6], err)
+		}
 	}
 	if m.Vehicles, err = parseVehicles(parts[7]); err != nil {
 		return ImageMeta{}, err
@@ -112,6 +124,14 @@ func parseSHA1(s string) (string, error) {
 	return strings.ToLower(s), nil
 }
 
+// optionalName: vazio = desconhecido; senão, as regras de nome.
+func optionalName(s string, max int, what string) (string, error) {
+	if s == "" {
+		return "", nil
+	}
+	return validateName(s, max, what)
+}
+
 func validateName(s string, max int, what string) (string, error) {
 	if len(s) > max {
 		return "", fmt.Errorf("%s com mais de %d caracteres: %q", what, max, s)
@@ -123,7 +143,11 @@ func validateName(s string, max int, what string) (string, error) {
 }
 
 // lookup traduz um código usando a tabela, com erro claro se não existir.
+// Código vazio = desconhecido.
 func lookup(table map[string]string, code, what string) (string, error) {
+	if code == "" {
+		return "", nil
+	}
 	v, ok := table[code]
 	if !ok {
 		return "", fmt.Errorf("código de %s desconhecido: %q", what, code)
@@ -159,9 +183,15 @@ func parseImageAttrs(s string, m *ImageMeta) error {
 }
 
 func parseConditions(s string) ([]string, error) {
+	if s == "" {
+		return []string{}, nil // nenhuma condição informada
+	}
 	codes := strings.Split(s, ".")
 	out := make([]string, 0, len(codes))
 	for _, c := range codes {
+		if c == "" {
+			return nil, fmt.Errorf("condição vazia no meio da lista: %q", s)
+		}
 		v, err := lookup(conditionCodes, c, "condição")
 		if err != nil {
 			return nil, err
@@ -172,6 +202,9 @@ func parseConditions(s string) ([]string, error) {
 }
 
 func parseVehicles(s string) ([]Vehicle, error) {
+	if s == "" {
+		return []Vehicle{}, nil // nenhum veículo
+	}
 	items := strings.Split(s, ".")
 	out := make([]Vehicle, 0, len(items))
 	for i, item := range items {
@@ -179,7 +212,7 @@ func parseVehicles(s string) ([]Vehicle, error) {
 		if len(f) != 5 {
 			return nil, fmt.Errorf("veículo %d: esperava 5 campos (placa-tipo-categoria-veículo-cor), veio %d (%q)", i+1, len(f), item)
 		}
-		if !plateRe.MatchString(f[0]) {
+		if f[0] != "" && !plateRe.MatchString(f[0]) { // vazio = placa desconhecida
 			return nil, fmt.Errorf("veículo %d: placa inválida %q", i+1, f[0])
 		}
 		v := Vehicle{Plate: f[0]}

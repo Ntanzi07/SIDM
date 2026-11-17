@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"SIDM/internal/export"
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
 	"SIDM/internal/importer"
@@ -35,11 +36,15 @@ import (
 //   GET  /import-profiles      lista os perfis, paginado
 //   GET  /import-profiles/{name}  um perfil
 //   PUT  /import-profiles/{name}  atualiza um perfil (o JSON inteiro)
+//   POST /images/{sha1}/reopen    reabre para edição (verificada volta a pendente) e reserva
 //   DELETE /images/{sha1}         apaga a imagem (registro, histórico, caixas e arquivo)
 //   GET  /images/{sha1}/boxes     caixas (CVAT) de uma imagem
 //   GET  /packages/{name}/cvat.zip         imagens do pacote para o CVAT
 //   POST /packages/{name}/boxes/import     importa o COCO 1.0 do CVAT (ensaio por padrão)
 //   GET  /packages/{name}/boxes            resumo das caixas do pacote
+//   GET  /boxes/labels                     labels existentes em todos os pacotes
+//   GET|POST /export-profiles, GET|PUT|DELETE /export-profiles/{name}   perfis de export
+//   POST /exports/preview, POST /exports/download                       dataset RF-DETR/YOLO
 //   PATCH  /import-profiles/{name}  renomeia {"name": "..."}
 //   DELETE /import-profiles/{name}  apaga
 //   POST /packages/{name}/import?profile=X&dry_run=false  importa um CSV para os rascunhos
@@ -87,12 +92,26 @@ type Store interface {
 	DeleteImage(ctx context.Context, sha1 string) error
 	DeleteImageHistory(ctx context.Context, sha1 string) error
 
-	// Caixas (bounding boxes) do CVAT
+	// Tarefas de anotação e caixas (bounding boxes) do CVAT
+	CreateTask(ctx context.Context, t *store.Task) error
+	FindTask(ctx context.Context, name string) (*store.Task, error)
+	ListTasks(ctx context.Context) ([]store.Task, error)
+	UpdateTask(ctx context.Context, oldName string, t *store.Task) error
+	AddTaskLabels(ctx context.Context, name string, labels []string, now time.Time) error
+	DeleteTask(ctx context.Context, name string) (int64, error)
+	TaskStats(ctx context.Context, task string) (*store.TaskStats, error)
 	ReplaceBoxSets(ctx context.Context, sets []store.BoxSet) error
-	FindBoxSet(ctx context.Context, sha1 string) (*store.BoxSet, error)
-	BoxImageIDs(ctx context.Context, ids []string) (map[string]bool, error)
-	DeleteBoxSet(ctx context.Context, sha1 string) error
-	BoxLabelCounts(ctx context.Context, pkg string) (int64, map[string]int64, error)
+	FindImageBoxSets(ctx context.Context, sha1 string) ([]store.BoxSet, error)
+	FindBoxSets(ctx context.Context, task string, ids []string) (map[string]store.BoxSet, error)
+	DeleteImageBoxSets(ctx context.Context, sha1 string) error
+	PackageBoxCounts(ctx context.Context, pkg string) ([]store.PackageTaskCount, error)
+
+	// Perfis de export
+	CreateExportProfile(ctx context.Context, p *export.Profile) error
+	FindExportProfile(ctx context.Context, name string) (*export.Profile, error)
+	ReplaceExportProfile(ctx context.Context, p *export.Profile) error
+	DeleteExportProfile(ctx context.Context, name string) error
+	ListExportProfiles(ctx context.Context) ([]export.Profile, error)
 	FindImage(ctx context.Context, sha1 string) (*store.Image, error)
 	ReplaceImage(ctx context.Context, img *store.Image, prevUpdatedAt time.Time) error
 	ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*store.Image, error)
@@ -155,10 +174,23 @@ func (s *Server) routes() []route {
 		{"GET", "/images/{sha1}", s.handleGetImage},
 		{"PUT", "/images/{sha1}", s.handleAnnotate},
 		{"DELETE", "/images/{sha1}", s.handleDeleteImage},
+		{"POST", "/images/{sha1}/reopen", s.handleReopen},
 		{"GET", "/images/{sha1}/boxes", s.handleImageBoxes},
 		{"GET", "/packages/{name}/boxes", s.handlePackageBoxes},
-		{"POST", "/packages/{name}/boxes/import", s.handleImportBoxes},
 		{"GET", "/packages/{name}/cvat.zip", s.handleCVATZip},
+		{"GET", "/tasks", s.handleListTasks},
+		{"POST", "/tasks", s.handleCreateTask},
+		{"GET", "/tasks/{name}", s.handleGetTask},
+		{"PUT", "/tasks/{name}", s.handleReplaceTask},
+		{"DELETE", "/tasks/{name}", s.handleDeleteTask},
+		{"POST", "/tasks/{name}/import", s.handleImportTask},
+		{"GET", "/export-profiles", s.handleListExportProfiles},
+		{"POST", "/export-profiles", s.handleCreateExportProfile},
+		{"GET", "/export-profiles/{name}", s.handleGetExportProfile},
+		{"PUT", "/export-profiles/{name}", s.handleReplaceExportProfile},
+		{"DELETE", "/export-profiles/{name}", s.handleDeleteExportProfile},
+		{"POST", "/exports/preview", s.handleExportPreview},
+		{"POST", "/exports/download", s.handleExportDownload},
 		{"GET", "/images/{sha1}/file", s.handleImageFile},
 		{"POST", "/images/{sha1}/release", s.handleRelease},
 

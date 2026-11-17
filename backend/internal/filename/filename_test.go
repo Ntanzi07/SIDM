@@ -159,8 +159,7 @@ func TestFormatErros(t *testing.T) {
 	}
 
 	cases := map[string]func(m *ImageMeta){
-		"sem condições": func(m *ImageMeta) { m.Conditions = nil },
-		"sem veículos":  func(m *ImageMeta) { m.Vehicles = nil },
+		"condição vazia no meio": func(m *ImageMeta) { m.Conditions = []string{"no_damage", ""} },
 		"placa inválida": func(m *ImageMeta) {
 			m.Vehicles = []Vehicle{{Plate: "AB-12", PlateType: "br", PlateCategory: "private", Type: "car", Color: "red"}}
 		},
@@ -241,6 +240,88 @@ func TestSanitizePackage(t *testing.T) {
 	for _, bad := range []string{"", "../etc", "pacote/sub", "pacote_1", strings.Repeat("a", 49)} {
 		if _, err := SanitizePackage(bad); err == nil {
 			t.Errorf("SanitizePackage(%q): esperava erro", bad)
+		}
+	}
+}
+
+// Campo desconhecido = posição vazia no nome. Tudo tem que ir e voltar igual.
+func TestCamposDesconhecidos(t *testing.T) {
+	base, err := Parse(validName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sha := base.SHA1
+
+	cases := []struct {
+		name string
+		mod  func(m *ImageMeta)
+		want string // o nome esperado, sem o "<sha1>_v2_" e sem a extensão
+	}{
+		{"tudo desconhecido", func(m *ImageMeta) { *m = ImageMeta{SHA1: sha} }, "__-----___"},
+		{"sem câmera", func(m *ImageMeta) { m.Camera = "" }, ""},
+		{"sem equipamento", func(m *ImageMeta) { m.Equipment = "" }, ""},
+		{"sem data", func(m *ImageMeta) { m.CapturedAt = time.Time{} }, ""},
+		{"sem condições", func(m *ImageMeta) { m.Conditions = nil }, ""},
+		{"sem veículo", func(m *ImageMeta) { m.Vehicles = nil }, ""},
+		{"só a direção desconhecida", func(m *ImageMeta) { m.Direction = "" }, ""},
+		{"placa desconhecida", func(m *ImageMeta) { m.Vehicles = []Vehicle{{PlateType: "mercosul", Type: "car"}} }, ""},
+		{"veículo todo desconhecido", func(m *ImageMeta) { m.Vehicles = []Vehicle{{}} }, ""},
+		{"dois veículos, um sem placa", func(m *ImageMeta) {
+			m.Vehicles = []Vehicle{{Plate: "ABC1D23", Color: "red"}, {Type: "motorcycle"}}
+		}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := base
+			m.Vehicles = append([]Vehicle(nil), base.Vehicles...)
+			m.Conditions = append([]string(nil), base.Conditions...)
+			tc.mod(&m)
+
+			name, err := Format(m)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tc.want != "" && name != sha+"_v2_"+tc.want {
+				t.Errorf("nome = %q, want %q", name, sha+"_v2_"+tc.want)
+			}
+			if got := strings.Count(name, "_"); got != partsCount-1 {
+				t.Fatalf("%q: %d separadores \"_\", want %d", name, got, partsCount-1)
+			}
+
+			back, err := Parse(name + ".jpg")
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", name, err)
+			}
+			again, err := Format(back)
+			if err != nil || again != name {
+				t.Errorf("ida e volta: %q -> %q (%v)", name, again, err)
+			}
+			if back.Camera != m.Camera || back.Equipment != m.Equipment || back.Direction != m.Direction ||
+				!back.CapturedAt.Equal(m.CapturedAt) || len(back.Vehicles) != len(m.Vehicles) || len(back.Conditions) != len(m.Conditions) {
+				t.Errorf("Parse devolveu %+v\nesperava %+v", back, m)
+			}
+			for i := range m.Vehicles {
+				if back.Vehicles[i] != m.Vehicles[i] {
+					t.Errorf("veículo %d: %+v, want %+v", i, back.Vehicles[i], m.Vehicles[i])
+				}
+			}
+		})
+	}
+}
+
+func TestParseVazioAindaValida(t *testing.T) {
+	sha := strings.Repeat("a", 40)
+	invalid := []string{
+		sha + "_v2_8003_cam_T-08-L-N-E_01__.jpg",       // 5 atributos em vez de 6
+		sha + "_v2_8003_cam_T-08-L-N-E-S_01_xx_.jpg",   // data inválida (não vazia)
+		sha + "_v2_8003_cam_T-08-L-N-E-S_01.._.jpg",    // condição vazia no meio da lista
+		sha + "_v2_8003_cam_T-08-L-N-E-S_01__AB-M.jpg", // veículo com campos a menos
+		sha + "_v2_8003_cam_T-99-L-N-E-S_01__.jpg",     // resolução inexistente
+		sha + "_v2_8003_cam_T-08-L-N-E-S_01__ab-----.jpg",
+	}
+	for _, name := range invalid {
+		if _, err := Parse(name); err == nil {
+			t.Errorf("Parse(%q) deveria dar erro", name)
 		}
 	}
 }

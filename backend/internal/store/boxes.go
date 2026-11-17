@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -13,12 +12,17 @@ import (
 	"SIDM/internal/boxes"
 )
 
-// BoxSet são as caixas (bounding boxes) de UMA imagem, vindas do CVAT.
-// Coleção própria (image_boxes), com _id = sha1 da imagem: os metadados da
-// imagem e as caixas têm ciclos de vida diferentes (reimportar as caixas não
-// mexe na anotação, e vice-versa).
+// BoxSet são as caixas (bounding boxes) de UMA imagem em UMA tarefa, vindas
+// do CVAT. Coleção própria (image_boxes), uma entrada por (tarefa, imagem):
+// os metadados da imagem e as caixas têm ciclos de vida diferentes, e a mesma
+// imagem pode estar em várias tarefas.
+//
+// Boxes vazio = a imagem foi anotada na tarefa e não tem nenhum objeto
+// (negativa): entra no export como imagem sem caixas.
 type BoxSet struct {
-	ImageID    string      `bson:"_id" json:"sha1"`
+	ID         any         `bson:"_id,omitempty" json:"-"`
+	Task       string      `bson:"task" json:"task"`
+	ImageID    string      `bson:"image" json:"sha1"`
 	Package    string      `bson:"package" json:"package"`
 	Width      int         `bson:"width" json:"width"` // tamanho da imagem no CVAT (as caixas são em pixels dela)
 	Height     int         `bson:"height" json:"height"`
@@ -38,27 +42,77 @@ type BoxSource struct {
 
 func (s *Store) boxes() *mongo.Collection { return s.db.Collection("image_boxes") }
 
-// ensureBoxIndexes: o índice por pacote (apagar/renomear pacote, exportar).
-// CreateOne é idempotente, então pode rodar a cada subida do servidor; assim
-// funciona também num banco criado antes desta coleção existir.
+// ensureBoxIndexes migra as caixas de antes das tarefas e cria os índices.
+// Idempotente: roda a cada subida do servidor.
+//
+// Antes, cada imagem tinha um conjunto só, com _id = sha1. Agora a chave é
+// (task, image). A migração põe essas caixas antigas na tarefa "padrao"
+// (criada com as labels delas); o _id antigo fica como está (o Mongo não
+// deixa mudar _id, e nada depende dele).
 func (s *Store) ensureBoxIndexes(ctx context.Context) error {
-	_, err := s.boxes().Indexes().CreateOne(ctx, mongo.IndexModel{Keys: bson.D{{Key: "package", Value: 1}}})
+	res, err := s.boxes().UpdateMany(ctx,
+		bson.D{{Key: "task", Value: bson.D{{Key: "$exists", Value: false}}}},
+		mongo.Pipeline{{{Key: "$set", Value: bson.D{
+			{Key: "task", Value: DefaultTask},
+			{Key: "image", Value: "$_id"},
+		}}}})
 	if err != nil {
-		return fmt.Errorf("índice de image_boxes: %w", err)
+		return fmt.Errorf("migrar caixas para a tarefa %q: %w", DefaultTask, err)
+	}
+	if res.ModifiedCount > 0 {
+		if err := s.ensureDefaultTask(ctx); err != nil {
+			return err
+		}
+	}
+
+	_, err = s.boxes().Indexes().CreateMany(ctx, []mongo.IndexModel{
+		{Keys: bson.D{{Key: "task", Value: 1}, {Key: "image", Value: 1}}, Options: options.Index().SetUnique(true)},
+		{Keys: bson.D{{Key: "image", Value: 1}}},
+		{Keys: bson.D{{Key: "package", Value: 1}}}, // apagar/renomear pacote
+	})
+	if err != nil {
+		return fmt.Errorf("índices de image_boxes: %w", err)
 	}
 	return nil
 }
 
-// ReplaceBoxSets grava (ou substitui) as caixas de várias imagens.
+// ensureDefaultTask cria a tarefa "padrao" (se não existe) com as labels das
+// caixas migradas.
+func (s *Store) ensureDefaultTask(ctx context.Context) error {
+	var labels []string
+	if err := s.boxes().Distinct(ctx, "boxes.label", bson.D{{Key: "task", Value: DefaultTask}}).Decode(&labels); err != nil {
+		return fmt.Errorf("labels das caixas migradas: %w", err)
+	}
+	if labels == nil {
+		labels = []string{}
+	}
+	now := time.Now().UTC()
+	err := s.CreateTask(ctx, &Task{
+		Name: DefaultTask, Labels: labels, CreatedBy: "migração", CreatedAt: now, UpdatedAt: now,
+		Description: "Caixas importadas antes de existirem tarefas.",
+	})
+	if err == ErrDuplicate {
+		return s.AddTaskLabels(ctx, DefaultTask, labels, now)
+	}
+	return err
+}
+
+// ReplaceBoxSets grava (ou substitui) as caixas de várias imagens, cada uma
+// na sua tarefa.
 func (s *Store) ReplaceBoxSets(ctx context.Context, sets []BoxSet) error {
 	const batch = 500
 	for start := 0; start < len(sets); start += batch {
 		end := min(start+batch, len(sets))
 		models := make([]mongo.WriteModel, 0, end-start)
 		for i := start; i < end; i++ {
+			set := sets[i]
+			set.ID = nil // o replace mantém o _id do documento existente
+			if set.Boxes == nil {
+				set.Boxes = []boxes.Box{} // negativa: [] e não null
+			}
 			models = append(models, mongo.NewReplaceOneModel().
-				SetFilter(bson.D{{Key: "_id", Value: sets[i].ImageID}}).
-				SetReplacement(sets[i]).
+				SetFilter(bson.D{{Key: "task", Value: set.Task}, {Key: "image", Value: set.ImageID}}).
+				SetReplacement(set).
 				SetUpsert(true))
 		}
 		if _, err := s.boxes().BulkWrite(ctx, models, options.BulkWrite().SetOrdered(false)); err != nil {
@@ -68,76 +122,76 @@ func (s *Store) ReplaceBoxSets(ctx context.Context, sets []BoxSet) error {
 	return nil
 }
 
-// FindBoxSet devolve as caixas de uma imagem (ErrNotFound se não tem).
-func (s *Store) FindBoxSet(ctx context.Context, sha1 string) (*BoxSet, error) {
-	var set BoxSet
-	err := s.boxes().FindOne(ctx, bson.D{{Key: "_id", Value: sha1}}).Decode(&set)
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, ErrNotFound
-	}
+// FindImageBoxSets devolve as caixas de uma imagem em todas as tarefas.
+func (s *Store) FindImageBoxSets(ctx context.Context, sha1 string) ([]BoxSet, error) {
+	cur, err := s.boxes().Find(ctx, bson.D{{Key: "image", Value: sha1}}, options.Find().SetSort(bson.D{{Key: "task", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("buscar caixas de %s: %w", sha1, err)
 	}
-	return &set, nil
+	out := []BoxSet{}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("ler caixas de %s: %w", sha1, err)
+	}
+	return out, nil
 }
 
-// BoxImageIDs diz quais destas imagens já têm caixas.
-func (s *Store) BoxImageIDs(ctx context.Context, ids []string) (map[string]bool, error) {
-	out := map[string]bool{}
+// FindBoxSets devolve as caixas de várias imagens numa tarefa (sha1 -> caixas).
+func (s *Store) FindBoxSets(ctx context.Context, task string, ids []string) (map[string]BoxSet, error) {
+	out := make(map[string]BoxSet, len(ids))
 	const batch = 1000
 	for start := 0; start < len(ids); start += batch {
 		end := min(start+batch, len(ids))
-		cur, err := s.boxes().Find(ctx,
-			bson.D{{Key: "_id", Value: bson.D{{Key: "$in", Value: ids[start:end]}}}},
-			options.Find().SetProjection(bson.D{{Key: "_id", Value: 1}}))
+		cur, err := s.boxes().Find(ctx, bson.D{
+			{Key: "task", Value: task},
+			{Key: "image", Value: bson.D{{Key: "$in", Value: ids[start:end]}}},
+		})
 		if err != nil {
-			return nil, fmt.Errorf("buscar caixas existentes: %w", err)
+			return nil, fmt.Errorf("buscar caixas: %w", err)
 		}
-		var docs []struct {
-			ID string `bson:"_id"`
+		var sets []BoxSet
+		if err := cur.All(ctx, &sets); err != nil {
+			return nil, fmt.Errorf("ler caixas: %w", err)
 		}
-		if err := cur.All(ctx, &docs); err != nil {
-			return nil, fmt.Errorf("ler caixas existentes: %w", err)
-		}
-		for _, d := range docs {
-			out[d.ID] = true
+		for _, set := range sets {
+			out[set.ImageID] = set
 		}
 	}
 	return out, nil
 }
 
-// DeleteBoxSet apaga as caixas de uma imagem (quando ela é excluída).
-func (s *Store) DeleteBoxSet(ctx context.Context, sha1 string) error {
-	if _, err := s.boxes().DeleteOne(ctx, bson.D{{Key: "_id", Value: sha1}}); err != nil {
+// DeleteImageBoxSets apaga as caixas de uma imagem em todas as tarefas
+// (quando ela é excluída).
+func (s *Store) DeleteImageBoxSets(ctx context.Context, sha1 string) error {
+	if _, err := s.boxes().DeleteMany(ctx, bson.D{{Key: "image", Value: sha1}}); err != nil {
 		return fmt.Errorf("apagar caixas de %s: %w", sha1, err)
 	}
 	return nil
 }
 
-// BoxLabelCounts conta as caixas por label num pacote (o resumo do pacote).
-func (s *Store) BoxLabelCounts(ctx context.Context, pkg string) (images int64, labels map[string]int64, err error) {
-	images, err = s.boxes().CountDocuments(ctx, bson.D{{Key: "package", Value: pkg}})
-	if err != nil {
-		return 0, nil, fmt.Errorf("contar imagens com caixas: %w", err)
-	}
+// PackageTaskCount: quantas imagens de um pacote estão numa tarefa.
+type PackageTaskCount struct {
+	Task   string `bson:"_id" json:"task"`
+	Images int64  `bson:"images" json:"images"`
+	Boxes  int64  `bson:"boxes" json:"boxes"`
+}
+
+// PackageBoxCounts conta, por tarefa, as imagens do pacote anotadas nela.
+func (s *Store) PackageBoxCounts(ctx context.Context, pkg string) ([]PackageTaskCount, error) {
 	cur, err := s.boxes().Aggregate(ctx, mongo.Pipeline{
 		{{Key: "$match", Value: bson.D{{Key: "package", Value: pkg}}}},
-		{{Key: "$unwind", Value: "$boxes"}},
-		{{Key: "$group", Value: bson.D{{Key: "_id", Value: "$boxes.label"}, {Key: "n", Value: bson.D{{Key: "$sum", Value: 1}}}}}},
+		{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: "$task"},
+			{Key: "images", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "boxes", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$size", Value: bson.D{{Key: "$ifNull", Value: bson.A{"$boxes", bson.A{}}}}}}}}},
+		}}},
+		{{Key: "$sort", Value: bson.D{{Key: "_id", Value: 1}}}},
 	})
 	if err != nil {
-		return 0, nil, fmt.Errorf("contar caixas por label: %w", err)
+		return nil, fmt.Errorf("contar caixas do pacote %s: %w", pkg, err)
 	}
-	var rows []struct {
-		Label string `bson:"_id"`
-		N     int64  `bson:"n"`
+	out := []PackageTaskCount{}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("ler contagem de caixas do pacote %s: %w", pkg, err)
 	}
-	if err := cur.All(ctx, &rows); err != nil {
-		return 0, nil, fmt.Errorf("ler contagem de caixas: %w", err)
-	}
-	labels = make(map[string]int64, len(rows))
-	for _, r := range rows {
-		labels[r.Label] = r.N
-	}
-	return images, labels, nil
+	return out, nil
 }

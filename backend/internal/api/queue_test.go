@@ -272,3 +272,71 @@ func TestPackagesContaQuemEstaAnotando(t *testing.T) {
 		t.Errorf("in_progress=%d pending=%d; want 2 e 3", resp.Items[0].InProgress, resp.Items[0].Pending)
 	}
 }
+
+func TestReabrirImagemVerificada(t *testing.T) {
+	env := newTestEnv(t)
+	sha := env.seedVerified(t, "verificada")
+	verifiedName := env.db.images[sha].FileName
+	env.db.boxSets[sha] = store.BoxSet{ImageID: sha, Package: testPkg}
+
+	// outra pessoa nem consegue editar uma verificada sem reabrir
+	rec := env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "maria"})
+	assertStatus(t, rec, http.StatusOK)
+
+	img := env.db.images[sha]
+	if img.Status != store.StatusPending || img.FileName != "" || img.Path != "dataset/"+testPkg+"/"+sha+".jpg" {
+		t.Errorf("status=%s file=%q path=%q", img.Status, img.FileName, img.Path)
+	}
+	if img.ClaimedBy != "maria" || img.ClaimedUntil == nil {
+		t.Errorf("deveria ficar reservada para maria: %q", img.ClaimedBy)
+	}
+	if img.Equipment != "8003-MF4739" || len(img.Vehicles) != 1 {
+		t.Error("os metadados ficam como rascunho")
+	}
+	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+		t.Error("o arquivo deveria voltar para <sha1>.jpg")
+	}
+	if _, err := os.Stat(env.pkgFile(verifiedName)); !os.IsNotExist(err) {
+		t.Error("o nome v2 deveria ter sumido")
+	}
+	if _, ok := env.db.boxSets[sha]; !ok {
+		t.Error("as caixas não podem ser afetadas")
+	}
+	var logged bool
+	for _, h := range env.db.history {
+		if h.ImageID == sha && h.Field == "status" && h.Old == store.StatusVerified && h.New == store.StatusPending && h.ChangedBy == "maria" {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Error("a reabertura deveria ir para o histórico")
+	}
+
+	// reservada: ninguém mais pega na fila nem edita
+	if got, code := env.next(t, "joao", ""); code != http.StatusNoContent {
+		t.Errorf("a fila não deveria entregar a imagem reaberta: %d %+v", code, got)
+	}
+	assertStatus(t, env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "joao"}), http.StatusConflict)
+
+	// maria salva rascunho e verifica de novo
+	rec = env.do("PUT", "/images/"+sha, strings.NewReader(completeBody()), map[string]string{"Content-Type": "application/json", "X-User": "maria"})
+	assertStatus(t, rec, http.StatusOK)
+	if img := env.db.images[sha]; img.Status != store.StatusVerified || img.FileName != verifiedName {
+		t.Errorf("verificando de novo: status=%s file=%q", img.Status, img.FileName)
+	}
+}
+
+func TestReabrirPendenteSoReserva(t *testing.T) {
+	env := newTestEnv(t)
+	sha := env.seedPending(t, "pendente")
+	rec := env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "maria"})
+	assertStatus(t, rec, http.StatusOK)
+	if img := env.db.images[sha]; img.Status != store.StatusPending || img.ClaimedBy != "maria" {
+		t.Errorf("status=%s claimed=%q", img.Status, img.ClaimedBy)
+	}
+	// a mesma pessoa pode reabrir de novo (renova a reserva)
+	assertStatus(t, env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "maria"}), http.StatusOK)
+
+	assertStatus(t, env.do("POST", "/images/"+sha+"/reopen", nil, nil), http.StatusBadRequest)
+	assertStatus(t, env.do("POST", "/images/"+strings.Repeat("0", 40)+"/reopen", nil, map[string]string{"X-User": "maria"}), http.StatusNotFound)
+}

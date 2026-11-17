@@ -36,22 +36,20 @@ func Format(m ImageMeta) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if _, err := validateName(m.Equipment, maxEquipmentLen, "equipamento"); err != nil {
+	// Campo vazio = desconhecido: fica a posição vazia no nome.
+	if _, err := optionalName(m.Equipment, maxEquipmentLen, "equipamento"); err != nil {
 		return "", err
 	}
-	if _, err := validateName(m.Camera, maxCameraLen, "câmera"); err != nil {
+	if _, err := optionalName(m.Camera, maxCameraLen, "câmera"); err != nil {
 		return "", err
-	}
-	if len(m.Conditions) == 0 {
-		return "", fmt.Errorf("imagem sem condições: use ao menos \"no_damage\"")
-	}
-	if len(m.Vehicles) == 0 {
-		return "", fmt.Errorf("imagem sem veículos")
 	}
 
 	// Coletamos o primeiro erro e seguimos; no fim, se houve erro, retornamos ele.
 	var firstErr error
 	code := func(rev map[string]string, value, what string) string {
+		if value == "" {
+			return "" // desconhecido
+		}
 		c, ok := rev[value]
 		if !ok && firstErr == nil {
 			firstErr = fmt.Errorf("valor de %s desconhecido: %q", what, value)
@@ -70,12 +68,15 @@ func Format(m ImageMeta) (string, error) {
 
 	conds := make([]string, 0, len(m.Conditions))
 	for _, c := range m.Conditions {
+		if c == "" && firstErr == nil {
+			firstErr = fmt.Errorf("condição vazia na lista: para nenhuma condição, mande a lista vazia")
+		}
 		conds = append(conds, code(conditionRev, c, "condição"))
 	}
 
 	vehicles := make([]string, 0, len(m.Vehicles))
 	for _, v := range m.Vehicles {
-		if !plateRe.MatchString(v.Plate) && firstErr == nil {
+		if v.Plate != "" && !plateRe.MatchString(v.Plate) && firstErr == nil {
 			firstErr = fmt.Errorf("placa inválida: %q", v.Plate)
 		}
 		vehicles = append(vehicles, strings.Join([]string{
@@ -91,6 +92,10 @@ func Format(m ImageMeta) (string, error) {
 		return "", firstErr
 	}
 
+	date := ""
+	if !m.CapturedAt.IsZero() {
+		date = m.CapturedAt.UTC().Format(dateLayout)
+	}
 	return strings.Join([]string{
 		sha1,
 		currentVersion,
@@ -98,7 +103,7 @@ func Format(m ImageMeta) (string, error) {
 		m.Camera,
 		attrs,
 		strings.Join(conds, "."),
-		m.CapturedAt.UTC().Format(dateLayout),
+		date,
 		strings.Join(vehicles, "."),
 	}, "_"), nil
 }
