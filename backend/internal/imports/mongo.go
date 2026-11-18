@@ -1,4 +1,4 @@
-package store
+package imports
 
 import (
 	"context"
@@ -12,7 +12,16 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
 	"SIDM/internal/importer"
+	"SIDM/internal/platform"
 )
+
+// MongoRepo é a coleção import_profiles (o índice único de nome é criado
+// pelo mongo/init/01-init.js).
+type MongoRepo struct{ db *mongo.Database }
+
+func NewMongoRepo(db *mongo.Database) *MongoRepo { return &MongoRepo{db: db} }
+
+func (m *MongoRepo) coll() *mongo.Collection { return m.db.Collection("import_profiles") }
 
 // storedProfile é como o perfil fica no Mongo: o JSON inteiro num campo texto.
 //
@@ -45,14 +54,14 @@ func (sp storedProfile) profile() (*importer.Profile, error) {
 }
 
 // CreateProfile cadastra um perfil de import (já validado).
-func (s *Store) CreateProfile(ctx context.Context, p *importer.Profile) error {
+func (m *MongoRepo) CreateProfile(ctx context.Context, p *importer.Profile) error {
 	doc, err := toStored(p)
 	if err != nil {
 		return err
 	}
-	_, err = s.db.Collection("import_profiles").InsertOne(ctx, doc)
+	_, err = m.coll().InsertOne(ctx, doc)
 	if mongo.IsDuplicateKeyError(err) {
-		return ErrDuplicate // índice único em import_profiles.name
+		return platform.ErrDuplicate // índice único em import_profiles.name
 	}
 	if err != nil {
 		return fmt.Errorf("criar perfil %s: %w", p.Name, err)
@@ -61,11 +70,11 @@ func (s *Store) CreateProfile(ctx context.Context, p *importer.Profile) error {
 }
 
 // FindProfile busca um perfil pelo nome.
-func (s *Store) FindProfile(ctx context.Context, name string) (*importer.Profile, error) {
+func (m *MongoRepo) FindProfile(ctx context.Context, name string) (*importer.Profile, error) {
 	var doc storedProfile
-	err := s.db.Collection("import_profiles").FindOne(ctx, bson.D{{Key: "name", Value: name}}).Decode(&doc)
+	err := m.coll().FindOne(ctx, bson.D{{Key: "name", Value: name}}).Decode(&doc)
 	if errors.Is(err, mongo.ErrNoDocuments) {
-		return nil, ErrNotFound
+		return nil, platform.ErrNotFound
 	}
 	if err != nil {
 		return nil, fmt.Errorf("buscar perfil %s: %w", name, err)
@@ -75,7 +84,7 @@ func (s *Store) FindProfile(ctx context.Context, name string) (*importer.Profile
 
 // ReplaceProfile grava a nova versão de um perfil existente.
 // O created_by original é mantido.
-func (s *Store) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
+func (m *MongoRepo) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
 	doc, err := toStored(p)
 	if err != nil {
 		return err
@@ -84,52 +93,52 @@ func (s *Store) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
 		{Key: "spec", Value: doc.Spec},
 		{Key: "updated_at", Value: doc.UpdatedAt},
 	}}}
-	res, err := s.db.Collection("import_profiles").UpdateOne(ctx, bson.D{{Key: "name", Value: p.Name}}, update)
+	res, err := m.coll().UpdateOne(ctx, bson.D{{Key: "name", Value: p.Name}}, update)
 	if err != nil {
 		return fmt.Errorf("atualizar perfil %s: %w", p.Name, err)
 	}
 	if res.MatchedCount == 0 {
-		return ErrNotFound
+		return platform.ErrNotFound
 	}
 	return nil
 }
 
 // RenameProfile troca o nome de um perfil. Nenhuma imagem guarda o nome do
 // perfil (ele só é usado na hora do upload/import), então não há cascata.
-func (s *Store) RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error {
-	res, err := s.db.Collection("import_profiles").UpdateOne(ctx,
+func (m *MongoRepo) RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error {
+	res, err := m.coll().UpdateOne(ctx,
 		bson.D{{Key: "name", Value: oldName}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "name", Value: newName}, {Key: "updated_at", Value: now}}}})
 	if mongo.IsDuplicateKeyError(err) {
-		return ErrDuplicate
+		return platform.ErrDuplicate
 	}
 	if err != nil {
 		return fmt.Errorf("renomear perfil %s: %w", oldName, err)
 	}
 	if res.MatchedCount == 0 {
-		return ErrNotFound
+		return platform.ErrNotFound
 	}
 	return nil
 }
 
 // DeleteProfile apaga um perfil.
-func (s *Store) DeleteProfile(ctx context.Context, name string) error {
-	res, err := s.db.Collection("import_profiles").DeleteOne(ctx, bson.D{{Key: "name", Value: name}})
+func (m *MongoRepo) DeleteProfile(ctx context.Context, name string) error {
+	res, err := m.coll().DeleteOne(ctx, bson.D{{Key: "name", Value: name}})
 	if err != nil {
 		return fmt.Errorf("apagar perfil %s: %w", name, err)
 	}
 	if res.DeletedCount == 0 {
-		return ErrNotFound
+		return platform.ErrNotFound
 	}
 	return nil
 }
 
 // ListProfiles lista perfis em ordem alfabética, com busca por nome.
-func (s *Store) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
-	coll := s.db.Collection("import_profiles")
+func (m *MongoRepo) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
+	coll := m.coll()
 	filter := bson.D{}
 	if q != "" {
-		filter = append(filter, nameContains(q))
+		filter = append(filter, platform.NameContains(q))
 	}
 
 	total, err := coll.CountDocuments(ctx, filter)

@@ -11,6 +11,7 @@ import (
 
 	"SIDM/internal/images"
 	"SIDM/internal/importer"
+	"SIDM/internal/imports"
 )
 
 const testProfileJSON = `{
@@ -67,7 +68,7 @@ func TestCreateProfile(t *testing.T) {
 	env := newTestEnv(t)
 	env.withProfile(t)
 
-	p := env.db.profiles["csv-teste"]
+	p := env.imp.Profiles["csv-teste"]
 	if p.CreatedBy != "nathan" || p.UpdatedAt.IsZero() {
 		t.Errorf("created_by/updated_at não preenchidos: %+v", p)
 	}
@@ -114,7 +115,7 @@ func TestReplaceProfile(t *testing.T) {
 		map[string]string{"Content-Type": "application/json", "X-User": "maria"})
 	assertStatus(t, rec, http.StatusOK)
 
-	p := env.db.profiles["csv-teste"]
+	p := env.imp.Profiles["csv-teste"]
 	if p.Fields["weather"].Map["Garoa"] != "rain" {
 		t.Error("PUT não atualizou o map")
 	}
@@ -142,10 +143,10 @@ func TestRenomearPerfil(t *testing.T) {
 	if p.Name != "csv-equipamento-8003" || p.Fields["day_time"].Map["N"] != "night" {
 		t.Errorf("perfil renomeado = %+v", p)
 	}
-	if _, ok := env.db.profiles["csv-teste"]; ok {
+	if _, ok := env.imp.Profiles["csv-teste"]; ok {
 		t.Error("o nome antigo deveria ter sumido")
 	}
-	if env.db.profiles["csv-equipamento-8003"].CreatedBy != "nathan" {
+	if env.imp.Profiles["csv-equipamento-8003"].CreatedBy != "nathan" {
 		t.Error("renomear não pode mudar quem criou")
 	}
 
@@ -159,7 +160,7 @@ func TestRenomearPerfil(t *testing.T) {
 func TestRenomearPerfilErros(t *testing.T) {
 	env := newTestEnv(t)
 	env.withProfile(t)
-	env.db.profiles["ocupado"] = importer.Profile{Name: "ocupado"}
+	env.imp.Profiles["ocupado"] = importer.Profile{Name: "ocupado"}
 
 	cases := map[string]struct {
 		path, body string
@@ -178,7 +179,7 @@ func TestRenomearPerfilErros(t *testing.T) {
 			assertStatus(t, env.doJSON("PATCH", tc.path, tc.body), tc.status)
 		})
 	}
-	if _, ok := env.db.profiles["csv-teste"]; !ok {
+	if _, ok := env.imp.Profiles["csv-teste"]; !ok {
 		t.Error("nenhum erro pode ter mexido no perfil")
 	}
 }
@@ -189,7 +190,7 @@ func TestApagarPerfil(t *testing.T) {
 
 	rec := env.do("DELETE", "/import-profiles/csv-teste", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
-	if _, ok := env.db.profiles["csv-teste"]; ok {
+	if _, ok := env.imp.Profiles["csv-teste"]; ok {
 		t.Error("o perfil deveria ter sido apagado")
 	}
 	assertStatus(t, env.do("GET", "/import-profiles/csv-teste", nil, nil), http.StatusNotFound)
@@ -267,10 +268,10 @@ b.jpg;D;Garoa;03/09/2026 09:00:00;;
 nao-existe.jpg;D;Limpo;03/09/2026 09:00:00;;
 `
 
-func decodeImport(t *testing.T, rec *httptest.ResponseRecorder) importReport {
+func decodeImport(t *testing.T, rec *httptest.ResponseRecorder) imports.Report {
 	t.Helper()
 	assertStatus(t, rec, http.StatusOK)
-	var rep importReport
+	var rep imports.Report
 	decode(t, rec, &rep)
 	return rep
 }

@@ -15,6 +15,7 @@ import (
 	"SIDM/internal/catalog"
 	"SIDM/internal/files"
 	"SIDM/internal/images"
+	"SIDM/internal/imports"
 	"SIDM/internal/store"
 )
 
@@ -47,9 +48,10 @@ func main() {
 	log.Printf("imagens em %s", imagesDir)
 
 	// Os módulos. Cada um tem o seu repositório; o store ainda guarda os
-	// perfis de import e de export (que viram módulos nos próximos passos).
+	// perfis de export (que viram módulo no próximo passo).
 	db := s.DB()
-	img := images.New(images.NewMongoRepo(db), fs, nil, s) // s: o perfil jpeg-ini do upload
+	impRepo := imports.NewMongoRepo(db)
+	img := images.New(images.NewMongoRepo(db), fs, nil, impRepo) // impRepo: o perfil jpeg-ini do upload
 	cat := catalog.New(catalog.NewMongoRepo(db), fs, img)
 	img.SetCatalog(cat)
 	boxRepo := boxes.NewMongoRepo(db)
@@ -59,7 +61,8 @@ func main() {
 	bx := boxes.New(boxRepo, img, fs, cat, s) // s: os perfis de export guardam a tarefa
 	cat.Listen(bx)                            // as caixas guardam o pacote de cada imagem
 	img.Listen(bx)                            // e são apagadas junto com a imagem
-	srv := api.New(s, fs, cat, bx, img)
+	imp := imports.New(impRepo, img, cat)
+	srv := api.New(s, fs, cat, bx, img, imp)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

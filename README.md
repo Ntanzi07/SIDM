@@ -75,11 +75,12 @@ SIDM/
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
+        ├── imports/        MÓDULO: perfis de import, raio-x e import de CSV/INI nos rascunhos
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── boxes/          MÓDULO: tarefas e caixas do CVAT (leitura do COCO, import, cvat.zip)
         ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC
-        ├── store/          Mongo do que ainda não é módulo: perfis de import e de export
-        └── api/            handlers HTTP do que ainda não é módulo (import de CSV, export) + openapi.yaml
+        ├── store/          Mongo do que ainda não é módulo: perfis de export
+        └── api/            handlers HTTP do que ainda não é módulo (export) + openapi.yaml
 ```
 
 ---
@@ -136,9 +137,8 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 ### Organização do backend (monólito modular)
 
 O backend é **um binário só**, organizado por **assunto** (módulos), e não por
-camada. A reorganização está em andamento: `catalog`, `boxes` e `images` já são
-módulos; o import de CSV e o export ainda vivem em `api/` + `store/` e vão sair um
-por vez.
+camada. A reorganização está em andamento: `catalog`, `boxes`, `images` e `imports`
+já são módulos; o export ainda vive em `api/` + `store/` e é o próximo a sair.
 
 Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 

@@ -18,14 +18,13 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/export"
 	"SIDM/internal/files"
 	"SIDM/internal/images"
-	"SIDM/internal/importer"
+	"SIDM/internal/imports"
 	"SIDM/internal/platform"
 )
 
@@ -33,7 +32,6 @@ import (
 type memStore struct {
 	mu sync.Mutex
 
-	profiles   map[string]importer.Profile
 	exportProf map[string]export.Profile
 
 	pingErr error
@@ -42,93 +40,10 @@ type memStore struct {
 func newMemStore() *memStore {
 	return &memStore{
 		exportProf: map[string]export.Profile{},
-		profiles:   map[string]importer.Profile{},
 	}
 }
 
 func (m *memStore) Ping(ctx context.Context) error { return m.pingErr }
-
-func paginate[T any](all []T, limit, skip int64) []T {
-	if skip >= int64(len(all)) {
-		return []T{}
-	}
-	end := skip + limit
-	if end > int64(len(all)) {
-		end = int64(len(all))
-	}
-	return all[skip:end]
-}
-
-func (m *memStore) CreateProfile(ctx context.Context, p *importer.Profile) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.profiles[p.Name]; ok {
-		return platform.ErrDuplicate
-	}
-	m.profiles[p.Name] = *p
-	return nil
-}
-
-func (m *memStore) FindProfile(ctx context.Context, name string) (*importer.Profile, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.profiles[name]
-	if !ok {
-		return nil, platform.ErrNotFound
-	}
-	return &p, nil
-}
-
-func (m *memStore) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	old, ok := m.profiles[p.Name]
-	if !ok {
-		return platform.ErrNotFound
-	}
-	p.CreatedBy = old.CreatedBy
-	m.profiles[p.Name] = *p
-	return nil
-}
-
-func (m *memStore) RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.profiles[oldName]
-	if !ok {
-		return platform.ErrNotFound
-	}
-	if _, taken := m.profiles[newName]; taken {
-		return platform.ErrDuplicate
-	}
-	delete(m.profiles, oldName)
-	p.Name, p.UpdatedAt = newName, now
-	m.profiles[newName] = p
-	return nil
-}
-
-func (m *memStore) DeleteProfile(ctx context.Context, name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.profiles[name]; !ok {
-		return platform.ErrNotFound
-	}
-	delete(m.profiles, name)
-	return nil
-}
-
-func (m *memStore) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := []importer.Profile{}
-	for _, p := range m.profiles {
-		if strings.Contains(strings.ToLower(p.Name), strings.ToLower(q)) {
-			out = append(out, p)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return paginate(out, limit, skip), int64(len(out)), nil
-}
 
 // TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
 func (m *memStore) TaskRenamed(ctx context.Context, oldName, newName string) error {
@@ -199,6 +114,7 @@ type testEnv struct {
 	cat     *catalog.Memory // pacotes, equipamentos e câmeras
 	box     *boxes.Memory   // tarefas e caixas
 	img     *images.Memory  // imagens e histórico
+	imp     *imports.Memory // perfis de import
 	srv     *Server
 	files   *files.Storage
 	root    string
@@ -218,15 +134,17 @@ func newTestEnv(t *testing.T) *testEnv {
 	cat.Cameras["hikvision-233"] = true
 	cat.Packages[testPkg] = catalog.Package{Name: testPkg}
 	img := images.NewMemory()
-	imgSvc := images.New(img, fs, nil, db)
+	imp := imports.NewMemory()
+	imgSvc := images.New(img, fs, nil, imp)
 	svc := catalog.New(cat, fs, imgSvc)
 	imgSvc.SetCatalog(svc)
 	box := boxes.NewMemory()
 	bx := boxes.New(box, imgSvc, fs, svc, db)
 	svc.Listen(bx)
 	imgSvc.Listen(bx)
-	srv := New(db, fs, svc, bx, imgSvc)
-	return &testEnv{db: db, cat: cat, box: box, img: img, srv: srv, files: fs, root: root, handler: srv.Routes()}
+	impSvc := imports.New(imp, imgSvc, svc)
+	srv := New(db, fs, svc, bx, imgSvc, impSvc)
+	return &testEnv{db: db, cat: cat, box: box, img: img, imp: imp, srv: srv, files: fs, root: root, handler: srv.Routes()}
 }
 
 // do executa um request e devolve a resposta gravada.

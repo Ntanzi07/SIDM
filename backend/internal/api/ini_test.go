@@ -12,6 +12,7 @@ import (
 	"SIDM/internal/crypt"
 	"SIDM/internal/images"
 	"SIDM/internal/importer"
+	"SIDM/internal/imports"
 )
 
 // jpegWithINI monta um "JPEG" mínimo com um INI depois do fim da imagem,
@@ -238,7 +239,7 @@ func TestInspectINIErros(t *testing.T) {
 	}
 	assertStatus(t, env.postFiles(t, "/imports/inspect?type=jpeg-ini"), http.StatusBadRequest)
 
-	many := make([]upFile, maxInspectINIFiles+1)
+	many := make([]upFile, imports.MaxInspectINIFiles+1)
 	for i := range many {
 		many[i] = upFile{"x.jpg", jpegWithINI("x", "AAA1A11")}
 	}

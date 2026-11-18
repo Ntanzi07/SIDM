@@ -4,14 +4,13 @@ import (
 	"context"
 	"net/http"
 	"net/url"
-	"time"
 
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/export"
 	"SIDM/internal/files"
 	"SIDM/internal/images"
-	"SIDM/internal/importer"
+	"SIDM/internal/imports"
 	"SIDM/internal/platform"
 )
 
@@ -28,14 +27,6 @@ import (
 type Store interface {
 	Ping(ctx context.Context) error
 
-	// Perfis de import
-	CreateProfile(ctx context.Context, p *importer.Profile) error
-	FindProfile(ctx context.Context, name string) (*importer.Profile, error)
-	ReplaceProfile(ctx context.Context, p *importer.Profile) error
-	RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error
-	DeleteProfile(ctx context.Context, name string) error
-	ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error)
-
 	// Perfis de export
 	CreateExportProfile(ctx context.Context, p *export.Profile) error
 	FindExportProfile(ctx context.Context, name string) (*export.Profile, error)
@@ -50,13 +41,13 @@ type Server struct {
 	catalog *catalog.Service
 	boxes   *boxes.Service
 	images  *images.Service
+	imports *imports.Service
 }
 
-// New monta a API. Catálogo, caixas e imagens já são módulos: as rotas
-// deles entram junto, e os handlers daqui (import de CSV, export) usam os
-// Services.
-func New(s Store, fs *files.Storage, cat *catalog.Service, bx *boxes.Service, img *images.Service) *Server {
-	return &Server{store: s, files: fs, catalog: cat, boxes: bx, images: img}
+// New monta a API. Catálogo, caixas, imagens e import já são módulos: as
+// rotas deles entram junto, e os handlers daqui (o export) usam os Services.
+func New(s Store, fs *files.Storage, cat *catalog.Service, bx *boxes.Service, img *images.Service, imp *imports.Service) *Server {
+	return &Server{store: s, files: fs, catalog: cat, boxes: bx, images: img, imports: imp}
 }
 
 // route é uma linha da tabela de rotas.
@@ -72,8 +63,6 @@ func (s *Server) routes() []route {
 	rts := []route{
 		{"GET", "/health", s.handleHealth},
 
-		{"POST", "/packages/{name}/import", s.handleImport},
-
 		{"GET", "/export-folder-fields", s.handleExportFolderFields},
 		{"GET", "/export-profiles", s.handleListExportProfiles},
 		{"POST", "/export-profiles", s.handleCreateExportProfile},
@@ -82,17 +71,9 @@ func (s *Server) routes() []route {
 		{"DELETE", "/export-profiles/{name}", s.handleDeleteExportProfile},
 		{"POST", "/exports/preview", s.handleExportPreview},
 		{"POST", "/exports/download", s.handleExportDownload},
-
-		{"POST", "/imports/inspect", s.handleInspect},
-		{"GET", "/import-profiles", s.handleListProfiles},
-		{"POST", "/import-profiles", s.handleCreateProfile},
-		{"GET", "/import-profiles/{name}", s.handleGetProfile},
-		{"PUT", "/import-profiles/{name}", s.handleReplaceProfile},
-		{"PATCH", "/import-profiles/{name}", s.handleRenameProfile},
-		{"DELETE", "/import-profiles/{name}", s.handleDeleteProfile},
 	}
 	// As rotas dos módulos.
-	for _, m := range []platform.Module{s.catalog, s.boxes, s.images} {
+	for _, m := range []platform.Module{s.catalog, s.boxes, s.images, s.imports} {
 		for _, rt := range m.Routes() {
 			rts = append(rts, route{rt.Method, rt.Path, rt.Handler})
 		}
