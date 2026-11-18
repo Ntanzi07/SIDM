@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/exports"
@@ -64,7 +65,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	expSvc := exports.New(exp, imgSvc, bx, svc, fs)
 	bx.Listen(expSvc)
 	env := &testEnv{cat: cat, box: box, img: img, imp: imp, exp: exp, files: fs, root: root}
-	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc)
+	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
+		annotation.New(annotation.NewMemory()))
 	env.handler = env.srv.Routes()
 	return env
 }

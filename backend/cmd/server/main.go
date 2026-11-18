@@ -10,6 +10,7 @@ import (
 
 	"github.com/joho/godotenv"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/api"
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
@@ -74,8 +75,14 @@ func main() {
 	exp := exports.New(expRepo, img, bx, cat, fs)
 	bx.Listen(exp) // os perfis de export guardam a tarefa
 
+	annRepo := annotation.NewMongoRepo(db)
+	if err := annRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar os perfis de anotação no Mongo: %v", err)
+	}
+	ann := annotation.New(annRepo)
+
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
-	srv := api.New(ping, cat, img, bx, imp, exp)
+	srv := api.New(ping, cat, img, bx, imp, exp, ann)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

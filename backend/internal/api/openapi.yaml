@@ -30,6 +30,13 @@ tags:
       anotadas sem nenhuma caixa entram como negativas). A divisão
       train/valid/test é **fixa por imagem** (pelo sha1). Perfis padrão:
       `rf-detr`, `yolo`, `voc` e `voc-pastas`.
+  - name: perfis de anotação
+    description: |
+      O que se anota em cada imagem: os **campos da imagem** e os **tipos de
+      objeto** (cada um com os seus campos; com caixa, o tipo é uma label do
+      CVAT). O padrão `veiculos` reproduz os campos de sempre, com os códigos do
+      nome v2. Por enquanto é só o cadastro e a validação: os próximos passos
+      ligam o perfil ao pacote, às imagens, ao import e ao export.
   - name: caixas
     description: |
       Caixas (bounding boxes) anotadas no CVAT, por **tarefa** (ex.: `capacete`,
@@ -661,6 +668,127 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /annotation-profiles:
+    get:
+      tags: [perfis de anotação]
+      summary: Listar perfis de anotação
+      description: O padrão (`veiculos`, com `builtin` true) e os salvos.
+      responses:
+        "200":
+          description: Perfis.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/AnnotationProfile" }
+    post:
+      tags: [perfis de anotação]
+      summary: Criar perfil de anotação
+      parameters:
+        - $ref: "#/components/parameters/XUser"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnotationProfile" }
+      responses:
+        "201":
+          description: Criado (já limpo).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnnotationProfile" }
+        "400": { $ref: "#/components/responses/Problems" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /annotation-profiles/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, example: veiculos }
+    get:
+      tags: [perfis de anotação]
+      summary: Um perfil de anotação
+      responses:
+        "200":
+          description: O perfil.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnnotationProfile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [perfis de anotação]
+      summary: Atualizar perfil de anotação
+      description: O padrão não pode ser alterado (salve uma cópia com outro nome).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnotationProfile" }
+      responses:
+        "200":
+          description: Atualizado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnnotationProfile" }
+        "400": { $ref: "#/components/responses/Problems" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [perfis de anotação]
+      summary: Apagar perfil de anotação
+      responses:
+        "200":
+          description: Apagado.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string }
+                  deleted: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /annotation-profiles/{name}/check:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string, example: veiculos }
+    post:
+      tags: [perfis de anotação]
+      summary: Conferir uma anotação contra o perfil
+      description: |
+        Não grava nada. Devolve os valores limpos (texto sem espaços,
+        maiúsculas onde o campo pede, data em UTC) ou a lista de problemas.
+        Com `complete` true também cobra os obrigatórios e o mínimo de objetos.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: "#/components/schemas/AnnotationValues"
+                - type: object
+                  properties:
+                    complete: { type: boolean }
+            example:
+              fields: { direction: rear, day_time: night }
+              objects: [{ type: vehicle, fields: { plate: abc1d23, type: car } }]
+              complete: true
+      responses:
+        "200":
+          description: Válida; os valores limpos.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AnnotationValues" }
+        "400": { $ref: "#/components/responses/Problems" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /packages/{name}/next:
     post:
       tags: [fila]
@@ -1221,6 +1349,21 @@ components:
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+    Problems:
+      description: Inválido; `problems` diz onde está cada erro (todos de uma vez).
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: "fields[0].type: tipo \"lista\" não existe (e mais 1)" }
+              problems:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    path: { type: string, example: "fields[0].type" }
+                    msg: { type: string }
     NameCreated:
       description: Criado; devolve o nome já sanitizado.
       content:
@@ -1249,6 +1392,76 @@ components:
       type: object
       properties:
         error: { type: string }
+
+    AnnotationField:
+      type: object
+      required: [key, type]
+      properties:
+        key: { type: string, example: day_time, description: "Nome no banco: minúsculas, números e _." }
+        label: { type: string, example: Dia/noite }
+        type: { type: string, enum: [choice, multi, text, number, bool, datetime, ref] }
+        required: { type: boolean, description: Obrigatório para verificar. }
+        help: { type: string }
+        options:
+          type: array
+          description: "choice e multi. `code` é a forma curta no nome do arquivo (se uma opção tem, todas têm)."
+          items:
+            type: object
+            properties:
+              value: { type: string, example: night }
+              label: { type: string, example: Noite }
+              code: { type: string, example: N }
+        pattern: { type: string, description: "text: expressão regular do valor inteiro.", example: "[A-Z0-9]{7}" }
+        max_len: { type: integer, description: text }
+        upper: { type: boolean, description: "text: guarda em maiúsculas." }
+        min: { type: number, description: number }
+        max: { type: number, description: number }
+        integer: { type: boolean, description: number }
+        ref: { type: string, enum: [equipment, camera], description: "ref: qual cadastro." }
+
+    AnnotationProfile:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, example: capacete-moto }
+        description: { type: string }
+        builtin: { type: boolean, readOnly: true }
+        fields:
+          type: array
+          description: Os campos da imagem.
+          items: { $ref: "#/components/schemas/AnnotationField" }
+        objects:
+          type: array
+          description: Os tipos de objeto.
+          items:
+            type: object
+            required: [key]
+            properties:
+              key: { type: string, example: helmet, description: "Com caixa, é a label do CVAT." }
+              label: { type: string, example: Capacete }
+              box: { type: boolean, description: "Cada objeto é uma caixa (vem do CVAT). Sem caixa, é uma lista na imagem." }
+              min: { type: integer, description: Mínimo por imagem para verificar. }
+              max: { type: integer, description: "Máximo por imagem (0 = sem limite)." }
+              fields:
+                type: array
+                items: { $ref: "#/components/schemas/AnnotationField" }
+        created_by: { type: string, readOnly: true }
+        updated_at: { type: string, format: date-time, readOnly: true }
+
+    AnnotationValues:
+      type: object
+      properties:
+        fields:
+          type: object
+          additionalProperties: true
+          example: { direction: rear, conditions: [glare] }
+        objects:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { type: string, example: vehicle }
+              fields: { type: object, additionalProperties: true }
 
     ExportProfile:
       type: object

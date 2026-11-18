@@ -1,7 +1,7 @@
 // Package api junta os módulos num servidor HTTP só: registra as rotas de
 // cada um, o /health e a documentação (/docs e /openapi.yaml). Não tem regra
 // de negócio: cada assunto está no módulo dele (catalog, images, boxes,
-// imports, exports).
+// imports, exports, annotation).
 package api
 
 import (

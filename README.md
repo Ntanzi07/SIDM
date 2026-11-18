@@ -80,6 +80,7 @@ SIDM/
         ├── boxes/          MÓDULO: tarefas e caixas do CVAT (leitura do COCO, import, cvat.zip)
         ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC (sem banco, sem HTTP)
         ├── exports/        MÓDULO: perfis de export salvos, preview e download do zip
+        ├── annotation/     MÓDULO: perfis de anotação (campos da imagem e tipos de objeto)
         └── api/            junta as rotas dos módulos: /health, /docs + openapi.yaml
 ```
 
@@ -137,7 +138,8 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 ### Organização do backend (monólito modular)
 
 O backend é **um binário só**, organizado por **assunto** (módulos), e não por
-camada. Os módulos são `catalog`, `images`, `boxes`, `imports` e `exports`. Ao
+camada. Os módulos são `catalog`, `images`, `boxes`, `imports`, `exports` e
+`annotation`. Ao
 lado deles ficam as bibliotecas puras, sem banco e sem HTTP (`filename`, `files`,
 `crypt`, `importer`, `export`), e o `api`, que só junta as rotas.
 
@@ -203,6 +205,10 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `GET`/`PUT`/`DELETE /export-profiles/{name}` | um perfil de export (os padrões não mudam) |
 | `POST /exports/preview` | prévia do dataset: imagens por grupo, caixas por classe |
 | `POST /exports/download` | o zip do dataset |
+| `GET /annotation-profiles` | perfis de anotação: o padrão (`veiculos`) e os salvos |
+| `POST /annotation-profiles` | cria um perfil de anotação (os erros voltam todos juntos, em `problems`) |
+| `GET`/`PUT`/`DELETE /annotation-profiles/{name}` | um perfil de anotação (o padrão não muda) |
+| `POST /annotation-profiles/{name}/check` | confere uma anotação contra o perfil, sem gravar: valores limpos ou problemas |
 | `GET /export-folder-fields` | metadados que podem virar pasta no VOC por pastas, com o nome padrão de cada valor |
 | `GET /import-profiles` | lista os perfis de import |
 | `POST /import-profiles` | cria um perfil de import |
@@ -514,6 +520,56 @@ imagem, só para conferência.
 **Caixas de antes das tarefas:** ao subir, o backend move as caixas antigas (um
 conjunto por imagem) para a tarefa **`padrao`**, criada com as labels delas. Dá para
 renomeá-la depois.
+
+---
+
+## Perfis de anotação
+
+Um perfil diz **o que se anota** em cada imagem:
+
+- **campos da imagem** (ex.: direção, clima, dia/noite);
+- **tipos de objeto**, cada um com os seus campos. Um tipo pode ter **caixa**
+  (é uma label do CVAT, e cada caixa ganha os campos, ex.: `capacete` com `cor`)
+  ou não (é uma lista na imagem, como os veículos com placa).
+
+| tipo de campo | o que guarda | opções do campo |
+|---|---|---|
+| `choice` | um valor da lista | `options` (`value`, `label`, `code`) |
+| `multi` | vários valores da lista | `options` |
+| `text` | texto livre | `pattern` (o valor inteiro), `max_len`, `upper` |
+| `number` | número | `min`, `max`, `integer` |
+| `bool` | sim/não | |
+| `datetime` | data e hora (guardada em UTC) | |
+| `ref` | um nome do cadastro | `ref`: `equipment` ou `camera` |
+
+O `code` de uma opção é a forma curta que vai no nome do arquivo (ex.: `night` → `N`).
+Se uma opção do campo tem código, todas precisam ter.
+
+O padrão **`veiculos`** é o que o SIDM sempre anotou, com os mesmos códigos do nome
+v2 (as opções vêm das mesmas tabelas, então não saem de sincronia). Ele não pode ser
+alterado: para mudar, salve uma cópia com outro nome.
+
+```json
+{
+  "name": "capacete-moto",
+  "fields": [
+    {"key": "day_time", "label": "Dia/noite", "type": "choice", "required": true,
+     "options": [{"value": "day", "label": "Dia", "code": "D"}, {"value": "night", "label": "Noite", "code": "N"}]},
+    {"key": "riders", "label": "Pessoas na moto", "type": "number", "integer": true, "min": 1, "max": 3}
+  ],
+  "objects": [
+    {"key": "helmet", "label": "Capacete", "box": true,
+     "fields": [{"key": "color", "type": "choice", "options": [{"value": "black"}, {"value": "white"}]}]}
+  ]
+}
+```
+
+Para testar um perfil antes de usar, o `POST /annotation-profiles/{name}/check` confere
+uma anotação sem gravar nada.
+
+> Por enquanto é só o cadastro e a validação. Os próximos passos ligam o perfil ao
+> pacote (cada pacote escolhe um, `veiculos` por padrão), às imagens, ao nome do
+> arquivo, ao import e ao export.
 
 ---
 
