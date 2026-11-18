@@ -13,10 +13,11 @@ import (
 	"SIDM/internal/api"
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
+	"SIDM/internal/exports"
 	"SIDM/internal/files"
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
-	"SIDM/internal/store"
+	"SIDM/internal/platform"
 )
 
 // Ponto de entrada do servidor SIDM.
@@ -31,11 +32,11 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	s, err := store.New(ctx, mongoURI, mongoDB)
+	client, err := platform.ConnectMongo(ctx, mongoURI)
 	if err != nil {
 		log.Fatalf("falha ao conectar no Mongo: %v", err)
 	}
-	defer s.Close(context.Background())
+	defer client.Disconnect(context.Background())
 	log.Printf("conectado ao Mongo (%s)", mongoDB)
 
 	// Local (go run em backend/): usa a pasta data/ da raiz do projeto.
@@ -47,22 +48,34 @@ func main() {
 	}
 	log.Printf("imagens em %s", imagesDir)
 
-	// Os módulos. Cada um tem o seu repositório; o store ainda guarda os
-	// perfis de export (que viram módulo no próximo passo).
-	db := s.DB()
+	// Os módulos. Cada um tem o seu repositório (as coleções dele) e conversa
+	// com os outros pelos Services. Os Listen são as cascatas: quem guarda o
+	// nome de um pacote, imagem ou tarefa é avisado quando ele muda.
+	db := client.Database(mongoDB)
 	impRepo := imports.NewMongoRepo(db)
 	img := images.New(images.NewMongoRepo(db), fs, nil, impRepo) // impRepo: o perfil jpeg-ini do upload
 	cat := catalog.New(catalog.NewMongoRepo(db), fs, img)
 	img.SetCatalog(cat)
+
 	boxRepo := boxes.NewMongoRepo(db)
 	if err := boxRepo.EnsureIndexes(ctx); err != nil {
 		log.Fatalf("falha ao preparar as caixas no Mongo: %v", err)
 	}
-	bx := boxes.New(boxRepo, img, fs, cat, s) // s: os perfis de export guardam a tarefa
-	cat.Listen(bx)                            // as caixas guardam o pacote de cada imagem
-	img.Listen(bx)                            // e são apagadas junto com a imagem
+	bx := boxes.New(boxRepo, img, fs, cat)
+	cat.Listen(bx) // as caixas guardam o pacote de cada imagem
+	img.Listen(bx) // e são apagadas junto com a imagem
+
 	imp := imports.New(impRepo, img, cat)
-	srv := api.New(s, fs, cat, bx, img, imp)
+
+	expRepo := exports.NewMongoRepo(db)
+	if err := expRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar os perfis de export no Mongo: %v", err)
+	}
+	exp := exports.New(expRepo, img, bx, cat, fs)
+	bx.Listen(exp) // os perfis de export guardam a tarefa
+
+	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
+	srv := api.New(ping, cat, img, bx, imp, exp)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

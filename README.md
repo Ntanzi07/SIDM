@@ -67,9 +67,9 @@ SIDM/
 │       └── <pacote-2>/
 ├── frontend/               React + Vite (veja frontend/PLAN.md)
 └── backend/                Go
-    ├── cmd/server/         main: lê o .env, conecta no Mongo, sobe o HTTP
+    ├── cmd/server/         main: lê o .env, conecta no Mongo, monta os módulos, sobe o HTTP
     └── internal/
-        ├── platform/       o que todos usam: erros, respostas HTTP, usuário, Mongo de teste
+        ├── platform/       o que todos usam: erros, respostas HTTP, usuário, conexão e Mongo de teste
         ├── catalog/        MÓDULO: pacotes, equipamentos e câmeras (regras, Mongo, HTTP)
         ├── images/         MÓDULO: upload, INI, fila, anotação, verificação (nome v2), histórico
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
@@ -78,9 +78,9 @@ SIDM/
         ├── imports/        MÓDULO: perfis de import, raio-x e import de CSV/INI nos rascunhos
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── boxes/          MÓDULO: tarefas e caixas do CVAT (leitura do COCO, import, cvat.zip)
-        ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC
-        ├── store/          Mongo do que ainda não é módulo: perfis de export
-        └── api/            handlers HTTP do que ainda não é módulo (export) + openapi.yaml
+        ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC (sem banco, sem HTTP)
+        ├── exports/        MÓDULO: perfis de export salvos, preview e download do zip
+        └── api/            junta as rotas dos módulos: /health, /docs + openapi.yaml
 ```
 
 ---
@@ -137,8 +137,9 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 ### Organização do backend (monólito modular)
 
 O backend é **um binário só**, organizado por **assunto** (módulos), e não por
-camada. A reorganização está em andamento: `catalog`, `boxes`, `images` e `imports`
-já são módulos; o export ainda vive em `api/` + `store/` e é o próximo a sair.
+camada. Os módulos são `catalog`, `images`, `boxes`, `imports` e `exports`. Ao
+lado deles ficam as bibliotecas puras, sem banco e sem HTTP (`filename`, `files`,
+`crypt`, `importer`, `export`), e o `api`, que só junta as rotas.
 
 Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 
@@ -682,11 +683,17 @@ go test ./... -cover
 
 | Pacote | Tipo |
 |---|---|
-| `filename`, `files`, `importer`, `cmd/server` | unitários |
-| `api` | handlers testados com um banco em memória (`memStore`), sem Docker |
-| `store` | **integração** com o Mongo de verdade |
+| `filename`, `files`, `crypt`, `importer`, `export`, `cmd/server` | unitários |
+| `api` | o servidor inteiro por HTTP, com os módulos usando os repositórios em memória (`memory.go`), sem Docker |
+| `mongo_test.go` de cada módulo | **integração** com o Mongo de verdade |
 
-Os testes do `store` usam o usuário root do `.env` e um banco descartável
+O `-cover` só conta o que os testes **do próprio pacote** executam. Como a maior
+parte dos módulos é testada pela API, para ver quanto de um módulo está coberto:
+```powershell
+go test ./internal/api -coverpkg=./internal/images,./internal/exports
+```
+
+Os testes de integração usam o usuário root do `.env` e um banco descartável
 (`sidm_test_<timestamp>`), apagado no fim. O banco `sidm` nunca é tocado.
 Sem Mongo rodando, eles aparecem como `SKIP`. Entre eles está um teste de concorrência:
 20 pessoas pedindo "próxima" ao mesmo tempo, sem nenhuma imagem repetida.

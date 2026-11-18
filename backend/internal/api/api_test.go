@@ -14,107 +14,25 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
-	"SIDM/internal/export"
+	"SIDM/internal/exports"
 	"SIDM/internal/files"
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
 	"SIDM/internal/platform"
 )
 
-// memStore guarda tudo em maps. Os campos *Err permitem simular falhas do banco.
-type memStore struct {
-	mu sync.Mutex
-
-	exportProf map[string]export.Profile
-
-	pingErr error
-}
-
-func newMemStore() *memStore {
-	return &memStore{
-		exportProf: map[string]export.Profile{},
-	}
-}
-
-func (m *memStore) Ping(ctx context.Context) error { return m.pingErr }
-
-// TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
-func (m *memStore) TaskRenamed(ctx context.Context, oldName, newName string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for name, p := range m.exportProf {
-		if p.Task == oldName {
-			p.Task = newName
-			m.exportProf[name] = p
-		}
-	}
-	return nil
-}
-
-func (m *memStore) CreateExportProfile(ctx context.Context, p *export.Profile) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.exportProf[p.Name]; ok {
-		return platform.ErrDuplicate
-	}
-	m.exportProf[p.Name] = *p
-	return nil
-}
-
-func (m *memStore) FindExportProfile(ctx context.Context, name string) (*export.Profile, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.exportProf[name]
-	if !ok {
-		return nil, platform.ErrNotFound
-	}
-	return &p, nil
-}
-
-func (m *memStore) ReplaceExportProfile(ctx context.Context, p *export.Profile) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.exportProf[p.Name]; !ok {
-		return platform.ErrNotFound
-	}
-	m.exportProf[p.Name] = *p
-	return nil
-}
-
-func (m *memStore) DeleteExportProfile(ctx context.Context, name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.exportProf[name]; !ok {
-		return platform.ErrNotFound
-	}
-	delete(m.exportProf, name)
-	return nil
-}
-
-func (m *memStore) ListExportProfiles(ctx context.Context) ([]export.Profile, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := []export.Profile{}
-	for _, p := range m.exportProf {
-		out = append(out, p)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
 type testEnv struct {
-	db      *memStore
+	pingErr error           // o /health falha com este erro
 	cat     *catalog.Memory // pacotes, equipamentos e câmeras
 	box     *boxes.Memory   // tarefas e caixas
 	img     *images.Memory  // imagens e histórico
 	imp     *imports.Memory // perfis de import
+	exp     *exports.Memory // perfis de export
 	srv     *Server
 	files   *files.Storage
 	root    string
@@ -128,7 +46,6 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db := newMemStore()
 	cat := catalog.NewMemory()
 	cat.Equipments["8003-MF4739"] = true
 	cat.Cameras["hikvision-233"] = true
@@ -139,12 +56,17 @@ func newTestEnv(t *testing.T) *testEnv {
 	svc := catalog.New(cat, fs, imgSvc)
 	imgSvc.SetCatalog(svc)
 	box := boxes.NewMemory()
-	bx := boxes.New(box, imgSvc, fs, svc, db)
+	bx := boxes.New(box, imgSvc, fs, svc)
 	svc.Listen(bx)
 	imgSvc.Listen(bx)
 	impSvc := imports.New(imp, imgSvc, svc)
-	srv := New(db, fs, svc, bx, imgSvc, impSvc)
-	return &testEnv{db: db, cat: cat, box: box, img: img, imp: imp, srv: srv, files: fs, root: root, handler: srv.Routes()}
+	exp := exports.NewMemory()
+	expSvc := exports.New(exp, imgSvc, bx, svc, fs)
+	bx.Listen(expSvc)
+	env := &testEnv{cat: cat, box: box, img: img, imp: imp, exp: exp, files: fs, root: root}
+	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc)
+	env.handler = env.srv.Routes()
+	return env
 }
 
 // do executa um request e devolve a resposta gravada.
@@ -255,7 +177,7 @@ func TestHealth(t *testing.T) {
 		t.Errorf("body = %q", rec.Body.String())
 	}
 
-	env.db.pingErr = errBoom
+	env.pingErr = errBoom
 	assertStatus(t, env.do("GET", "/health", nil, nil), http.StatusServiceUnavailable)
 }
 
@@ -452,7 +374,7 @@ func TestListPackagesComProgresso(t *testing.T) {
 	rec := env.do("GET", "/packages", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
 
-	var resp page[catalog.PackageSummary]
+	var resp platform.Page[catalog.PackageSummary]
 	decode(t, rec, &resp)
 	if resp.Total != 1 || len(resp.Items) != 1 {
 		t.Fatalf("pacotes = %+v", resp)
@@ -469,7 +391,7 @@ func TestListPackagesBuscaEPaginacao(t *testing.T) {
 		env.cat.Packages[n] = catalog.Package{Name: n}
 	}
 
-	var resp page[catalog.PackageSummary]
+	var resp platform.Page[catalog.PackageSummary]
 	decode(t, env.do("GET", "/packages?q=noturnas", nil, nil), &resp)
 	if resp.Total != 2 || len(resp.Items) != 2 {
 		t.Errorf("busca por 'noturnas': total=%d items=%d, want 2", resp.Total, len(resp.Items))

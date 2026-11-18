@@ -4,6 +4,7 @@ import (
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/images"
+	"SIDM/internal/platform"
 	"net/http"
 	"os"
 	"strings"
@@ -263,7 +264,7 @@ func TestPackagesContaQuemEstaAnotando(t *testing.T) {
 	env.next(t, "nathan", "")
 	env.next(t, "maria", "")
 
-	var resp page[catalog.PackageSummary]
+	var resp platform.Page[catalog.PackageSummary]
 	decode(t, env.do("GET", "/packages", nil, nil), &resp)
 	if resp.Items[0].InProgress != 2 || resp.Items[0].Pending != 3 {
 		t.Errorf("in_progress=%d pending=%d; want 2 e 3", resp.Items[0].InProgress, resp.Items[0].Pending)

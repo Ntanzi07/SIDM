@@ -1,6 +1,7 @@
 // Package platform é o que todos os módulos usam e não é de nenhum assunto:
 // os erros comuns, as respostas HTTP (JSON, erro, paginação), quem é o
-// usuário e a busca por nome no Mongo. Não depende de nenhum módulo.
+// usuário, a conexão com o Mongo e a busca por nome. Não depende de nenhum
+// módulo.
 package platform
 
 import (

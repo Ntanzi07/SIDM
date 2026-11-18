@@ -2,6 +2,8 @@ package api
 
 import (
 	"SIDM/internal/catalog"
+	"SIDM/internal/exports"
+	"SIDM/internal/platform"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -59,10 +61,10 @@ func putTask(env *testEnv, task, sha string, labels ...string) {
 	env.box.Sets[boxes.Key(task, sha)] = set
 }
 
-func preview(t *testing.T, env *testEnv, body string) (exportPreview, int, string) {
+func preview(t *testing.T, env *testEnv, body string) (exports.Preview, int, string) {
 	t.Helper()
 	rec := env.doJSON("POST", "/exports/preview", body)
-	var p exportPreview
+	var p exports.Preview
 	if rec.Code == http.StatusOK {
 		decode(t, rec, &p)
 		return p, rec.Code, ""
@@ -221,11 +223,11 @@ func TestPerfisDeExport(t *testing.T) {
 
 	assertStatus(t, env.doJSON("POST", "/export-profiles", prof), http.StatusCreated)
 	assertStatus(t, env.doJSON("POST", "/export-profiles", prof), http.StatusConflict)
-	if env.db.exportProf["meu-yolo"].CreatedBy == "" {
+	if env.exp.Profiles["meu-yolo"].CreatedBy == "" {
 		t.Error("deveria guardar quem criou")
 	}
 
-	var list page[export.Profile]
+	var list platform.Page[export.Profile]
 	decode(t, env.do("GET", "/export-profiles", nil, nil), &list)
 	names := []string{}
 	for _, p := range list.Items {
@@ -238,7 +240,7 @@ func TestPerfisDeExport(t *testing.T) {
 	assertStatus(t, env.do("GET", "/export-profiles/rf-detr", nil, nil), http.StatusOK)
 	assertStatus(t, env.doJSON("PUT", "/export-profiles/meu-yolo", strings.Replace(prof, "80", "70", 1)), http.StatusBadRequest) // não soma 100
 	assertStatus(t, env.doJSON("PUT", "/export-profiles/meu-yolo", strings.Replace(strings.Replace(prof, "80", "70", 1), `"test":0`, `"test":10`, 1)), http.StatusOK)
-	if env.db.exportProf["meu-yolo"].Split.Test != 10 {
+	if env.exp.Profiles["meu-yolo"].Split.Test != 10 {
 		t.Error("PUT deveria ter atualizado")
 	}
 

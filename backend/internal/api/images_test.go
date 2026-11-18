@@ -11,6 +11,7 @@ import (
 
 	"SIDM/internal/filename"
 	"SIDM/internal/images"
+	"SIDM/internal/platform"
 )
 
 // completeBody gera uma anotação completa e válida; mods altera campos.
@@ -97,8 +98,8 @@ func TestIntParam(t *testing.T) {
 	}
 	for _, tc := range cases {
 		q := map[string][]string{"limit": {tc.raw}}
-		if got := intParam(q, "limit", 50, 1, 500); got != tc.want {
-			t.Errorf("intParam(%q) = %d, want %d", tc.raw, got, tc.want)
+		if got := platform.IntParam(q, "limit", 50, 1, 500); got != tc.want {
+			t.Errorf("platform.IntParam(%q) = %d, want %d", tc.raw, got, tc.want)
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"SIDM/internal/images"
 	"SIDM/internal/importer"
 	"SIDM/internal/imports"
+	"SIDM/internal/platform"
 )
 
 const testProfileJSON = `{
@@ -201,7 +202,7 @@ func TestListEGetProfiles(t *testing.T) {
 	env := newTestEnv(t)
 	env.withProfile(t)
 
-	var resp page[importer.Profile]
+	var resp platform.Page[importer.Profile]
 	decode(t, env.do("GET", "/import-profiles?q=CSV", nil, nil), &resp)
 	if resp.Total != 1 || resp.Items[0].Name != "csv-teste" {
 		t.Errorf("lista = %+v", resp)

@@ -2,6 +2,7 @@ package api
 
 import (
 	"SIDM/internal/boxes"
+	"SIDM/internal/platform"
 	"net/http"
 	"strings"
 	"testing"
@@ -44,21 +45,21 @@ func TestTarefasCRUD(t *testing.T) {
 	}
 	assertStatus(t, env.do("GET", "/tasks/nao-existe", nil, nil), http.StatusNotFound)
 
-	var list page[boxes.TaskView]
+	var list platform.Page[boxes.TaskView]
 	decode(t, env.do("GET", "/tasks", nil, nil), &list)
 	if list.Total != 1 || list.Items[0].Stats.Images != 2 {
 		t.Errorf("lista = %+v", list)
 	}
 
 	// renomear leva caixas e perfis de export junto
-	env.db.exportProf["p"] = export.Profile{Name: "p", Task: "capacete"}
+	env.exp.Profiles["p"] = export.Profile{Name: "p", Task: "capacete"}
 	assertStatus(t, env.doJSON("POST", "/tasks", `{"name":"letras"}`), http.StatusCreated)
 	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"letras"}`), http.StatusConflict)
 	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"moto-capacete","labels":["com_capacete"]}`), http.StatusOK)
 	if _, ok := env.boxSet("moto-capacete", a); !ok {
 		t.Error("as caixas deveriam ir para o nome novo")
 	}
-	if env.db.exportProf["p"].Task != "moto-capacete" {
+	if env.exp.Profiles["p"].Task != "moto-capacete" {
 		t.Error("o perfil de export deveria apontar para o nome novo")
 	}
 	if got := env.box.Tasks["moto-capacete"]; got.CreatedBy != task.CreatedBy || len(got.Labels) != 1 {

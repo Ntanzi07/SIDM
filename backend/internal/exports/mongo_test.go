@@ -1,4 +1,4 @@
-package store
+package exports
 
 import (
 	"context"
@@ -7,12 +7,16 @@ import (
 	"time"
 
 	"SIDM/internal/export"
+	"SIDM/internal/platform"
+	"SIDM/internal/platform/mongotest"
 )
 
+func ms(t time.Time) time.Time { return t.UTC().Truncate(time.Millisecond) }
+
 func TestPerfisDeExportNoMongo(t *testing.T) {
-	s := testStore(t)
+	s := NewMongoRepo(mongotest.DB(t))
 	ctx := context.Background()
-	if err := s.ensureExportIndexes(ctx); err != nil {
+	if err := s.EnsureIndexes(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -26,7 +30,7 @@ func TestPerfisDeExportNoMongo(t *testing.T) {
 	if err := s.CreateExportProfile(ctx, p); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreateExportProfile(ctx, p); !errors.Is(err, ErrDuplicate) {
+	if err := s.CreateExportProfile(ctx, p); !errors.Is(err, platform.ErrDuplicate) {
 		t.Errorf("duplicado: %v", err)
 	}
 
@@ -46,7 +50,7 @@ func TestPerfisDeExportNoMongo(t *testing.T) {
 	if again, _ := s.FindExportProfile(ctx, "yolo-noite"); again.Split.Train != 70 {
 		t.Error("o replace não gravou")
 	}
-	if err := s.ReplaceExportProfile(ctx, &export.Profile{Name: "nao-existe"}); !errors.Is(err, ErrNotFound) {
+	if err := s.ReplaceExportProfile(ctx, &export.Profile{Name: "nao-existe"}); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("replace inexistente: %v", err)
 	}
 
@@ -57,7 +61,29 @@ func TestPerfisDeExportNoMongo(t *testing.T) {
 	if err := s.DeleteExportProfile(ctx, "yolo-noite"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteExportProfile(ctx, "yolo-noite"); !errors.Is(err, ErrNotFound) {
+	if err := s.DeleteExportProfile(ctx, "yolo-noite"); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("apagar duas vezes: %v", err)
+	}
+}
+
+func TestTaskRenamed(t *testing.T) {
+	s := NewMongoRepo(mongotest.DB(t))
+	ctx := context.Background()
+	for _, p := range []export.Profile{
+		{Name: "a", Format: export.FormatYOLO, Task: "capacete"},
+		{Name: "b", Format: export.FormatYOLO, Task: "outra"},
+	} {
+		if err := s.CreateExportProfile(ctx, &p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.TaskRenamed(ctx, "capacete", "moto-capacete"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.FindExportProfile(ctx, "a"); p.Task != "moto-capacete" {
+		t.Errorf("perfil a aponta para %q", p.Task)
+	}
+	if p, _ := s.FindExportProfile(ctx, "b"); p.Task != "outra" {
+		t.Errorf("o perfil de outra tarefa mudou: %q", p.Task)
 	}
 }

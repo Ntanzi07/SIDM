@@ -28,6 +28,10 @@ func New(repo Repo, images Images, files Files, packages Packages, listeners ...
 		now: func() time.Time { return time.Now().UTC() }}
 }
 
+// Listen inscreve mais um interessado na renomeação de tarefas (para quem é
+// criado depois do boxes, como o export, que também lê as caixas).
+func (s *Service) Listen(l TaskListener) { s.listeners = append(s.listeners, l) }
+
 // ---------- tarefas ----------
 
 var taskNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
