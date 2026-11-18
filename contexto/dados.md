@@ -47,7 +47,10 @@ guardado no banco; o export escolhe o nome de saída.
   textos (`[]string`), data (`time.Time`, UTC). O `images.MongoRepo` converte o que o Mongo
   devolve (`bson.A`, `bson.DateTime`, `int32`) para esses tipos.
 - **Objetos sem caixa** ficam em `objects`. **Objetos com caixa** são as caixas do CVAT,
-  em `image_boxes` (os atributos por caixa ainda não existem, ver `estado.md`).
+  em `image_boxes`: a label é a chave do tipo, e `boxes[].attributes` segue os campos
+  dele (conferidos no import e na edição; label sem tipo guarda os atributos crus). O
+  documento ganha `updated_by`/`updated_at` quando alguém edita os atributos no SIDM
+  (o reimport zera; é a versão para o optimistic locking, senão `imported_at`).
 - Os campos `ref` têm nome fixo: `equipment` e `camera` (a cascata de renomear procura
   `fields.equipment`/`fields.camera` em qualquer perfil).
 

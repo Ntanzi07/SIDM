@@ -15,9 +15,11 @@ package boxes
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/catalog"
 )
 
@@ -52,6 +54,19 @@ type Set struct {
 	Source     Source    `bson:"source" json:"source"`
 	ImportedBy string    `bson:"imported_by" json:"imported_by"`
 	ImportedAt time.Time `bson:"imported_at" json:"imported_at"`
+	// UpdatedBy/UpdatedAt: quem editou os atributos no SIDM, e quando. Vazio
+	// = como veio do CVAT (o reimport zera: o CVAT é a fonte).
+	UpdatedBy string     `bson:"updated_by,omitempty" json:"updated_by,omitempty"`
+	UpdatedAt *time.Time `bson:"updated_at,omitempty" json:"updated_at,omitempty"`
+}
+
+// Version é a versão do Set para a edição (optimistic locking): a última
+// edição no SIDM ou, sem edição, o import.
+func (s *Set) Version() time.Time {
+	if s.UpdatedAt != nil {
+		return *s.UpdatedAt
+	}
+	return s.ImportedAt
 }
 
 // Source diz de onde as caixas vieram.
@@ -109,6 +124,9 @@ type Repo interface {
 	FindImageSets(ctx context.Context, sha1 string) ([]Set, error)
 	FindSets(ctx context.Context, task string, ids []string) (map[string]Set, error)
 	DeleteImageSets(ctx context.Context, sha1 string) error
+	// UpdateSet grava as caixas editadas de UM Set, só se ele ainda está na
+	// versão prev (senão ErrConflict; platform.ErrNotFound se sumiu).
+	UpdateSet(ctx context.Context, set *Set, prev time.Time) error
 	PackageCounts(ctx context.Context, pkg string) ([]PackageCount, error)
 	// RenameTaskSets / DeleteTaskSets: as caixas de uma tarefa.
 	RenameTaskSets(ctx context.Context, oldName, newName string) error
@@ -138,6 +156,17 @@ type Images interface {
 	// Verified: quais destes sha1 estão verificados.
 	Verified(ctx context.Context, ids []string) (map[string]bool, error)
 }
+
+// Profiles: o perfil de anotação do pacote (o *images.Service). Os
+// atributos de uma caixa seguem o tipo de objeto com caixa cuja chave é a
+// label.
+type Profiles interface {
+	ProfileOf(ctx context.Context, pkg string) (*annotation.Profile, error)
+}
+
+// ErrConflict: as caixas mudaram (outra edição ou um reimport) desde que
+// foram lidas.
+var ErrConflict = errors.New("as caixas mudaram desde que foram lidas")
 
 // Files: onde fica o arquivo de uma imagem (o *files.Storage).
 type Files interface {

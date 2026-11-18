@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/platform"
 )
 
@@ -36,6 +37,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "DELETE", Path: "/tasks/{name}", Handler: s.handleDeleteTask},
 		{Method: "POST", Path: "/tasks/{name}/import", Handler: s.handleImportTask},
 		{Method: "GET", Path: "/images/{sha1}/boxes", Handler: s.handleImageBoxes},
+		{Method: "PUT", Path: "/images/{sha1}/boxes/{task}", Handler: s.handleUpdateAttributes},
 		{Method: "GET", Path: "/packages/{name}/boxes", Handler: s.handlePackageBoxes},
 		{Method: "GET", Path: "/packages/{name}/cvat.zip", Handler: s.handleCVATZip},
 	}
@@ -212,6 +214,47 @@ func (s *Service) handleImageBoxes(w http.ResponseWriter, r *http.Request) {
 	}
 	platform.WriteJSON(w, http.StatusOK, map[string]any{"items": sets})
 }
+
+// PUT /images/{sha1}/boxes/{task}
+// {"version": "<updated_at ou imported_at lido>", "boxes": [{"attributes": {...}}, ...]}
+// Edita os atributos das caixas da imagem na tarefa (uma entrada por caixa,
+// na ordem do GET). 400 com "problems" se um atributo não passa no tipo de
+// objeto do perfil; 409 se as caixas mudaram desde a leitura.
+func (s *Service) handleUpdateAttributes(w http.ResponseWriter, r *http.Request) {
+	sha, task := r.PathValue("sha1"), r.PathValue("task")
+	if !sha1Re.MatchString(sha) {
+		platform.WriteError(w, http.StatusBadRequest, "sha1 inválido")
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, maxAttributesBytes)
+	var in AttributesInput
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		platform.WriteError(w, http.StatusBadRequest, `JSON inválido: esperado {"version": "...", "boxes": [{"attributes": {...}}]} (`+err.Error()+")")
+		return
+	}
+	set, err := s.UpdateAttributes(r.Context(), sha, task, in, platform.UserFrom(r))
+	var problems *annotation.InvalidError
+	var invalid *InvalidError
+	switch {
+	case errors.As(err, &problems):
+		platform.WriteJSON(w, http.StatusBadRequest, map[string]any{"error": problems.Msg, "problems": problems.Problems})
+	case errors.As(err, &invalid):
+		platform.WriteError(w, http.StatusBadRequest, invalid.Msg)
+	case errors.Is(err, platform.ErrNotFound):
+		platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("a imagem não tem caixas na tarefa %q", task))
+	case errors.Is(err, ErrConflict):
+		platform.WriteError(w, http.StatusConflict, "as caixas mudaram (outra edição ou um novo import do CVAT): recarregue e edite de novo")
+	case err != nil:
+		platform.ServerError(w, err)
+	default:
+		platform.WriteJSON(w, http.StatusOK, set)
+	}
+}
+
+// maxAttributesBytes: os atributos de todas as caixas de uma imagem.
+const maxAttributesBytes = 1 << 20
 
 // GET /packages/{name}/boxes
 // Por tarefa, quantas imagens do pacote estão anotadas nela.

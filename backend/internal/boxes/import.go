@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/platform"
 )
 
@@ -41,8 +42,19 @@ type ImportReport struct {
 	Applied       int            `json:"applied"`       // imagens gravadas (0 no ensaio)
 	AppliedBoxes  int            `json:"applied_boxes"`
 	Warnings      []string       `json:"warnings"` // caixas ignoradas na leitura
-	matched       []importMatch  `json:"-"`
+
+	// Os atributos das caixas, conferidos pelo tipo de objeto com caixa do
+	// perfil do pacote (a label é a chave do tipo).
+	AttributeProblems     []string `json:"attribute_problems"`      // atributos que ficaram de fora (até 50)
+	AttributeProblemCount int      `json:"attribute_problem_count"` //
+	MissingRequired       int      `json:"missing_required"`        // caixas com atributo obrigatório vazio
+	UntypedLabels         []string `json:"untyped_labels"`          // labels sem tipo com caixa no perfil: atributos crus
+	EditedReplaced        int      `json:"edited_replaced"`         // imagens com atributos editados no SIDM que serão sobrescritas
+
+	matched []importMatch `json:"-"`
 }
+
+const maxAttributeProblems = 50
 
 type SizeMismatch struct {
 	FileName string `json:"file_name"`
@@ -76,7 +88,7 @@ func (s *Service) match(ctx context.Context, task *Task, f *File, negatives bool
 		Task: task.Name, Negatives: negatives,
 		FileImages: len(f.Images), FileBoxes: f.Boxes, Labels: map[string]int{}, NewLabels: []string{},
 		Packages: map[string]int{}, NotFound: []string{}, Ambiguous: []string{}, SizeMismatch: []SizeMismatch{},
-		Warnings: f.Warnings,
+		Warnings: f.Warnings, AttributeProblems: []string{}, UntypedLabels: []string{},
 	}
 	if rep.Warnings == nil {
 		rep.Warnings = []string{}
@@ -179,7 +191,65 @@ func (s *Service) match(ctx context.Context, task *Task, f *File, negatives bool
 		return nil, err
 	}
 	rep.Replaced = len(existing)
+	for _, set := range existing {
+		if set.UpdatedAt != nil {
+			rep.EditedReplaced++
+		}
+	}
+	if err := s.fitAttributes(ctx, rep); err != nil {
+		return nil, err
+	}
 	return rep, nil
+}
+
+// fitAttributes encaixa os atributos de cada caixa no tipo de objeto com
+// caixa do perfil do pacote da imagem: o que o tipo não tem, ou que não é
+// válido, sai e vai para o relatório. Label sem tipo no perfil: os
+// atributos ficam como vieram. Roda também no ensaio.
+func (s *Service) fitAttributes(ctx context.Context, rep *ImportReport) error {
+	profiles := map[string]*annotation.Profile{}
+	untyped := map[string]bool{}
+	for i := range rep.matched {
+		m := &rep.matched[i]
+		p, ok := profiles[m.img.Package]
+		if !ok {
+			var err error
+			if p, err = s.profiles.ProfileOf(ctx, m.img.Package); err != nil {
+				return err
+			}
+			profiles[m.img.Package] = p
+		}
+		boxes := make([]Box, len(m.boxes.Boxes)) // a cópia: o arquivo lido fica como veio
+		copy(boxes, m.boxes.Boxes)
+		for j := range boxes {
+			b := &boxes[j]
+			t, ok := p.BoxType(b.Label)
+			if !ok {
+				untyped[b.Label] = true
+				continue
+			}
+			clean, problems := t.FitFields(b.Attributes)
+			for _, msg := range problems {
+				rep.AttributeProblemCount++
+				if len(rep.AttributeProblems) < maxAttributeProblems {
+					rep.AttributeProblems = append(rep.AttributeProblems, fmt.Sprintf("%s %s: %s", m.boxes.FileName, b.Label, msg))
+				}
+			}
+			if len(t.Missing(clean)) > 0 {
+				rep.MissingRequired++
+			}
+			b.Attributes = clean
+			if len(clean) == 0 {
+				b.Attributes = nil
+			}
+		}
+		m.boxes.Boxes = boxes
+	}
+	for l := range untyped {
+		rep.UntypedLabels = append(rep.UntypedLabels, l)
+	}
+	sort.Strings(rep.UntypedLabels)
+	return nil
 }
 
 func (rep *ImportReport) notFound(name string) {

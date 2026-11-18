@@ -6,13 +6,16 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"net/http"
+	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // realJPEG gera um JPEG de verdade (o import confere o tamanho da imagem).
@@ -84,6 +87,12 @@ type boxReport struct {
 	Replaced      int                  `json:"replaced"`
 	Applied       int                  `json:"applied"`
 	AppliedBoxes  int                  `json:"applied_boxes"`
+
+	AttributeProblems     []string `json:"attribute_problems"`
+	AttributeProblemCount int      `json:"attribute_problem_count"`
+	MissingRequired       int      `json:"missing_required"`
+	UntypedLabels         []string `json:"untyped_labels"`
+	EditedReplaced        int      `json:"edited_replaced"`
 }
 
 func (e *testEnv) importBoxes(t *testing.T, task, query, fileName, content string) (boxReport, int) {
@@ -318,4 +327,87 @@ func TestZipParaOCVAT(t *testing.T) {
 	env.cat.Packages["vazio"] = catalog.Package{Name: "vazio"}
 	assertStatus(t, env.do("GET", "/packages/vazio/cvat.zip", nil, nil), http.StatusNotFound)
 	assertStatus(t, env.do("GET", "/packages/nao-existe/cvat.zip", nil, nil), http.StatusNotFound)
+}
+
+// helmetCOCO: um COCO do CVAT com caixas "helmet" (tipo com caixa do
+// capacete-moto) e "pessoa" (sem tipo no perfil), com os atributos dados.
+func helmetCOCO(name string, attrs ...map[string]any) string {
+	doc := map[string]any{
+		"categories": []any{map[string]any{"id": 1, "name": "helmet"}, map[string]any{"id": 2, "name": "pessoa"}},
+		"images":     []any{map[string]any{"id": 1, "width": 32, "height": 32, "file_name": name}},
+	}
+	anns := []any{}
+	for i, a := range attrs {
+		cat := 1
+		if i == len(attrs)-1 {
+			cat = 2 // a última é "pessoa"
+		}
+		a["occluded"], a["rotation"] = false, 0.0
+		anns = append(anns, map[string]any{"id": i + 1, "image_id": 1, "category_id": cat, "bbox": []float64{1, 1, 5, 5}, "attributes": a})
+	}
+	doc["annotations"] = anns
+	out, _ := json.Marshal(doc)
+	return string(out)
+}
+
+func TestAtributosDasCaixas(t *testing.T) {
+	env := newTestEnv(t)
+	env.withCapacete(t)
+	assertStatus(t, env.doJSON("POST", "/tasks", `{"name":"capacete","labels":["helmet","pessoa"]}`), http.StatusCreated)
+	sha := env.uploadTo(t, "motos", upFile{"m.jpg", realJPEG(t, 32, 32, 9)})[0].SHA1
+	coco := helmetCOCO(sha+".jpg",
+		map[string]any{"Cor": "Branco", "visor": "true"}, // pelo nome na tela; sim/não em texto
+		map[string]any{"color": "azul", "tamanho": "G"},  // opção que não existe; campo que não existe
+		map[string]any{"qualquer": "coisa"},              // pessoa: sem tipo, fica crua
+	)
+
+	// ensaio: o relatório já confere os atributos, e nada é gravado
+	rep, code := env.importBoxes(t, "capacete", "", "c.json", coco)
+	if code != http.StatusOK || rep.AttributeProblemCount != 2 || rep.MissingRequired != 1 || strings.Join(rep.UntypedLabels, ",") != "pessoa" {
+		t.Fatalf("%d %+v", code, rep)
+	}
+	if _, ok := env.boxSet("capacete", sha); ok {
+		t.Fatal("o ensaio gravou")
+	}
+
+	rep, _ = env.importBoxes(t, "capacete", "?dry_run=false", "c.json", coco)
+	set, _ := env.boxSet("capacete", sha)
+	if rep.Applied != 1 || fmt.Sprint(set.Boxes[0].Attributes) != "map[color:white visor:true]" ||
+		set.Boxes[1].Attributes != nil || set.Boxes[2].Attributes["qualquer"] != "coisa" {
+		t.Fatalf("caixas = %+v", set.Boxes)
+	}
+
+	put := func(version string, body string) *httptest.ResponseRecorder {
+		return env.doJSON("PUT", "/images/"+sha+"/boxes/capacete", `{"version":"`+version+`","boxes":`+body+`}`)
+	}
+	version := set.ImportedAt.Format(time.RFC3339Nano)
+
+	// atributo inválido: 400 com o caminho
+	rec := put(version, `[{"attributes":{"color":"black"}},{"attributes":{"color":"azul"}},{"attributes":{}}]`)
+	assertStatus(t, rec, http.StatusBadRequest)
+	if !strings.Contains(rec.Body.String(), `"boxes[1].attributes.color"`) {
+		t.Errorf("sem o caminho: %s", rec.Body.String())
+	}
+	// número de caixas errado: 400
+	assertStatus(t, put(version, `[{"attributes":{}}]`), http.StatusBadRequest)
+
+	// válido: grava; a caixa sem tipo fica como estava
+	rec = put(version, `[{"attributes":{"color":"black","visor":false}},{"attributes":{"color":"white"}},{"attributes":{"x":"y"}}]`)
+	assertStatus(t, rec, http.StatusOK)
+	set, _ = env.boxSet("capacete", sha)
+	if set.UpdatedAt == nil || set.Boxes[1].Attributes["color"] != "white" || set.Boxes[0].Attributes["visor"] != false ||
+		set.Boxes[2].Attributes["qualquer"] != "coisa" {
+		t.Fatalf("depois da edição: %+v", set)
+	}
+	// versão velha: 409
+	assertStatus(t, put(version, `[{"attributes":{}},{"attributes":{}},{"attributes":{}}]`), http.StatusConflict)
+	// tarefa sem caixas desta imagem: 404
+	assertStatus(t, env.doJSON("PUT", "/images/"+sha+"/boxes/outra", `{"version":"`+version+`","boxes":[]}`), http.StatusNotFound)
+
+	// reimport: avisa e sobrescreve (o CVAT é a fonte)
+	rep, _ = env.importBoxes(t, "capacete", "?dry_run=false", "c.json", coco)
+	set, _ = env.boxSet("capacete", sha)
+	if rep.EditedReplaced != 1 || set.UpdatedAt != nil || set.Boxes[1].Attributes != nil {
+		t.Errorf("reimport: %+v %+v", rep, set)
+	}
 }

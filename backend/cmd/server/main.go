@@ -97,7 +97,7 @@ func main() {
 	if err := boxRepo.EnsureIndexes(ctx); err != nil {
 		log.Fatalf("falha ao preparar as caixas no Mongo: %v", err)
 	}
-	bx := boxes.New(boxRepo, img, fs, cat)
+	bx := boxes.New(boxRepo, img, fs, cat, img)
 	cat.Listen(bx) // as caixas guardam o pacote de cada imagem
 	img.Listen(bx) // e são apagadas junto com a imagem
 

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -268,37 +269,166 @@ func number(v any) (float64, bool) {
 func (p *Profile) Fit(v Values) (Values, []string) {
 	out := Values{Fields: map[string]any{}, Objects: []Object{}}
 	var warnings []string
-	fit := func(where string, def func(string) (*Field, bool), in map[string]any) map[string]any {
-		clean := map[string]any{}
-		for _, k := range sortedKeys(in) {
-			f, ok := def(k)
-			if !ok {
-				if in[k] != nil && in[k] != "" {
-					warnings = append(warnings, fmt.Sprintf("%s%s: o perfil %s não tem este campo", where, k, p.Name))
-				}
-				continue
-			}
-			val, err := f.Clean(in[k])
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s%s: %v", where, k, err))
-				continue
-			}
-			if val != nil {
-				clean[k] = val
-			}
-		}
-		return clean
-	}
-	out.Fields = fit("", p.Field, v.Fields)
+	out.Fields, warnings = fitFields("", "o perfil "+p.Name, p.Fields, v.Fields, false)
 	for _, o := range v.Objects {
 		t, ok := p.Object(o.Type)
 		if !ok || t.Box {
 			warnings = append(warnings, fmt.Sprintf("objeto %q: o perfil %s não tem este tipo (sem caixa)", o.Type, p.Name))
 			continue
 		}
-		out.Objects = append(out.Objects, Object{Type: o.Type, Fields: fit(o.Type+".", t.Field, o.Fields)})
+		fields, w := fitFields(o.Type+".", "o perfil "+p.Name, t.Fields, o.Fields, false)
+		warnings = append(warnings, w...)
+		out.Objects = append(out.Objects, Object{Type: o.Type, Fields: fields})
 	}
 	return out, warnings
+}
+
+// FitFields encaixa nos campos do tipo os valores de UM objeto que vieram de
+// fora (os atributos de uma caixa do CVAT): o nome casa pela chave do campo
+// ou, se não casar, pelo nome na tela; um texto vira o tipo do campo
+// (FromText). O que não serve sai e vira aviso ("color: ...").
+func (t *ObjectType) FitFields(in map[string]any) (map[string]any, []string) {
+	return fitFields("", fmt.Sprintf("%q", t.Key), t.Fields, in, true)
+}
+
+// CheckFields confere os valores de UM objeto do tipo, como o Check faz com a
+// imagem (complete=true cobra os obrigatórios). base é o começo do caminho
+// dos problemas (ex.: "boxes[2].attributes").
+func (t *ObjectType) CheckFields(base string, in map[string]any, complete bool) (map[string]any, error) {
+	var ps problems
+	out := checkFields(&ps, base, t.Fields, in, complete)
+	if len(ps) > 0 {
+		return nil, &InvalidError{Msg: summary(ps), Problems: ps}
+	}
+	return out, nil
+}
+
+// Missing: os campos obrigatórios do tipo que estão vazios nos valores.
+func (t *ObjectType) Missing(values map[string]any) []string {
+	var out []string
+	for _, f := range t.Fields {
+		if f.Required {
+			if v, err := f.Clean(values[f.Key]); err != nil || v == nil {
+				out = append(out, f.Key)
+			}
+		}
+	}
+	return out
+}
+
+// BoxType devolve o tipo de objeto COM caixa dessa label do CVAT (a label é
+// a chave do tipo).
+func (p *Profile) BoxType(label string) (*ObjectType, bool) {
+	t, ok := p.Object(label)
+	if !ok || !t.Box {
+		return nil, false
+	}
+	return t, true
+}
+
+// fitFields é o laço do Fit e do FitFields. loose: o nome também casa com
+// o nome do campo na tela, e um texto passa pelo FromText.
+func fitFields(where, owner string, defs []Field, in map[string]any, loose bool) (map[string]any, []string) {
+	clean := map[string]any{}
+	var warnings []string
+	find := func(k string) *Field {
+		for i := range defs {
+			if defs[i].Key == k {
+				return &defs[i]
+			}
+		}
+		if loose {
+			for i := range defs {
+				if defs[i].Label != "" && strings.EqualFold(strings.TrimSpace(defs[i].Label), strings.TrimSpace(k)) {
+					return &defs[i]
+				}
+			}
+		}
+		return nil
+	}
+	for _, k := range sortedKeys(in) {
+		f := find(k)
+		if f == nil {
+			if in[k] != nil && in[k] != "" {
+				warnings = append(warnings, fmt.Sprintf("%s%s: %s não tem este campo", where, k, owner))
+			}
+			continue
+		}
+		v := in[k]
+		if s, ok := v.(string); ok && loose && strings.TrimSpace(s) != "" {
+			conv, err := f.FromText(strings.TrimSpace(s))
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s%s: %v", where, f.Key, err))
+				continue
+			}
+			v = conv
+		}
+		val, err := f.Clean(v)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s%s: %v", where, f.Key, err))
+			continue
+		}
+		if val != nil {
+			clean[f.Key] = val
+		}
+	}
+	return clean, warnings
+}
+
+// OptionOf acha a opção do campo pelo valor, pelo código ou pelo nome da
+// tela, sem diferenciar maiúscula.
+func (f *Field) OptionOf(s string) (string, bool) {
+	for _, o := range f.Options {
+		if strings.EqualFold(o.Value, s) || (o.Code != "" && strings.EqualFold(o.Code, s)) {
+			return o.Value, true
+		}
+	}
+	for _, o := range f.Options {
+		if o.Label != "" && strings.EqualFold(o.Label, s) {
+			return o.Value, true
+		}
+	}
+	return "", false
+}
+
+// Typed converte um texto no tipo do campo quando é número ou sim/não
+// ("2,5" -> 2.5; "sim" -> true). Os outros tipos ficam texto.
+func (f *Field) Typed(s string) (any, error) {
+	switch f.Type {
+	case TypeNumber:
+		n, err := strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+		if err != nil {
+			return nil, fmt.Errorf("%q não é um número", s)
+		}
+		return n, nil
+	case TypeBool:
+		switch strings.ToLower(s) {
+		case "true", "1", "s", "sim", "y", "yes", "verdadeiro":
+			return true, nil
+		case "false", "0", "n", "nao", "não", "no", "falso":
+			return false, nil
+		}
+		return nil, fmt.Errorf("%q não é sim/não (use true ou false)", s)
+	}
+	return s, nil
+}
+
+// FromText converte um texto de fora (CSV, atributo do CVAT) no valor do
+// campo: numa lista, a opção pelo valor, código ou nome; número e sim/não
+// pelo Typed; o resto, o próprio texto (o Clean confere).
+func (f *Field) FromText(s string) (any, error) {
+	switch f.Type {
+	case TypeChoice, TypeMulti:
+		v, ok := f.OptionOf(s)
+		if !ok {
+			return nil, fmt.Errorf("%q não é uma opção (%s)", s, f.optionList())
+		}
+		if f.Type == TypeMulti {
+			return []string{v}, nil
+		}
+		return v, nil
+	}
+	return f.Typed(s)
 }
 
 func sortedKeys(m map[string]any) []string {

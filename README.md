@@ -553,7 +553,25 @@ As caixas ficam em **pixels** (`x, y` = canto superior esquerdo). `occluded` e
 as caixas junto; renomear a tarefa leva as caixas e os perfis de export que apontam
 para ela; apagar a tarefa apaga só as caixas dela (as imagens ficam). Na tela de
 anotação e no visualizador, as caixas de todas as tarefas aparecem por cima da
-imagem, só para conferência.
+imagem.
+
+**Atributos das caixas.** Se a label da caixa é um **tipo de objeto com caixa** do
+perfil de anotação do pacote (a label é a chave do tipo, ex.: `helmet`), os
+atributos seguem os campos dele:
+
+- **no import** (e já no ensaio), cada atributo casa pela chave do campo ou pelo nome
+  na tela (`Cor`), e o valor vira o tipo do campo (opção pelo valor, código ou nome;
+  número; sim/não, mesmo que o CVAT mande como texto). O que o tipo não tem, ou é
+  inválido, fica de fora e aparece em `attribute_problems`; `missing_required` conta
+  as caixas com obrigatório vazio; `untyped_labels` lista as labels sem tipo no perfil
+  (essas guardam os atributos como vieram);
+- **na tela de anotação**, clique na caixa para ver e editar os atributos
+  (`PUT /images/{sha1}/boxes/{tarefa}`, com a `version` lida: 409 se as caixas
+  mudaram). A posição e a label continuam vindo só do CVAT;
+- **um novo import da tarefa sobrescreve** o que foi editado no SIDM (o CVAT é a
+  fonte); o ensaio avisa em `edited_replaced`;
+- atributo obrigatório faltando **não impede** de verificar a imagem: a tela mostra a
+  pendência.
 
 **Caixas de antes das tarefas:** ao subir, o backend move as caixas antigas (um
 conjunto por imagem) para a tarefa **`padrao`**, criada com as labels delas. Dá para
@@ -567,7 +585,8 @@ Um perfil diz **o que se anota** em cada imagem:
 
 - **campos da imagem** (ex.: direção, clima, dia/noite);
 - **tipos de objeto**, cada um com os seus campos. Um tipo pode ter **caixa**
-  (é uma label do CVAT, e cada caixa ganha os campos, ex.: `capacete` com `cor`)
+  (a chave é a label do CVAT, e os campos são os atributos de cada caixa, ex.:
+  `helmet` com `color`; veja [Atributos das caixas](#caixas-bounding-boxes-do-cvat-por-tarefa))
   ou não (é uma lista na imagem, como os veículos com placa).
 
 | tipo de campo | o que guarda | opções do campo |

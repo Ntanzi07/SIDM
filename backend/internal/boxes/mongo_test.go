@@ -223,3 +223,43 @@ func TestMongoTarefas(t *testing.T) {
 		t.Errorf("delete de novo: %v", err)
 	}
 }
+
+func TestMongoEditarAtributos(t *testing.T) {
+	r := testRepo(t)
+	ctx := context.Background()
+	set := boxSet("capacete", "a", "p1", "helmet")
+	if err := r.ReplaceSets(ctx, []Set{set}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := r.FindSets(ctx, "capacete", []string{"a"})
+	cur := got["a"]
+
+	// primeira edição: a versão é o imported_at
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	edit := cur
+	edit.Boxes = []Box{{Label: "helmet", W: 1, H: 1, Attributes: map[string]any{"color": "black"}}}
+	edit.UpdatedBy, edit.UpdatedAt = "nathan", &now
+	if err := r.UpdateSet(ctx, &edit, cur.Version()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = r.FindSets(ctx, "capacete", []string{"a"})
+	if v := got["a"]; v.UpdatedAt == nil || !v.UpdatedAt.Equal(now) || v.Boxes[0].Attributes["color"] != "black" {
+		t.Fatalf("depois: %+v", v)
+	}
+	// com a versão antiga: conflito; outra tarefa: não existe
+	if err := r.UpdateSet(ctx, &edit, cur.Version()); !errors.Is(err, ErrConflict) {
+		t.Errorf("versão velha: %v", err)
+	}
+	edit.Task = "outra"
+	if err := r.UpdateSet(ctx, &edit, now); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("sem caixas: %v", err)
+	}
+	// o reimport zera a edição
+	if err := r.ReplaceSets(ctx, []Set{boxSet("capacete", "a", "p1", "helmet")}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = r.FindSets(ctx, "capacete", []string{"a"})
+	if got["a"].UpdatedAt != nil {
+		t.Error("o reimport deveria zerar updated_at")
+	}
+}

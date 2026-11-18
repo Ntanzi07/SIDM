@@ -20,7 +20,10 @@ const capaceteProfile = `{
     {"key": "riders", "type": "number", "integer": true, "min": 1, "max": 3}
   ],
   "objects": [
-    {"key": "helmet", "box": true, "fields": [{"key": "color", "type": "choice", "options": [{"value": "black"}]}]},
+    {"key": "helmet", "box": true, "fields": [
+      {"key": "color", "label": "Cor", "type": "choice", "required": true, "options": [{"value": "black", "label": "Preto"}, {"value": "white", "label": "Branco"}]},
+      {"key": "visor", "type": "bool"}
+    ]},
     {"key": "plate", "max": 1, "fields": [{"key": "text", "type": "text", "pattern": "[A-Z0-9]{7}", "upper": true}]}
   ]
 }`

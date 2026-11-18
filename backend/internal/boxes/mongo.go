@@ -245,6 +245,35 @@ func (m *MongoRepo) ReplaceSets(ctx context.Context, sets []Set) error {
 	return nil
 }
 
+// UpdateSet grava as caixas editadas de um Set, só se ele ainda está na
+// versão prev (a última edição ou, sem edição, o import).
+func (m *MongoRepo) UpdateSet(ctx context.Context, set *Set, prev time.Time) error {
+	doc := *set
+	doc.ID = nil
+	filter := bson.D{
+		{Key: "task", Value: set.Task}, {Key: "image", Value: set.ImageID},
+		{Key: "$or", Value: bson.A{
+			bson.D{{Key: "updated_at", Value: prev}},
+			bson.D{{Key: "updated_at", Value: bson.D{{Key: "$exists", Value: false}}}, {Key: "imported_at", Value: prev}},
+		}},
+	}
+	res, err := m.sets().ReplaceOne(ctx, filter, doc)
+	if err != nil {
+		return fmt.Errorf("gravar caixas de %s: %w", set.ImageID, err)
+	}
+	if res.MatchedCount == 0 {
+		n, err := m.sets().CountDocuments(ctx, bson.D{{Key: "task", Value: set.Task}, {Key: "image", Value: set.ImageID}})
+		if err != nil {
+			return fmt.Errorf("conferir caixas de %s: %w", set.ImageID, err)
+		}
+		if n == 0 {
+			return platform.ErrNotFound
+		}
+		return ErrConflict
+	}
+	return nil
+}
+
 // FindImageSets: as caixas de uma imagem em todas as tarefas.
 func (m *MongoRepo) FindImageSets(ctx context.Context, sha1 string) ([]Set, error) {
 	cur, err := m.sets().Find(ctx, bson.D{{Key: "image", Value: sha1}}, options.Find().SetSort(bson.D{{Key: "task", Value: 1}}))

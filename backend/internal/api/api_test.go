@@ -62,7 +62,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	imgSvc.SetCatalog(svc)
 	annSvc.SetPackages(svc)
 	box := boxes.NewMemory()
-	bx := boxes.New(box, imgSvc, fs, svc)
+	bx := boxes.New(box, imgSvc, fs, svc, imgSvc)
 	svc.Listen(bx)
 	imgSvc.Listen(bx)
 	impSvc := imports.New(imp, imgSvc, svc, annSvc)

@@ -143,6 +143,20 @@ func (m *Memory) ReplaceSets(ctx context.Context, sets []Set) error {
 	return nil
 }
 
+func (m *Memory) UpdateSet(ctx context.Context, set *Set, prev time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	cur, ok := m.Sets[Key(set.Task, set.ImageID)]
+	if !ok {
+		return platform.ErrNotFound
+	}
+	if !cur.Version().Equal(prev) {
+		return ErrConflict
+	}
+	m.Sets[Key(set.Task, set.ImageID)] = *set
+	return nil
+}
+
 func (m *Memory) FindImageSets(ctx context.Context, sha1 string) ([]Set, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

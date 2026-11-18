@@ -48,7 +48,7 @@ func TestServiceTarefas(t *testing.T) {
 	mem := NewMemory()
 	var log []string
 	listener := &fakeListener{log: &log}
-	s := New(mem, fakeImages{verified: map[string]bool{"a": true}}, nil, nil, listener)
+	s := New(mem, fakeImages{verified: map[string]bool{"a": true}}, nil, nil, nil, listener)
 	ctx := context.Background()
 
 	// criar: valida e limpa
@@ -133,7 +133,7 @@ func TestServiceTarefas(t *testing.T) {
 
 func TestServiceAvisos(t *testing.T) {
 	mem := NewMemory()
-	s := New(mem, fakeImages{}, nil, nil)
+	s := New(mem, fakeImages{}, nil, nil, nil)
 	ctx := context.Background()
 	mem.Put(set("t", "a", "velho", "placa"))
 	mem.Put(set("t", "b", "outro", "placa"))

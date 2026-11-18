@@ -354,7 +354,7 @@ func validateRule(add func(string, ...any), path string, f *annotation.Field, r 
 
 // checkTarget: o texto é um valor válido do campo (já traduzido)?
 func checkTarget(f *annotation.Field, s string) error {
-	v, err := typed(f, s)
+	v, err := f.Typed(s)
 	if err != nil {
 		return err
 	}

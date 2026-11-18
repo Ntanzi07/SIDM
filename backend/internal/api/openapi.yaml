@@ -1165,6 +1165,61 @@ paths:
                     items: { $ref: "#/components/schemas/BoxSet" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /images/{sha1}/boxes/{task}:
+    put:
+      tags: [caixas]
+      summary: Editar os atributos das caixas de uma imagem numa tarefa
+      description: |
+        Uma entrada por caixa, na ordem do GET /images/{sha1}/boxes (a posição e
+        a label vêm do CVAT e não mudam). Numa caixa cuja label é um tipo de
+        objeto com caixa do perfil do pacote, os atributos são conferidos pelos
+        campos do tipo; numa label sem tipo, ficam como estavam. Um novo import
+        da tarefa sobrescreve a edição (o CVAT é a fonte).
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+        - name: task
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [version, boxes]
+              properties:
+                version: { type: string, format: date-time, description: "A versão lida: updated_at do BoxSet ou, sem edição, imported_at." }
+                boxes:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      attributes: { type: object, additionalProperties: true, example: { color: white } }
+      responses:
+        "200":
+          description: As caixas como ficaram.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BoxSet" }
+        "400":
+          description: "Número de caixas diferente, ou atributo inválido (problems, com caminho boxes[i].attributes.<campo>)."
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  problems:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path: { type: string, example: "boxes[1].attributes.color" }
+                        msg: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { description: "As caixas mudaram (outra edição ou um novo import): recarregue." }
+
   /images/{sha1}/file:
     get:
       tags: [imagens]
@@ -1702,7 +1757,10 @@ components:
         attributes:
           type: object
           additionalProperties: true
-          description: "Atributos criados no CVAT (ex.: { caractere: A })."
+          description: |
+            Atributos criados no CVAT (ex.: { caractere: A }). Se a label é um tipo de
+            objeto com caixa do perfil do pacote, seguem os campos dele (conferidos no
+            import e na edição); senão, ficam como vieram.
 
     BoxSet:
       type: object
@@ -1724,6 +1782,8 @@ components:
             file_name: { type: string, description: Nome da imagem dentro do arquivo. }
         imported_by: { type: string }
         imported_at: { type: string, format: date-time }
+        updated_by: { type: string, description: Quem editou os atributos no SIDM (vazio = como veio do CVAT). }
+        updated_at: { type: string, format: date-time, description: "Última edição no SIDM; o reimport zera." }
 
     BoxImportReport:
       type: object
@@ -1773,6 +1833,17 @@ components:
           type: array
           items: { type: string }
           description: Caixas ignoradas na leitura do arquivo.
+        attribute_problems:
+          type: array
+          items: { type: string }
+          description: "Atributos que ficaram de fora (o tipo de objeto não tem, ou valor inválido), até 50."
+        attribute_problem_count: { type: integer }
+        missing_required: { type: integer, description: Caixas com atributo obrigatório vazio. }
+        untyped_labels:
+          type: array
+          items: { type: string }
+          description: Labels sem tipo com caixa no perfil do pacote (atributos crus).
+        edited_replaced: { type: integer, description: Imagens com atributos editados no SIDM que serão sobrescritas. }
 
     TaskBody:
       type: object

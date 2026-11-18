@@ -28,4 +28,7 @@ apagada: marque "**substituída por** <data>".
 | 2026-11 | O perfil de import diz qual perfil de anotação preenche (`annotation_profile`) e é validado contra ele; `vehicles` vira `objects.vehicle` (com `key: plate`) | os destinos de um CSV dependem do que o pacote anota |
 | 2026-11 | Perfil de import num pacote de outro perfil de anotação **não é recusado**: o `Transform` usa o perfil do pacote e o resto vai para `outside_profile` | segue a regra do `Fit` (um valor de fora não derruba o import) |
 | 2026-11 | O perfil de export tem `annotation_profile` só para os campos de filtros, pastas e nome; **não limita os pacotes** | os padrões (`rf-detr`, `yolo`) servem para qualquer tarefa; imagem de outro perfil só não tem os campos |
+| 2026-11 | Label do CVAT = chave do tipo de objeto com caixa; os atributos da caixa são os campos do tipo; label sem tipo fica com os atributos crus | o perfil já dizia isso; sem mapa extra para manter |
+| 2026-11 | O reimport do CVAT sobrescreve os atributos editados no SIDM (o ensaio avisa) | o CVAT é a fonte das caixas; casar caixa a caixa seria frágil |
+| 2026-11 | Atributo obrigatório de caixa faltando não bloqueia a verificação da imagem | as caixas são por tarefa, com ciclo próprio |
 | 2026-11 | Campo de objeto no export/pasta/nome é `<tipo>_<campo>` (do primeiro objeto do tipo); o nome sem o tipo (`plate`) fica como atalho | no `veiculos` os nomes de sempre (`vehicle_type`, `plate_type`) continuam valendo |

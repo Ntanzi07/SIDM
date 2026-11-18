@@ -142,3 +142,51 @@ func TestFit(t *testing.T) {
 		t.Errorf("avisos = %q", warnings)
 	}
 }
+
+func TestFromText(t *testing.T) {
+	cor := Field{Key: "color", Type: TypeChoice, Options: []Option{{Value: "white", Label: "Branco", Code: "WHT"}}}
+	for _, in := range []string{"white", "WHT", "branco", "BRANCO"} {
+		if v, err := cor.FromText(in); err != nil || v != "white" {
+			t.Errorf("%q -> %v %v", in, v, err)
+		}
+	}
+	if _, err := cor.FromText("azul"); err == nil {
+		t.Error("azul não é opção")
+	}
+	num := Field{Type: TypeNumber}
+	if v, _ := num.FromText("2,5"); v != 2.5 {
+		t.Errorf("número com vírgula: %v", v)
+	}
+	sim := Field{Type: TypeBool}
+	if v, _ := sim.FromText("Sim"); v != true {
+		t.Errorf("sim: %v", v)
+	}
+	if _, err := sim.FromText("talvez"); err == nil {
+		t.Error("talvez não é sim/não")
+	}
+}
+
+func TestFitFieldsDeUmaCaixa(t *testing.T) {
+	helmet := ObjectType{Key: "helmet", Box: true, Fields: []Field{
+		{Key: "color", Label: "Cor", Type: TypeChoice, Required: true, Options: []Option{{Value: "black", Label: "Preto"}}},
+		{Key: "count", Type: TypeNumber, Integer: true},
+	}}
+	clean, warns := helmet.FitFields(map[string]any{"Cor": "preto", "count": "2", "x": "y"})
+	if clean["color"] != "black" || clean["count"] != 2.0 || len(warns) != 1 || !strings.Contains(warns[0], "x") {
+		t.Errorf("clean=%v warns=%v", clean, warns)
+	}
+	if m := helmet.Missing(map[string]any{"count": 1.0}); len(m) != 1 || m[0] != "color" {
+		t.Errorf("missing = %v", m)
+	}
+	if _, err := helmet.CheckFields("boxes[0].attributes", map[string]any{"color": "azul"}, false); err == nil ||
+		err.(*InvalidError).Problems[0].Path != "boxes[0].attributes.color" {
+		t.Errorf("CheckFields: %v", err)
+	}
+	p := Profile{Objects: []ObjectType{helmet, {Key: "plate"}}}
+	if _, ok := p.BoxType("helmet"); !ok {
+		t.Error("helmet é tipo com caixa")
+	}
+	if _, ok := p.BoxType("plate"); ok {
+		t.Error("plate não tem caixa")
+	}
+}

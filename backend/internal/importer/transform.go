@@ -147,7 +147,7 @@ func (tr *transformer) translate(where string, f *annotation.Field, value string
 		if f == nil || (f.Type != annotation.TypeChoice && f.Type != annotation.TypeMulti) {
 			return value
 		}
-		if v, ok := optionOf(f, value); ok {
+		if v, ok := f.OptionOf(value); ok {
 			return v
 		}
 		tr.unmapped(where, value)
@@ -160,44 +160,6 @@ func (tr *transformer) translate(where string, f *annotation.Field, value string
 	}
 	tr.unmapped(where, value)
 	return ""
-}
-
-// optionOf acha a opção do campo pelo valor, pelo código ou pelo nome da
-// tela, sem diferenciar maiúscula.
-func optionOf(f *annotation.Field, s string) (string, bool) {
-	for _, o := range f.Options {
-		if strings.EqualFold(o.Value, s) || (o.Code != "" && strings.EqualFold(o.Code, s)) {
-			return o.Value, true
-		}
-	}
-	for _, o := range f.Options {
-		if o.Label != "" && strings.EqualFold(o.Label, s) {
-			return o.Value, true
-		}
-	}
-	return "", false
-}
-
-// typed converte um texto já traduzido no tipo do campo (número, sim/não).
-// Os outros tipos ficam texto: o Clean do perfil confere.
-func typed(f *annotation.Field, s string) (any, error) {
-	switch f.Type {
-	case annotation.TypeNumber:
-		n, err := strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
-		if err != nil {
-			return nil, fmt.Errorf("%q não é um número", s)
-		}
-		return n, nil
-	case annotation.TypeBool:
-		switch strings.ToLower(s) {
-		case "true", "1", "s", "sim", "y", "yes", "verdadeiro":
-			return true, nil
-		case "false", "0", "n", "nao", "não", "no", "falso":
-			return false, nil
-		}
-		return nil, fmt.Errorf("%q não é sim/não (use true ou false)", s)
-	}
-	return s, nil
 }
 
 // patternSeparators: o que sai de um texto com formato (ex.: a placa
@@ -269,7 +231,7 @@ func (tr *transformer) value(row Row, where string, f *annotation.Field, rule Fi
 	if s == "" {
 		return nil
 	}
-	v, err := typed(f, s)
+	v, err := f.Typed(s)
 	if err != nil {
 		tr.addError(row.Line, where, err.Error())
 		return nil

@@ -19,12 +19,13 @@ type Service struct {
 	images    Images
 	files     Files
 	packages  Packages
+	profiles  Profiles
 	listeners []TaskListener
 	now       func() time.Time
 }
 
-func New(repo Repo, images Images, files Files, packages Packages, listeners ...TaskListener) *Service {
-	return &Service{repo: repo, images: images, files: files, packages: packages, listeners: listeners,
+func New(repo Repo, images Images, files Files, packages Packages, profiles Profiles, listeners ...TaskListener) *Service {
+	return &Service{repo: repo, images: images, files: files, packages: packages, profiles: profiles, listeners: listeners,
 		now: func() time.Time { return time.Now().UTC() }}
 }
 

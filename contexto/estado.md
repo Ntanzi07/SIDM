@@ -16,12 +16,14 @@ Atualizado em 2026-11-18. Branch de trabalho: `feat/moduloConfigs`.
   genéricos (`filters.fields`/`filters.objects`) e pastas/nome calculados do perfil
   (`export.MetaFields`, `GET /export-folder-fields?annotation_profile=`). As telas de
   Configurar e Exportar montam os campos a partir do perfil.
+- Atributos nas caixas: a label do CVAT é a chave do tipo de objeto com caixa; o import
+  encaixa os atributos no tipo (`ObjectType.FitFields`, relatório com
+  `attribute_problems`/`missing_required`/`untyped_labels`/`edited_replaced`); a tela de
+  anotação mostra e edita (`PUT /images/{sha1}/boxes/{tarefa}`, com versão).
 
 ## Próximos passos (em ordem)
 
-1. **Atributos nas caixas:** os tipos de objeto com caixa do perfil ganham campos de
-   verdade (importar os atributos do COCO do CVAT, validar pelo perfil, editar na tela).
-2. **Export de várias tarefas** (ex.: para-brisa + placa num dataset), com a opção "só
+1. **Export de várias tarefas** (ex.: para-brisa + placa num dataset), com a opção "só
    imagens anotadas em todas as tarefas" para não ensinar que a placa não marcada é fundo.
 
 ## Pendências menores
