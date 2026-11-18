@@ -173,7 +173,7 @@ func TestAnnotateImagemDeOutraPessoa(t *testing.T) {
 	shas := env.seedQueue(t, "a")
 	env.next(t, "nathan", "")
 
-	rec := env.do("PUT", "/images/"+shas[0], strings.NewReader(`{"day_time":"night"}`),
+	rec := env.do("PUT", "/images/"+shas[0], strings.NewReader(`{"fields": {"day_time":"night"}}`),
 		map[string]string{"Content-Type": "application/json", "X-User": "maria"})
 	assertStatus(t, rec, http.StatusConflict)
 	if !strings.Contains(errorMsg(t, rec), "nathan") {
@@ -191,7 +191,7 @@ func TestAnnotateRascunhoRenovaOPrazo(t *testing.T) {
 	img.ClaimedUntil = &soon
 	env.img.Images[shas[0]] = img
 
-	rec := env.do("PUT", "/images/"+shas[0], strings.NewReader(`{"day_time":"night"}`),
+	rec := env.do("PUT", "/images/"+shas[0], strings.NewReader(`{"fields": {"day_time":"night"}}`),
 		map[string]string{"Content-Type": "application/json", "X-User": "nathan"})
 	assertStatus(t, rec, http.StatusOK)
 
@@ -288,7 +288,7 @@ func TestReabrirImagemVerificada(t *testing.T) {
 	if img.ClaimedBy != "maria" || img.ClaimedUntil == nil {
 		t.Errorf("deveria ficar reservada para maria: %q", img.ClaimedBy)
 	}
-	if img.Equipment != "8003-MF4739" || len(img.Vehicles) != 1 {
+	if img.Fields["equipment"] != "8003-MF4739" || len(img.Objects) != 1 {
 		t.Error("os metadados ficam como rascunho")
 	}
 	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {

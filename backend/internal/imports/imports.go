@@ -13,6 +13,7 @@ import (
 	"context"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/catalog"
 	"SIDM/internal/images"
 	"SIDM/internal/importer"
@@ -38,6 +39,9 @@ type Images interface {
 	FindByKeys(ctx context.Context, pkg, by string, keys []string) ([]images.Image, error)
 	Replace(ctx context.Context, img *images.Image, prevUpdatedAt time.Time) error
 	InsertHistory(ctx context.Context, entries []images.HistoryEntry) error
+	// ProfileOf: o perfil de anotação do pacote (o import só preenche o que
+	// ele tem).
+	ProfileOf(ctx context.Context, pkg string) (*annotation.Profile, error)
 }
 
 // Catalog é o que o import usa do catálogo: o pacote tem que existir, e os
@@ -86,6 +90,10 @@ type Report struct {
 	// Nomes que não dá para sanitizar (ex: "8003/MF"): não são criados, e o
 	// campo fica vazio na imagem. Corrija no CSV ou use um "map" no perfil.
 	InvalidNames []RowName `json:"invalid_names"`
+	// Valores que o perfil de anotação do pacote não tem ou não aceita (ex.:
+	// clima num pacote de perfil sem clima): ficam de fora (até 100).
+	OutsideProfile      []string `json:"outside_profile"`
+	OutsideProfileCount int      `json:"outside_profile_count"`
 }
 
 // RowName é um nome de equipamento/câmera do CSV que não deu para usar.

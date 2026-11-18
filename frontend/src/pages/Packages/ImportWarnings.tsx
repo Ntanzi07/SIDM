@@ -2,7 +2,8 @@ import type { ImportReport } from '../../services/api'
 
 // Os avisos do ensaio de import, iguais na criação e no detalhe do pacote.
 export function ImportWarnings({ report }: { report: ImportReport }) {
-  const hasWarnings = report.error_count > 0 || report.not_found_count > 0 || report.invalid_names.length > 0
+  const outside = report.outside_profile ?? []
+  const hasWarnings = report.error_count > 0 || report.not_found_count > 0 || report.invalid_names.length > 0 || outside.length > 0
     || Object.keys(report.unmapped).length > 0 || report.ambiguous.length > 0
   return (
     <>
@@ -40,6 +41,13 @@ export function ImportWarnings({ report }: { report: ImportReport }) {
       ))}
       {report.error_count > 5 && (
         <p className="import-report__detail">… e mais {(report.error_count - 5).toLocaleString('pt-BR')} erro(s).</p>
+      )}
+      {outside.length > 0 && (
+        <p className="import-report__detail import-report__detail--warning">
+          <strong>Fora do perfil de anotação ({(report.outside_profile_count ?? outside.length).toLocaleString('pt-BR')}):</strong>{' '}
+          {outside.slice(0, 3).join('; ')}{(report.outside_profile_count ?? 0) > 3 && '; …'}
+          {' '}— esses valores ficam de fora (o perfil do pacote não tem o campo, ou não aceita o valor).
+        </p>
       )}
       {report.invalid_names.slice(0, 5).map((item) => (
         <p className="import-report__detail import-report__detail--warning" key={`${item.line}-${item.field}-${item.value}`}>

@@ -1,145 +1,11 @@
-import { useEffect, useState } from 'react'
-import type { KeyboardEvent } from 'react'
+import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { annotationOptions } from '../../data/annotationOptions'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
-import { searchCameras, searchEquipments, type PageResponse } from '../../services/api'
 import { useAnnotator } from '../../hooks/useAnnotator'
-import type { AnnotationForm } from '../../types/annotation'
+import { fieldLabel, listObjectTypes } from '../../utils/annotationForm'
+import { FieldInput } from './AnnotationFields'
 import './Annotation.css'
-
-type SelectFieldProps = {
-  label: string
-  value: string
-  options: readonly (readonly [string, string])[]
-  onChange: (value: string) => void
-}
-
-// Todo campo pode ficar "Não informado" (vazio): imagem sem dado, ou que não
-// dá para conferir. No nome v2, vira uma posição vazia.
-function SelectField({ label, value, options, onChange }: SelectFieldProps) {
-  // Valor que não está na lista (ex.: veio de um import sem tradução). Sem
-  // isto, o navegador mostraria a primeira opção, e escolher essa opção não
-  // dispararia mudança: o valor errado ficaria preso.
-  const invalid = value !== '' && !options.some(([option]) => option === value)
-  return (
-    <label className={`annotation-field${invalid ? ' annotation-field--invalid' : ''}${value === '' ? ' annotation-field--unknown' : ''}`}>
-      <span>{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
-        {invalid && <option value={value}>"{value}" (inválido: escolha outro)</option>}
-        <option value="">Não informado</option>
-        {options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
-      </select>
-    </label>
-  )
-}
-
-type AutocompleteFieldProps = {
-  label: string
-  value: string
-  search: (q: string) => Promise<PageResponse<string>>
-  placeholder?: string
-  onChange: (value: string) => void
-}
-
-// Combobox próprio (o <datalist> do navegador não atualiza a lista aberta
-// quando as sugestões chegam depois, e filtra demais quando já há um valor).
-// Ao focar, mostra a lista toda; ao digitar, busca no backend (300 ms depois
-// da última tecla). Setas + Enter escolhem, Esc fecha.
-function AutocompleteField({ label, value, search, placeholder, onChange }: AutocompleteFieldProps) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState('')
-  const [suggestions, setSuggestions] = useState<string[]>([])
-  const [active, setActive] = useState(-1)
-
-  useEffect(() => {
-    if (!open) return
-    let alive = true
-    const timer = window.setTimeout(() => {
-      search(query)
-        .then((page) => {
-          if (!alive) return
-          setSuggestions(page.items)
-          setActive(-1)
-        })
-        .catch(() => { if (alive) setSuggestions([]) })
-    }, query ? 300 : 0)
-    return () => {
-      alive = false
-      window.clearTimeout(timer)
-    }
-  }, [open, query, search])
-
-  function choose(name: string) {
-    onChange(name)
-    setOpen(false)
-  }
-
-  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>) {
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      setOpen(true)
-      setActive((i) => Math.min(i + 1, suggestions.length - 1))
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      setActive((i) => Math.max(i - 1, 0))
-    } else if (event.key === 'Enter' && open && active >= 0 && suggestions[active]) {
-      event.preventDefault()
-      choose(suggestions[active])
-    } else if (event.key === 'Escape') {
-      setOpen(false)
-    }
-  }
-
-  return (
-    <label className="annotation-field annotation-combobox">
-      <span>{label}</span>
-      <input
-        autoComplete="off"
-        onBlur={() => setOpen(false)}
-        onChange={(event) => {
-          onChange(event.target.value)
-          setQuery(event.target.value)
-          setOpen(true)
-        }}
-        onFocus={() => {
-          setQuery('') // ao entrar no campo, mostra todos (não só o que bate com o valor atual)
-          setOpen(true)
-        }}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder ?? 'Digite para buscar'}
-        role="combobox"
-        aria-expanded={open}
-        value={value}
-      />
-      {open && suggestions.length > 0 && (
-        <ul className="annotation-combobox__list" role="listbox">
-          {suggestions.map((name, i) => (
-            <li
-              aria-selected={name === value}
-              className={i === active ? 'annotation-combobox__item annotation-combobox__item--active' : 'annotation-combobox__item'}
-              key={name}
-              // mousedown (e não click): acontece antes do blur que fecha a lista
-              onMouseDown={(event) => {
-                event.preventDefault()
-                choose(name)
-              }}
-              role="option"
-            >
-              {name}
-            </li>
-          ))}
-        </ul>
-      )}
-      {open && query !== '' && suggestions.length === 0 && (
-        <div className="annotation-combobox__list annotation-combobox__empty">
-          Nenhum cadastrado com "{query}". Ao salvar, a tela pergunta se quer cadastrar.
-        </div>
-      )}
-    </label>
-  )
-}
 
 function formatSize(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`
@@ -151,13 +17,19 @@ export function AnnotationPage() {
   const packageName = decodeURIComponent(id ?? '')
   const [searchParams] = useSearchParams()
   const annotator = useAnnotator(packageName, searchParams.get('imagem') ?? undefined)
-  const { image, form, codes } = annotator
+  const { image, form, profile } = annotator
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showBoxes, setShowBoxes] = useState(true)
   const boxSets = useImageBoxes(annotator.image?.sha1)
 
-  const update = <K extends keyof AnnotationForm>(field: K, value: AnnotationForm[K]) => annotator.updateForm(field, value)
+  // O erro do backend para um campo (pelo caminho: "fields.day_time", "objects[0].plate").
+  const problemAt = (path: string) => annotator.problems.find((problem) => problem.path === path)?.msg
+  const objectTypes = listObjectTypes(profile)
+  const boxTypes = profile.objects.filter((type) => type.box)
+  const countOf = (type: string) => form.objects.filter((object) => object.type === type).length
+  // Os problemas que não são de um campo só (ex.: "pelo menos 1 veículo").
+  const generalProblems = annotator.problems.filter((problem) => problem.path === 'objects' || problem.path.endsWith('.type'))
 
   async function handleDeleteImage() {
     const ok = await annotator.deleteCurrentImage()
@@ -277,88 +149,93 @@ export function AnnotationPage() {
                 {annotator.message && <p className="annotation-feedback">{annotator.message}</p>}
 
                 <div className="annotation-fields">
-                  <AutocompleteField
-                    label="Equipamento"
-                    onChange={(value) => update('equipment', value)}
-                    placeholder="Digite o equipamento"
-                    search={searchEquipments}
-                    value={form.equipment}
-                  />
-                  <AutocompleteField
-                    label="Câmera"
-                    onChange={(value) => update('camera', value)}
-                    placeholder="Digite a câmera"
-                    search={searchCameras}
-                    value={form.camera}
-                  />
-                  <SelectField label="Direção" value={form.direction} options={annotationOptions.direction} onChange={(value) => update('direction', value)} />
-                  <label className="annotation-field">
-                    <span>Resolução</span>
-                    <select value={form.resolution} onChange={(event) => update('resolution', event.target.value)}>
-                      <option value="">Não informado</option>
-                      {Object.values(codes.resolution ?? {}).sort((a, b) => Number.parseInt(a, 10) - Number.parseInt(b, 10)).map((size) => <option key={size} value={size}>{size}</option>)}
-                    </select>
-                  </label>
-                  <SelectField label="Ângulo" value={form.capture_angle} options={annotationOptions.capture_angle} onChange={(value) => update('capture_angle', value)} />
-                  <SelectField label="Período" value={form.day_time} options={annotationOptions.day_time} onChange={(value) => update('day_time', value)} />
-                  <SelectField label="Alcance" value={form.image_range} options={annotationOptions.image_range} onChange={(value) => update('image_range', value)} />
-                  <SelectField label="Clima" value={form.weather} options={annotationOptions.weather} onChange={(value) => update('weather', value)} />
-                  <label className="annotation-field">
-                    <span>Data e hora da captura</span>
-                    <input step="1" type="datetime-local" value={form.captured_at} onChange={(event) => update('captured_at', event.target.value)} />
-                  </label>
+                  {profile.fields.map((field) => (
+                    <FieldInput
+                      error={problemAt(`fields.${field.key}`)}
+                      field={field}
+                      key={field.key}
+                      onChange={(value) => annotator.updateField(field.key, value)}
+                      value={form.fields[field.key] ?? ''}
+                    />
+                  ))}
                 </div>
 
                 <p className="annotation-hint">
-                  Nenhum campo é obrigatório: deixe vazio (ou "Não informado") o que a imagem não tem ou não dá para conferir.
-                  Equipamento ou câmera novo: digite o nome e salve; a tela pede para confirmar o cadastro.
-                  Para renomear ou desativar, use <Link to="/configurar">Configurar</Link>.
+                  Perfil <strong>{profile.name}</strong>.
+                  {profile.fields.some((field) => field.required) || profile.objects.some((type) => (type.min ?? 0) > 0)
+                    ? ' Os campos com * são obrigatórios para verificar; o resto pode ficar vazio (ou "Não informado").'
+                    : ' Nenhum campo é obrigatório: deixe vazio (ou "Não informado") o que a imagem não tem ou não dá para conferir.'}
+                  {profile.fields.some((field) => field.type === 'ref') && (
+                    <> Equipamento ou câmera novo: digite o nome e salve; a tela pede para confirmar o cadastro.
+                      Para renomear ou desativar, use <Link to="/configurar">Configurar</Link>.</>
+                  )}
                 </p>
 
-                <label className="annotation-field annotation-condition">
-                  <span>Condição</span>
-                  <select value={form.conditions[0] ?? ''} onChange={(event) => update('conditions', event.target.value ? [event.target.value] : [])}>
-                    <option value="">Não informado</option>
-                    {annotationOptions.condition.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
-                  </select>
-                </label>
+                {form.objects.map((object, index) => {
+                  const type = objectTypes.find((t) => t.key === object.type)
+                  if (!type) return null
+                  const number = form.objects.slice(0, index + 1).filter((o) => o.type === object.type).length
+                  return (
+                    <div className="vehicle-row" key={index}>
+                      <div className="vehicle-row-header">
+                        <h3>{fieldLabel(type)} {number}</h3>
+                        <button
+                          className="button button--danger button--sm"
+                          onClick={() => annotator.removeObject(index)}
+                          type="button"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                      <div className="annotation-fields">
+                        {type.fields.map((field) => (
+                          <FieldInput
+                            error={problemAt(`objects[${index}].${field.key}`)}
+                            field={field}
+                            key={field.key}
+                            onChange={(value) => annotator.updateObject(index, field.key, value)}
+                            value={object.values[field.key] ?? ''}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
 
-                {/* Vehicle rows */}
-                {form.vehicles.map((vehicle, index) => (
-                  <div className="vehicle-row" key={index}>
-                    <div className="vehicle-row-header">
-                      <h3>Veículo {index + 1}</h3>
+                {objectTypes.map((type) => {
+                  const full = (type.max ?? 0) > 0 && countOf(type.key) >= (type.max ?? 0)
+                  return (
+                    <div className="annotation-object-type" key={type.key}>
+                      {countOf(type.key) === 0 && (
+                        <p className="annotation-hint">
+                          Nenhum(a) {fieldLabel(type).toLowerCase()} nesta imagem.
+                          {(type.min ?? 0) > 0 && ` Para verificar, são pelo menos ${type.min}.`}
+                        </p>
+                      )}
                       <button
-                        className="button button--danger button--sm"
-                        onClick={() => annotator.removeVehicle(index)}
+                        className="button button--secondary annotation-add-vehicle"
+                        disabled={full}
+                        onClick={() => annotator.addObject(type.key)}
+                        title={full ? `No máximo ${type.max} por imagem` : undefined}
                         type="button"
                       >
-                        Remover
+                        + Adicionar {fieldLabel(type).toLowerCase()}
                       </button>
                     </div>
-                    <div className="annotation-fields">
-                      <label className="annotation-field">
-                        <span>Placa</span>
-                        <input placeholder="Ilegível? Deixe vazio" value={vehicle.plate} onChange={(event) => annotator.updateVehicle(index, { plate: event.target.value.toUpperCase() })} />
-                      </label>
-                      <SelectField label="Tipo" value={vehicle.type} options={annotationOptions.type} onChange={(value) => annotator.updateVehicle(index, { type: value })} />
-                      <SelectField label="Tipo da placa" value={vehicle.plate_type} options={annotationOptions.plate_type} onChange={(value) => annotator.updateVehicle(index, { plate_type: value })} />
-                      <SelectField label="Categoria" value={vehicle.plate_category} options={annotationOptions.plate_category} onChange={(value) => annotator.updateVehicle(index, { plate_category: value })} />
-                      <SelectField label="Cor" value={vehicle.color} options={annotationOptions.color} onChange={(value) => annotator.updateVehicle(index, { color: value })} />
-                    </div>
-                  </div>
-                ))}
-                {form.vehicles.length === 0 && (
-                  <p className="annotation-hint">Nenhum veículo nesta imagem.</p>
+                  )
+                })}
+
+                {boxTypes.length > 0 && (
+                  <p className="annotation-hint">
+                    {boxTypes.map((type) => fieldLabel(type)).join(', ')}: anotado(s) com caixas, no CVAT (tarefas).
+                  </p>
                 )}
 
-                <button
-                  className="button button--secondary annotation-add-vehicle"
-                  onClick={annotator.addVehicle}
-                  type="button"
-                >
-                  + Adicionar veículo
-                </button>
+                {generalProblems.length > 0 && (
+                  <ul className="annotation-feedback annotation-feedback--error annotation-problems">
+                    {generalProblems.map((problem) => <li key={problem.path + problem.msg}>{problem.msg}</li>)}
+                  </ul>
+                )}
 
                 <button className="button button--primary annotation-save" disabled={annotator.saving} onClick={() => void annotator.save()} type="button">
                   {annotator.saving ? 'Salvando...' : 'Salvar anotação'}

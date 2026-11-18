@@ -120,3 +120,25 @@ func TestCheckVeiculos(t *testing.T) {
 		t.Fatalf("%v: %+v", err, err.(*InvalidError).Problems)
 	}
 }
+
+func TestFit(t *testing.T) {
+	p := capacete()
+	out, warnings := p.Fit(Values{
+		Fields: map[string]any{"day_time": "night", "riders": 9.0, "weather": "rain", "notes": ""},
+		Objects: []Object{
+			{Type: "plate", Fields: map[string]any{"text": "abc1d23", "color": "white"}},
+			{Type: "helmet"},  // com caixa: não entra pela lista
+			{Type: "vehicle"}, // não existe no perfil
+		},
+	})
+	if out.Fields["day_time"] != "night" || len(out.Fields) != 1 {
+		t.Errorf("campos = %v", out.Fields)
+	}
+	if len(out.Objects) != 1 || out.Objects[0].Fields["text"] != "ABC1D23" || len(out.Objects[0].Fields) != 1 {
+		t.Errorf("objetos = %+v", out.Objects)
+	}
+	// riders fora do limite, weather e color que o perfil não tem, helmet e vehicle
+	if len(warnings) != 5 {
+		t.Errorf("avisos = %q", warnings)
+	}
+}

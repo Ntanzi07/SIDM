@@ -26,7 +26,7 @@ func (s *Service) Routes() []platform.Route {
 	return []platform.Route{
 		{Method: "GET", Path: "/packages", Handler: s.handleListPackages},
 		{Method: "POST", Path: "/packages", Handler: s.handleCreatePackage},
-		{Method: "PATCH", Path: "/packages/{name}", Handler: s.handleRenamePackage},
+		{Method: "PATCH", Path: "/packages/{name}", Handler: s.handleUpdatePackage},
 		{Method: "DELETE", Path: "/packages/{name}", Handler: s.handleDeletePackage},
 
 		{Method: "GET", Path: "/equipments", Handler: s.handleSearch(Equipments)},
@@ -82,27 +82,68 @@ func searchQuery(w http.ResponseWriter, r *http.Request) (string, bool) {
 	return q, true
 }
 
-// POST /packages {"name": "Noturnas Setembro"}
-// O nome é sanitizado ("Noturnas-Setembro") porque vira nome de pasta.
+// packageBody é o corpo do POST e do PATCH de pacote.
+type packageBody struct {
+	Name    *string `json:"name"`
+	Profile *string `json:"profile"` // perfil de anotação
+}
+
+func decodePackage(w http.ResponseWriter, r *http.Request) (packageBody, bool) {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<10)
+	var b packageBody
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&b); err != nil {
+		platform.WriteError(w, http.StatusBadRequest, `JSON inválido: esperado {"name": "...", "profile": "..."}`)
+		return b, false
+	}
+	return b, true
+}
+
+// writeErr: InvalidError vira 400, o resto 500.
+func writeErr(w http.ResponseWriter, err error) {
+	var invalid *InvalidError
+	if errors.As(err, &invalid) {
+		platform.WriteError(w, http.StatusBadRequest, invalid.Msg)
+		return
+	}
+	platform.ServerError(w, err)
+}
+
+// POST /packages {"name": "Noturnas Setembro", "profile": "veiculos"}
+// O nome é sanitizado ("Noturnas-Setembro") porque vira nome de pasta. Sem
+// profile, o pacote usa o perfil de anotação padrão.
 func (s *Service) handleCreatePackage(w http.ResponseWriter, r *http.Request) {
-	raw, ok := decodeName(w, r, false)
+	b, ok := decodePackage(w, r)
 	if !ok {
 		return
+	}
+	raw, profile := "", ""
+	if b.Name != nil {
+		raw = *b.Name
+	}
+	if b.Profile != nil {
+		profile = *b.Profile
 	}
 	name, err := filename.SanitizePackage(raw)
 	if err != nil {
 		platform.WriteError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := s.CreatePackage(r.Context(), name, platform.UserFrom(r)); err != nil {
+	if err := s.CreatePackage(r.Context(), name, profile, platform.UserFrom(r)); err != nil {
 		if errors.Is(err, platform.ErrDuplicate) {
 			platform.WriteError(w, http.StatusConflict, fmt.Sprintf("pacote %q já existe", name))
 			return
 		}
+		writeErr(w, err)
+		return
+	}
+	p, err := s.FindPackage(r.Context(), name)
+	if err != nil {
 		platform.ServerError(w, err)
 		return
 	}
-	platform.WriteJSON(w, http.StatusCreated, map[string]string{"name": name})
+	platform.WriteJSON(w, http.StatusCreated, map[string]string{"name": name, "profile": p.Profile})
 }
 
 // GET /packages?q=noturnas&limit=20&skip=0
@@ -123,30 +164,52 @@ func (s *Service) handleListPackages(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusOK, platform.Page[PackageSummary]{Total: total, Items: pkgs})
 }
 
-// PATCH /packages/{name}  {"name": "novo nome"}
-func (s *Service) handleRenamePackage(w http.ResponseWriter, r *http.Request) {
+// PATCH /packages/{name}  {"name": "novo nome"} e/ou {"profile": "outro-perfil"}
+// O perfil só pode ser trocado enquanto o pacote não tem imagem verificada.
+// Com os dois, o perfil é trocado primeiro (se ele for recusado, nada muda).
+func (s *Service) handleUpdatePackage(w http.ResponseWriter, r *http.Request) {
 	oldName := r.PathValue("name")
 	if _, ok := s.PackageByName(w, r, oldName); !ok {
 		return
 	}
-	raw, ok := decodeName(w, r, true)
+	b, ok := decodePackage(w, r)
 	if !ok {
 		return
 	}
-	newName, err := filename.SanitizePackage(raw)
-	if err != nil {
-		platform.WriteError(w, http.StatusBadRequest, err.Error())
+	if b.Name == nil && b.Profile == nil {
+		platform.WriteError(w, http.StatusBadRequest, `nada para mudar: envie "name" e/ou "profile"`)
 		return
 	}
-	n, err := s.RenamePackage(r.Context(), oldName, newName)
-	switch {
-	case errors.Is(err, platform.ErrDuplicate):
-		platform.WriteError(w, http.StatusConflict, fmt.Sprintf("já existe um pacote %q", newName))
-	case err != nil:
-		platform.ServerError(w, err)
-	default:
-		platform.WriteJSON(w, http.StatusOK, map[string]any{"name": newName, "images": n})
+	if b.Profile != nil {
+		if err := s.SetPackageProfile(r.Context(), oldName, *b.Profile); err != nil {
+			writeErr(w, err)
+			return
+		}
 	}
+	name, n := oldName, int64(0)
+	if b.Name != nil {
+		newName, err := filename.SanitizePackage(*b.Name)
+		if err != nil {
+			platform.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		n, err = s.RenamePackage(r.Context(), oldName, newName)
+		switch {
+		case errors.Is(err, platform.ErrDuplicate):
+			platform.WriteError(w, http.StatusConflict, fmt.Sprintf("já existe um pacote %q", newName))
+			return
+		case err != nil:
+			platform.ServerError(w, err)
+			return
+		}
+		name = newName
+	}
+	p, err := s.FindPackage(r.Context(), name)
+	if err != nil {
+		platform.ServerError(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, map[string]any{"name": name, "profile": p.Profile, "images": n})
 }
 
 // DELETE /packages/{name}?confirm=<name>

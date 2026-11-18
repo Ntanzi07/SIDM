@@ -124,6 +124,14 @@ func validFields(ps *problems, base string, fs []Field) {
 			ps.add(path+".ref", "ref só vale para o tipo ref")
 		}
 
+		if f.Default != nil && f.Type != TypeRef {
+			if _, err := f.Clean(f.Default); err != nil {
+				ps.add(path+".default", "valor inicial inválido: %v", err)
+			}
+		} else if f.Default != nil {
+			ps.add(path+".default", "um campo ref não tem valor inicial")
+		}
+
 		switch f.Type {
 		case TypeChoice, TypeMulti:
 			validOptions(ps, path+".options", f.Options)
@@ -141,8 +149,13 @@ func validFields(ps *problems, base string, fs []Field) {
 				ps.add(path, "min maior que max")
 			}
 		case TypeRef:
-			if f.Ref != RefEquipment && f.Ref != RefCamera {
+			switch {
+			case f.Ref != RefEquipment && f.Ref != RefCamera:
 				ps.add(path+".ref", "use %q ou %q", RefEquipment, RefCamera)
+			case f.Key != f.Ref:
+				// A cascata de renomear um equipamento procura o campo pelo
+				// nome, em qualquer perfil: por isso o nome é fixo.
+				ps.add(path+".key", "um campo ref %s precisa se chamar %q", f.Ref, f.Ref)
 			}
 		case TypeBool, TypeDateTime:
 		default:

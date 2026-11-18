@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from 'react-router-dom'
 import { useEffect, useState } from 'react'
-import { applyIniProfile, deleteImage, deletePackage, getPackage, imageFiles, importPackageCsv, listImportProfiles, listIniProfiles, listPackageImages, uploadImages, type ImageSummary, type ImportProfile, type ImportReport, type PackageSummary, type UploadProgress } from '../../services/api'
+import { applyIniProfile, deleteImage, deletePackage, getPackage, imageFiles, importPackageCsv, listAnnotationProfiles, listImportProfiles, listIniProfiles, listPackageImages, setPackageProfile, uploadImages, type ImageSummary, type ImportProfile, type ImportReport, type PackageSummary, type UploadProgress } from '../../services/api'
+import type { AnnotationProfile } from '../../types/annotation'
 import type { ChangeEvent, FormEvent } from 'react'
 import { UploadStatus } from './UploadStatus'
 import { BoxesSection } from './BoxesSection'
@@ -20,6 +21,8 @@ export function PackageDetailPage() {
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
+  const [annotationProfiles, setAnnotationProfiles] = useState<AnnotationProfile[]>([])
+  const [profileError, setProfileError] = useState('')
   const [iniProfiles, setIniProfiles] = useState<ImportProfile[]>([])
   // De onde vêm os metadados: um CSV enviado agora, ou o INI que já está
   // guardado em cada imagem (sem arquivo).
@@ -43,6 +46,23 @@ export function PackageDetailPage() {
     setSelectedPackage(summary)
     setImages(page.items)
     setImageTotal(page.total)
+  }
+
+  useEffect(() => {
+    listAnnotationProfiles().then(setAnnotationProfiles).catch(() => { /* sem a lista: só mostra o nome */ })
+  }, [])
+
+  // O perfil de anotação só pode ser trocado sem imagem verificada (o
+  // backend confere de novo).
+  async function handleProfileChange(profile: string) {
+    if (!selectedPackage || profile === selectedPackage.profile) return
+    setProfileError('')
+    try {
+      await setPackageProfile(selectedPackage.name, profile)
+      await refresh()
+    } catch (requestError: unknown) {
+      setProfileError(requestError instanceof Error ? requestError.message : 'Não foi possível trocar o perfil.')
+    }
   }
 
   useEffect(() => {
@@ -203,7 +223,24 @@ export function PackageDetailPage() {
       <div className="detail-heading">
         <div>
           <h1>{selectedPackage.name}</h1>
-          <p>criado por {selectedPackage.created_by}</p>
+          <p>
+            criado por {selectedPackage.created_by} · perfil de anotação{' '}
+            {selectedPackage.verified === 0 && annotationProfiles.length > 1 ? (
+              <select
+                aria-label="Perfil de anotação"
+                className="detail-profile-select"
+                onChange={(event) => void handleProfileChange(event.target.value)}
+                value={selectedPackage.profile}
+              >
+                {annotationProfiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+              </select>
+            ) : (
+              <strong title={selectedPackage.verified > 0 ? 'Com imagens verificadas, o perfil não muda mais' : undefined}>
+                {selectedPackage.profile}
+              </strong>
+            )}
+          </p>
+          {profileError && <p className="form-error">{profileError}</p>}
         </div>
         <div className="detail-heading__actions">
           <button className="button button--danger" disabled={saving} onClick={handleOpenDeleteModal} type="button">Excluir pacote</button>

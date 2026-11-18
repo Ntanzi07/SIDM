@@ -757,3 +757,10 @@
   color: #5963d9;
   text-decoration: underline;
 }
+
+.detail-profile-select {
+  padding: 2px 6px;
+  border: 1px solid #dfe3eb;
+  border-radius: 6px;
+  font: inherit;
+}

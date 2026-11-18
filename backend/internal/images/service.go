@@ -1,6 +1,7 @@
 package images
 
 import (
+	"SIDM/internal/annotation"
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/filename"
@@ -10,6 +11,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"time"
 )
 
@@ -19,15 +21,39 @@ type Service struct {
 	repo      Repo
 	files     *files.Storage
 	catalog   Catalog
-	profiles  Profiles
+	profiles  ImportProfiles
+	annots    Annotations
 	listeners []Listener
 	now       func() time.Time
 }
 
 // New monta o módulo. catalog e profiles podem ser nil nos testes que não
-// fazem upload nem verificação.
-func New(repo Repo, fs *files.Storage, cat Catalog, profiles Profiles) *Service {
-	return &Service{repo: repo, files: fs, catalog: cat, profiles: profiles, now: func() time.Time { return time.Now().UTC() }}
+// fazem upload nem verificação; annots nil usa só o perfil padrão.
+func New(repo Repo, fs *files.Storage, cat Catalog, profiles ImportProfiles, annots Annotations) *Service {
+	return &Service{repo: repo, files: fs, catalog: cat, profiles: profiles, annots: annots,
+		now: func() time.Time { return time.Now().UTC() }}
+}
+
+// ProfileOf devolve o perfil de anotação do pacote.
+func (s *Service) ProfileOf(ctx context.Context, pkg string) (*annotation.Profile, error) {
+	p, err := s.catalog.FindPackage(ctx, pkg)
+	if err != nil {
+		return nil, err
+	}
+	return s.profileNamed(ctx, p.Profile)
+}
+
+func (s *Service) profileNamed(ctx context.Context, name string) (*annotation.Profile, error) {
+	if b, ok := annotation.Builtin(name); ok || name == "" {
+		if !ok {
+			b, _ = annotation.Builtin(annotation.DefaultProfile)
+		}
+		return &b, nil
+	}
+	if s.annots == nil {
+		return nil, fmt.Errorf("perfil de anotação %q: sem o módulo de perfis", name)
+	}
+	return s.annots.FindProfile(ctx, name)
 }
 
 // SetCatalog liga o catálogo depois de criado (o catálogo também depende
@@ -134,12 +160,7 @@ func (s *Service) RenameRegistry(ctx context.Context, reg catalog.Registry, oldN
 	const pageSize = 200
 	skip := int64(0)
 	for {
-		filter := ImageFilter{Status: StatusVerified, Limit: pageSize, Skip: skip}
-		if reg == catalog.Cameras {
-			filter.Camera = oldName
-		} else {
-			filter.Equipment = oldName
-		}
+		filter := ImageFilter{Status: StatusVerified, Fields: map[string]string{reg.ImageField(): oldName}, Limit: pageSize, Skip: skip}
 		page, _, err := s.repo.ListImages(ctx, filter)
 		if err != nil {
 			return res, err
@@ -159,27 +180,28 @@ func (s *Service) RenameRegistry(ctx context.Context, reg catalog.Registry, oldN
 	}
 }
 
-// renameVerified troca o equipamento/câmera de UMA imagem verificada e
-// renomeia o arquivo para o novo nome v2.
+// renameVerified troca o equipamento/câmera de UMA imagem verificada e, se
+// ela tem o nome v2, renomeia o arquivo também.
 func (s *Service) renameVerified(ctx context.Context, img *Image, reg catalog.Registry, newName, changedBy string, now time.Time) error {
 	before := *img
-	if reg == catalog.Cameras {
-		img.Camera = newName
-	} else {
-		img.Equipment = newName
-	}
+	img.Fields = maps.Clone(img.Fields) // o before continua com o mapa antigo
+	img.Fields[reg.ImageField()] = newName
 
-	base, err := filename.Format(MetaFromImage(img))
-	if err != nil {
-		return err
-	}
-	newPath := files.VerifiedPath(img.Package, base+img.Ext)
-	if newPath != img.Path {
-		if err := s.files.Move(img.Path, newPath); err != nil {
+	newPath, fileName := img.Path, img.FileName
+	if img.PatternVersion == filename.CurrentVersion {
+		base, err := filename.Format(MetaFromImage(img))
+		if err != nil {
 			return err
 		}
+		fileName = base + img.Ext
+		newPath = files.VerifiedPath(img.Package, fileName)
+		if newPath != img.Path {
+			if err := s.files.Move(img.Path, newPath); err != nil {
+				return err
+			}
+		}
 	}
-	img.Path, img.FileName, img.UpdatedAt = newPath, base+img.Ext, now
+	img.Path, img.FileName, img.UpdatedAt = newPath, fileName, now
 
 	if err := s.repo.ReplaceImage(ctx, img, before.UpdatedAt); err != nil {
 		if newPath != before.Path {

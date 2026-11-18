@@ -68,10 +68,13 @@ func TestPerfilInvalido(t *testing.T) {
 		{"min > max", func(p *Profile) { p.Fields[1].Min = ptr(5) }, "fields[1]"},
 		{"regex", func(p *Profile) { p.Objects[1].Fields[0].Pattern = "([" }, "objects[1].fields[0].pattern"},
 		{"ref", func(p *Profile) { p.Fields[6].Ref = "pessoa" }, "fields[6].ref"},
+		{"ref com outro nome", func(p *Profile) { p.Fields[6].Key = "equip" }, "fields[6].key"},
 		{"opção fora de lugar", func(p *Profile) { p.Fields[2].Options = []Option{{Value: "x"}} }, "fields[2].options"},
 		{"upper fora de lugar", func(p *Profile) { p.Fields[0].Upper = true }, "fields[0]"},
 		{"objeto repetido", func(p *Profile) { p.Objects[1].Key = "helmet" }, "objects[1].key"},
 		{"objeto min > max", func(p *Profile) { p.Objects[1].Min = 3 }, "objects[1]"},
+		{"valor inicial fora das opções", func(p *Profile) { p.Fields[0].Default = "tarde" }, "fields[0].default"},
+		{"valor inicial em ref", func(p *Profile) { p.Fields[6].Default = "8003" }, "fields[6].default"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

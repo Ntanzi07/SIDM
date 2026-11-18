@@ -33,8 +33,12 @@ do próprio JPEG**.
   existe em outro pacote é **pulada** no upload (`duplicate`, com o `existing_package`).
 - **Rascunho:** `PUT` com `"complete": false` salva o que já foi preenchido, sem validar
   tudo e sem renomear. A imagem continua `pending`.
-- **Verificar:** `PUT` com `"complete": true` valida tudo, confere o cadastro de
-  equipamento e câmera, renomeia para o padrão v2 e marca `verified`.
+- **Verificar:** `PUT` com `"complete": true` valida tudo pelo perfil de anotação do
+  pacote (inclusive os obrigatórios), confere o cadastro de equipamento e câmera,
+  renomeia o arquivo (padrão v2, no perfil `veiculos`) e marca `verified`.
+- **Perfil de anotação:** cada pacote tem um, e ele diz o que se anota (veja
+  [Perfis de anotação](#perfis-de-anotação)). A imagem guarda a anotação em
+  `fields` (os campos) e `objects` (os objetos, ex.: os veículos).
 - **Fila compartilhada:** várias pessoas anotam o mesmo pacote ao mesmo tempo, e cada
   uma pega "a próxima". Ninguém recebe a mesma imagem (veja [Fila de trabalho](#fila-de-trabalho)).
 - **Import:** um CSV ou o INI embutido na imagem preenchem os rascunhos automaticamente,
@@ -219,10 +223,12 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `GET /docs` | documentação interativa (Swagger UI) |
 | `GET /openapi.yaml` | a especificação OpenAPI |
 
-**Filtros do `GET /images`:** `package`, `status`, `equipment`, `camera`, `day_time`,
-`weather`, `direction`, `vehicle_type`, `vehicle_color` e `plate`. Os filtros de veículo
-valem para o **mesmo** veículo (`$elemMatch`): "caminhão branco" não traz uma imagem com
-um caminhão preto e um carro branco.
+**Filtros do `GET /images`:** `package`, `status`, `fields.<campo>` (um campo da
+imagem; numa lista, basta conter o valor) e `objects.<campo>`. Os filtros de objeto
+valem para o **mesmo** objeto (`$elemMatch`): `objects.type=truck&objects.color=white`
+não traz uma imagem com um caminhão preto e um carro branco. Os nomes de antes dos
+perfis continuam valendo: `equipment`, `camera`, `day_time`, `weather`, `direction`,
+`vehicle_type`, `vehicle_color` e `plate`.
 
 **Códigos de resposta mais comuns:**
 
@@ -567,9 +573,34 @@ alterado: para mudar, salve uma cópia com outro nome.
 Para testar um perfil antes de usar, o `POST /annotation-profiles/{name}/check` confere
 uma anotação sem gravar nada.
 
-> Por enquanto é só o cadastro e a validação. Os próximos passos ligam o perfil ao
-> pacote (cada pacote escolhe um, `veiculos` por padrão), às imagens, ao nome do
-> arquivo, ao import e ao export.
+Um campo pode ter **valor inicial** (`default`): é o que a tela já traz numa imagem
+sem rascunho (no `veiculos`: traseira, diurno, sem chuva...).
+
+### O perfil no pacote e nas imagens
+
+- **Cada pacote escolhe um perfil** ao ser criado (`POST /packages` com `"profile"`;
+  sem ele, `veiculos`). Dá para trocar (`PATCH /packages/{nome}`) **só enquanto o
+  pacote não tem imagem verificada**: o nome do arquivo delas saiu do perfil atual.
+- **A imagem guarda a anotação** em `fields` e `objects`, e o `PUT` passa tudo pelo
+  `Check` do perfil. Os erros voltam juntos, em `problems`, e a tela marca cada campo.
+
+```json
+PUT /images/{sha1}
+{
+  "fields": {"direction": "rear", "day_time": "night", "conditions": ["glare"]},
+  "objects": [{"type": "vehicle", "fields": {"plate": "ABC1D23", "type": "car"}}],
+  "complete": true
+}
+```
+
+- **O nome do arquivo:** no `veiculos`, o padrão v2. Nos outros perfis, o arquivo
+  continua `<sha1>.ext` (o modelo de nome por perfil é um próximo passo).
+- **Import e INI** só preenchem o que o perfil do pacote tem; o resto aparece no
+  relatório, em `outside_profile`. Os perfis de import (e os filtros e pastas do
+  export) ainda escrevem e leem os campos do `veiculos`.
+- **Migração:** na subida, o servidor leva as imagens de antes dos perfis (campos
+  soltos e `vehicles`) para `fields`/`objects`, numa operação no próprio Mongo. Só
+  roda uma vez: nas próximas subidas não há nada para migrar.
 
 ---
 

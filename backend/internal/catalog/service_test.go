@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/platform"
 )
 
@@ -79,24 +80,24 @@ func newTestService() (*Service, *Memory, *fakeDirs, *fakeImages, *[]string) {
 	var log []string
 	mem, dirs := NewMemory(), &fakeDirs{}
 	imgs := &fakeImages{log: &log}
-	return New(mem, dirs, imgs, fakeListener{log: &log}), mem, dirs, imgs, &log
+	return New(mem, dirs, imgs, nil, fakeListener{log: &log}), mem, dirs, imgs, &log
 }
 
 func TestServicePacotes(t *testing.T) {
 	s, mem, dirs, imgs, log := newTestService()
 	ctx := context.Background()
 
-	if err := s.CreatePackage(ctx, "p1", "nathan"); err != nil {
+	if err := s.CreatePackage(ctx, "p1", "", "nathan"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.CreatePackage(ctx, "p1", "nathan"); !errors.Is(err, platform.ErrDuplicate) {
+	if err := s.CreatePackage(ctx, "p1", "", "nathan"); !errors.Is(err, platform.ErrDuplicate) {
 		t.Errorf("duplicado: %v", err)
 	}
 	if fmt.Sprint(dirs.calls) != "[ensure p1]" || mem.Packages["p1"].CreatedBy != "nathan" || mem.Packages["p1"].CreatedAt.IsZero() {
 		t.Errorf("criar: dirs=%v pacote=%+v", dirs.calls, mem.Packages["p1"])
 	}
 
-	s.CreatePackage(ctx, "p2", "nathan")
+	s.CreatePackage(ctx, "p2", "", "nathan")
 	imgs.progress = map[string]Progress{"p1": {Total: 3, Verified: 2, Pending: 1}}
 	list, total, err := s.ListPackages(ctx, "", 10, 0)
 	if err != nil || total != 2 || list[0].Total != 3 || list[1].Total != 0 {
@@ -219,5 +220,58 @@ func TestServiceCadastro(t *testing.T) {
 	}
 	if _, ok := mem.Cameras["cam"]; ok {
 		t.Error("deveria ter sido apagada")
+	}
+}
+
+// fakeProfiles: só o "capacete" existe além do padrão.
+type fakeProfiles struct{}
+
+func (fakeProfiles) FindProfile(ctx context.Context, name string) (*annotation.Profile, error) {
+	if name == "capacete" {
+		return &annotation.Profile{Name: name}, nil
+	}
+	return nil, platform.ErrNotFound
+}
+
+func TestPerfilDoPacote(t *testing.T) {
+	s, mem, _, imgs, _ := newTestService()
+	s.profiles = fakeProfiles{}
+	ctx := context.Background()
+
+	// sem perfil: o padrão
+	if err := s.CreatePackage(ctx, "p1", "", "nathan"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := s.FindPackage(ctx, "p1"); p.Profile != annotation.DefaultProfile {
+		t.Errorf("perfil = %q", p.Profile)
+	}
+	// perfil que não existe
+	var invalid *InvalidError
+	if err := s.CreatePackage(ctx, "p2", "nao-existe", "nathan"); !errors.As(err, &invalid) {
+		t.Errorf("perfil inexistente: %v", err)
+	}
+	if _, ok := mem.Packages["p2"]; ok {
+		t.Error("criou o pacote com perfil inexistente")
+	}
+	if err := s.CreatePackage(ctx, "p3", "capacete", "nathan"); err != nil || mem.Packages["p3"].Profile != "capacete" {
+		t.Errorf("criar com perfil: %v, %+v", err, mem.Packages["p3"])
+	}
+
+	// pacote de antes dos perfis (vazio no banco) aparece com o padrão
+	mem.Packages["antigo"] = Package{Name: "antigo"}
+	if p, _ := s.FindPackage(ctx, "antigo"); p.Profile != annotation.DefaultProfile {
+		t.Errorf("antigo: %q", p.Profile)
+	}
+
+	// trocar: livre sem verificadas, recusado com
+	if err := s.SetPackageProfile(ctx, "p1", "capacete"); err != nil || mem.Packages["p1"].Profile != "capacete" {
+		t.Errorf("trocar: %v", err)
+	}
+	imgs.progress = map[string]Progress{"p1": {Verified: 3, Total: 3}}
+	if err := s.SetPackageProfile(ctx, "p1", annotation.DefaultProfile); !errors.As(err, &invalid) || mem.Packages["p1"].Profile != "capacete" {
+		t.Errorf("trocar com verificadas: %v", err)
+	}
+	if err := s.SetPackageProfile(ctx, "nao-existe", "capacete"); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("pacote inexistente: %v", err)
 	}
 }

@@ -78,7 +78,7 @@ func TestUploadGuardaINI(t *testing.T) {
 	if _, ok := got["Metrologico.Assinatura"]; ok {
 		t.Error("a assinatura não pode ir para o banco")
 	}
-	if img.DayTime != "" || len(img.Vehicles) != 0 {
+	if fv(img.Fields, "day_time") != "" || len(img.Objects) != 0 {
 		t.Error("sem perfil, nenhum campo de anotação deveria ser preenchido")
 	}
 }
@@ -97,18 +97,18 @@ func TestUploadComPerfilDeINI(t *testing.T) {
 	if img.Status != images.StatusPending {
 		t.Error("o perfil pré-preenche, mas a imagem continua pending")
 	}
-	if img.Equipment != "MFR1-0001" {
-		t.Errorf("equipamento deveria vir sanitizado: %q", img.Equipment)
+	if fv(img.Fields, "equipment") != "MFR1-0001" {
+		t.Errorf("equipamento deveria vir sanitizado: %q", fv(img.Fields, "equipment"))
 	}
 	if !env.cat.Equipments["MFR1-0001"] {
 		t.Error("o equipamento do INI deveria ser cadastrado automaticamente")
 	}
 	want := time.Date(2026, 9, 18, 13, 32, 28, 321e6, time.UTC)
-	if img.CapturedAt == nil || !img.CapturedAt.Equal(want) {
-		t.Errorf("captured_at = %v, want %v", img.CapturedAt, want)
+	if img.Fields["captured_at"] != want {
+		t.Errorf("captured_at = %v, want %v", img.Fields["captured_at"], want)
 	}
-	if len(img.Vehicles) != 1 || img.Vehicles[0].Plate != "GGB5H24" || img.Vehicles[0].Type != "car" {
-		t.Errorf("veículo = %+v", img.Vehicles)
+	if len(img.Objects) != 1 || fv(img.Objects[0].Fields, "plate") != "GGB5H24" || fv(img.Objects[0].Fields, "type") != "car" {
+		t.Errorf("veículo = %+v", img.Objects)
 	}
 }
 
@@ -165,7 +165,7 @@ func TestImportComPerfilDeINISemArquivo(t *testing.T) {
 	if len(rep.NewEquipments) != 1 || rep.NewEquipments[0] != "MFR1-0001" {
 		t.Errorf("new_equipments = %v", rep.NewEquipments)
 	}
-	if env.img.Images[res[0].SHA1].Equipment != "" {
+	if fv(env.img.Images[res[0].SHA1].Fields, "equipment") != "" {
 		t.Fatal("o ensaio gravou!")
 	}
 
@@ -174,7 +174,7 @@ func TestImportComPerfilDeINISemArquivo(t *testing.T) {
 		t.Fatalf("applied = %d", rep.Applied)
 	}
 	a := env.img.Images[res[0].SHA1]
-	if a.Equipment != "MFR1-0001" || len(a.Vehicles) != 1 || a.Vehicles[0].Plate != "AAA1111" {
+	if fv(a.Fields, "equipment") != "MFR1-0001" || len(a.Objects) != 1 || fv(a.Objects[0].Fields, "plate") != "AAA1111" {
 		t.Errorf("imagem a = %+v", a)
 	}
 	if !env.cat.Equipments["MFR1-0001"] {

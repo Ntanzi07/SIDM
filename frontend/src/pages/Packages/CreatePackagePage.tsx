@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createPackage, imageFiles, importPackageCsv, listImportProfiles, listIniProfiles, uploadImages, type ImportProfile, type ImportReport, type UploadProgress } from '../../services/api'
+import { createPackage, imageFiles, importPackageCsv, listAnnotationProfiles, listImportProfiles, listIniProfiles, uploadImages, type ImportProfile, type ImportReport, type UploadProgress } from '../../services/api'
+import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
 import { UploadStatus } from './UploadStatus'
 import './Packages.css'
@@ -10,6 +11,8 @@ export function CreatePackagePage() {
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const [folder, setFolder] = useState<FileList | null>(null)
+  const [annotationProfiles, setAnnotationProfiles] = useState<AnnotationProfile[]>([])
+  const [annotationProfile, setAnnotationProfile] = useState('veiculos')
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
   const [iniProfiles, setIniProfiles] = useState<ImportProfile[]>([])
   const [iniProfile, setIniProfile] = useState('')
@@ -24,6 +27,7 @@ export function CreatePackagePage() {
   const [importReport, setImportReport] = useState<ImportReport | null>(null)
 
   useEffect(() => {
+    listAnnotationProfiles().then(setAnnotationProfiles).catch(() => { /* sem a lista: fica o padrão */ })
     listIniProfiles().then(setIniProfiles).catch(() => { /* sem perfis de INI: o seletor não aparece */ })
     listImportProfiles()
       .then(setProfiles)
@@ -66,7 +70,7 @@ export function CreatePackagePage() {
     try {
       // Se o pacote já foi criado numa tentativa anterior, não cria de novo:
       // o upload pula as imagens que já subiram (duplicadas).
-      const createdName = createdPackageName || await createPackage(name.trim())
+      const createdName = createdPackageName || await createPackage(name.trim(), annotationProfile)
       setCreatedPackageName(createdName)
 
       setSaving('uploading')
@@ -126,6 +130,25 @@ export function CreatePackagePage() {
             placeholder="Ex.: Placas BR - Rodovia Anhanguera"
             value={name}
           />
+        </div>
+        <div className="form-field">
+          <label htmlFor="annotation-profile">O que anotar (perfil de anotação)</label>
+          <select
+            disabled={Boolean(createdPackageName)}
+            id="annotation-profile"
+            onChange={(event) => setAnnotationProfile(event.target.value)}
+            value={annotationProfile}
+          >
+            {annotationProfiles.length === 0 && <option value="veiculos">veiculos</option>}
+            {annotationProfiles.map((profile) => (
+              <option key={profile.name} value={profile.name}>
+                {profile.name}{profile.description ? ` — ${profile.description}` : ''}
+              </option>
+            ))}
+          </select>
+          <small className="form-hint">
+            Os campos da tela de anotação vêm do perfil. Dá para trocar depois, enquanto nenhuma imagem foi verificada.
+          </small>
         </div>
         <div className="form-field">
           <label htmlFor="package-folder">Pasta das imagens</label>

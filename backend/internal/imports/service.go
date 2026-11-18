@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/filename"
 	"SIDM/internal/images"
 	"SIDM/internal/importer"
@@ -94,12 +95,15 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 		DryRun: run.DryRun, Package: run.Package, Profile: p.Name, Overwrite: run.Overwrite,
 		Report:   importer.Report{Unmapped: map[string]map[string]int{}, Errors: []importer.RowError{}},
 		NotFound: []string{}, Ambiguous: []string{},
-		NewEquipments: []string{}, NewCameras: []string{}, InvalidNames: []RowName{},
+		NewEquipments: []string{}, NewCameras: []string{}, InvalidNames: []RowName{}, OutsideProfile: []string{},
+	}
+	annot, err := s.images.ProfileOf(ctx, run.Package)
+	if err != nil {
+		return nil, err
 	}
 
 	var records []importer.Record
 	var byKey map[string][]images.Image
-	var err error
 	if p.Reader.Type == importer.ReaderJPEGINI {
 		records, byKey, err = s.iniRecords(ctx, run.Package, p, rep)
 	} else {
@@ -146,16 +150,29 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 		ann.Equipment = rep.sanitizeName(rec.Line, "equipment", ann.Equipment, filename.SanitizeEquipment)
 		ann.Camera = rep.sanitizeName(rec.Line, "camera", ann.Camera, filename.SanitizeCamera)
 
+		// Encaixa no perfil do pacote: o que ele não tem fica de fora.
+		fit, outside := annot.Fit(images.ValuesFromAnnotation(ann))
+		for _, o := range outside {
+			rep.OutsideProfileCount++
+			if len(rep.OutsideProfile) < MaxListedKeys {
+				where := fmt.Sprintf("linha %d", rec.Line)
+				if rec.Line == 0 { // INI: não tem linha, tem a imagem
+					where = rec.Key
+				}
+				rep.OutsideProfile = append(rep.OutsideProfile, where+": "+o)
+			}
+		}
+
 		before := img
-		if !images.MergeAnnotation(&img, ann, run.Overwrite) {
+		if !images.MergeAnnotation(&img, fit, run.Overwrite) {
 			rep.Unchanged++
 			continue
 		}
-		if img.Equipment != "" {
-			equipments[img.Equipment] = true
+		if v, _ := img.Fields[annotation.RefEquipment].(string); v != "" {
+			equipments[v] = true
 		}
-		if img.Camera != "" {
-			cameras[img.Camera] = true
+		if v, _ := img.Fields[annotation.RefCamera].(string); v != "" {
+			cameras[v] = true
 		}
 		writes = append(writes, write{before: before, after: img})
 	}

@@ -65,7 +65,7 @@ func TestUploadComPerfilDeINIEmArquivoCriptografado(t *testing.T) {
 
 	res := env.uploadToWithQuery(t, testPkg, "&profile=ini-mfr1", upFile{"foto.enc", encrypted})
 	img := env.img.Images[res[0].SHA1]
-	if !res[0].Prefilled || len(img.Vehicles) != 1 || img.Vehicles[0].Plate != "GGB5H24" {
+	if !res[0].Prefilled || len(img.Objects) != 1 || img.Objects[0].Fields["plate"] != "GGB5H24" {
 		t.Errorf("o perfil de INI deveria funcionar no arquivo descriptografado: %+v", res[0])
 	}
 }

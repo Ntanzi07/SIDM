@@ -20,10 +20,12 @@ db.equipments.createIndex({ name: 1 }, { unique: true });
 
 db.images.createIndex({ package: 1, status: 1, queued_at: 1 });  // fila de trabalho e progresso de cada pacote
 db.images.createIndex({ package: 1, original_name: 1 });         // import: casar a linha do CSV com a imagem
-db.images.createIndex({ equipment: 1, captured_at: -1 });
-db.images.createIndex({ camera: 1, captured_at: -1 });
-db.images.createIndex({ day_time: 1, captured_at: -1 });
-db.images.createIndex({ weather: 1, captured_at: -1 });
+// A anotação fica em fields/objects (campos do perfil de anotação do pacote).
+// O servidor também cria estes índices na subida (images.EnsureIndexes).
+db.images.createIndex({ "fields.equipment": 1 });
+db.images.createIndex({ "fields.camera": 1 });
+db.images.createIndex({ "fields.day_time": 1 });
+db.images.createIndex({ "fields.weather": 1 });
 
 db.image_history.createIndex({ image_id: 1, changed_at: -1 });
 
@@ -44,3 +46,7 @@ db.annotation_tasks.createIndex({ name: 1 }, { unique: true });
 // O backend também cria este índice ao subir.
 db.createCollection("export_profiles");
 db.export_profiles.createIndex({ name: 1 }, { unique: true });
+
+// Perfis de anotação salvos (o padrão "veiculos" fica no código).
+db.createCollection("annotation_profiles");
+db.annotation_profiles.createIndex({ name: 1 }, { unique: true });

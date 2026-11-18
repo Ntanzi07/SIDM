@@ -1,10 +1,11 @@
-import type { AnnotationCodes, AnnotationForm, ImageDetail } from '../types/annotation'
+import type { AnnotationCodes, AnnotationProfile, ImageDetail } from '../types/annotation'
 import { getUser } from './user'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
 export type PackageSummary = {
   name: string
+  profile: string // perfil de anotação
   created_by: string
   created_at: string
   total: number
@@ -110,6 +111,9 @@ export type ImportReport = {
   new_equipments: string[]
   new_cameras: string[]
   invalid_names: Array<{ line: number; field: string; value: string; error: string }>
+  // O que o perfil de anotação do pacote não tem ou não aceita (fica de fora).
+  outside_profile?: string[]
+  outside_profile_count?: number
 }
 
 export type PageResponse<T> = {
@@ -131,6 +135,20 @@ type UploadResult = {
   error?: string
 }
 
+// Um problema de validação do perfil de anotação: path diz onde (ex.:
+// "fields.day_time", "objects[0].plate").
+export type Problem = { path: string; msg: string }
+
+// O erro de um pedido. Na anotação, problems tem TODOS os erros (a mensagem
+// só traz o primeiro).
+export class RequestError extends Error {
+  problems: Problem[]
+  constructor(message: string, problems: Problem[]) {
+    super(message)
+    this.problems = problems
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
@@ -142,8 +160,8 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!response.ok) {
-    const body = await response.json().catch(() => null) as { error?: string } | null
-    throw new Error(body?.error ?? `Não foi possível concluir a operação (${response.status}).`)
+    const body = await response.json().catch(() => null) as { error?: string; problems?: Problem[] } | null
+    throw new RequestError(body?.error ?? `Não foi possível concluir a operação (${response.status}).`, body?.problems ?? [])
   }
 
   if (response.status === 204) return undefined as T
@@ -183,12 +201,28 @@ export async function listPackageImages(
   return request<PageResponse<ImageSummary>>(`/images?${query.toString()}`)
 }
 
-export async function createPackage(name: string): Promise<string> {
+// profile vazio = o perfil de anotação padrão (veiculos).
+export async function createPackage(name: string, profile?: string): Promise<string> {
   const created = await request<{ name: string }>('/packages', {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(profile ? { name, profile } : { name }),
   })
   return created.name
+}
+
+// Só enquanto o pacote não tem imagem verificada (o backend recusa).
+export async function setPackageProfile(name: string, profile: string): Promise<void> {
+  await request(`/packages/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify({ profile }) })
+}
+
+// ---------- perfis de anotação ----------
+
+export async function listAnnotationProfiles(): Promise<AnnotationProfile[]> {
+  return (await request<PageResponse<AnnotationProfile>>('/annotation-profiles')).items
+}
+
+export async function getAnnotationProfile(name: string): Promise<AnnotationProfile> {
+  return request<AnnotationProfile>(`/annotation-profiles/${encodeURIComponent(name)}`)
 }
 
 export async function deletePackage(name: string): Promise<void> {
@@ -233,12 +267,12 @@ export function imageFileUrl(sha1: string): string {
   return `${API_BASE_URL}/images/${encodeURIComponent(sha1)}/file`
 }
 
-// O form guarda a data no formato do <input type="datetime-local">; aqui ela
-// vira ISO com fuso, que é o que o backend aceita.
-export async function saveAnnotation(sha1: string, annotation: AnnotationForm, capturedAtISO: string | null): Promise<ImageDetail> {
+// Verifica a imagem com a anotação (já no formato da API: ver
+// utils/annotationForm.ts, formToAPI).
+export async function saveAnnotation(sha1: string, annotation: { fields: Record<string, unknown>; objects: { type: string; fields: Record<string, unknown> }[] }): Promise<ImageDetail> {
   return request<ImageDetail>(`/images/${encodeURIComponent(sha1)}`, {
     method: 'PUT',
-    body: JSON.stringify({ ...annotation, captured_at: capturedAtISO, complete: true }),
+    body: JSON.stringify({ ...annotation, complete: true }),
   })
 }
 

@@ -10,9 +10,9 @@
 // precisa dos outros pede por interfaces (Catalog, Profiles) e avisa quando
 // uma imagem é apagada (Listener).
 //
-// Os campos de anotação (veículo, direção, período…) ainda são fixos: o
-// perfil de anotação configurável vai substituir isso (ver annotate.go, onde
-// eles estão concentrados).
+// O que se anota em cada imagem vem do perfil de anotação do pacote (o
+// módulo annotation): a imagem guarda os valores em fields e objects, e a
+// anotação passa pelo Check do perfil (ver annotate.go).
 package images
 
 import (
@@ -20,6 +20,7 @@ import (
 	"errors"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/catalog"
 	"SIDM/internal/importer"
 )
@@ -28,14 +29,6 @@ const (
 	StatusPending  = "pending"  // no pacote com nome = hash, aguardando verificação
 	StatusVerified = "verified" // anotada e conferida, renomeada para o padrão v2
 )
-
-type Vehicle struct {
-	Plate         string `bson:"plate" json:"plate"`
-	PlateType     string `bson:"plate_type" json:"plate_type"`
-	PlateCategory string `bson:"plate_category" json:"plate_category"`
-	Type          string `bson:"type" json:"type"`
-	Color         string `bson:"color" json:"color"`
-}
 
 // Image é o documento da collection images.
 // Campos de anotação ficam vazios (omitempty) enquanto a imagem está pending,
@@ -53,18 +46,16 @@ type Image struct {
 	// (ex: "rc4-legacy"). O que fica no disco é sempre o original aberto.
 	Encryption string `bson:"encryption,omitempty" json:"encryption,omitempty"`
 
-	PatternVersion string     `bson:"pattern_version,omitempty" json:"pattern_version,omitempty"`
-	Equipment      string     `bson:"equipment,omitempty" json:"equipment,omitempty"`
-	Camera         string     `bson:"camera,omitempty" json:"camera,omitempty"`
-	Direction      string     `bson:"direction,omitempty" json:"direction,omitempty"`
-	Resolution     string     `bson:"resolution,omitempty" json:"resolution,omitempty"`
-	CaptureAngle   string     `bson:"capture_angle,omitempty" json:"capture_angle,omitempty"`
-	DayTime        string     `bson:"day_time,omitempty" json:"day_time,omitempty"`
-	ImageRange     string     `bson:"image_range,omitempty" json:"image_range,omitempty"`
-	Weather        string     `bson:"weather,omitempty" json:"weather,omitempty"`
-	Conditions     []string   `bson:"conditions,omitempty" json:"conditions,omitempty"`
-	CapturedAt     *time.Time `bson:"captured_at,omitempty" json:"captured_at,omitempty"` // ponteiro: pending não tem data
-	Vehicles       []Vehicle  `bson:"vehicles,omitempty" json:"vehicles,omitempty"`
+	// PatternVersion: "v2" quando o arquivo tem o nome v2 (perfil veiculos);
+	// vazio quando o nome é o sha1 (pendente, ou perfil sem modelo de nome).
+	PatternVersion string `bson:"pattern_version,omitempty" json:"pattern_version,omitempty"`
+
+	// A anotação, nos campos do perfil do pacote (ver o módulo annotation):
+	// Fields são os campos da imagem e Objects os objetos sem caixa (ex.: os
+	// veículos). Os valores já passaram pelo Check do perfil: texto, número
+	// (float64), sim/não, lista de textos ([]string) ou data (time.Time).
+	Fields  map[string]any      `bson:"fields" json:"fields"`
+	Objects []annotation.Object `bson:"objects" json:"objects"`
 
 	// INI: os metadados que o equipamento gravou DENTRO do arquivo (depois do
 	// fim do JPEG). Cópia para busca e para os perfis de import; o arquivo
@@ -89,23 +80,36 @@ func (img *Image) ClaimedByOther(user string, now time.Time) bool {
 		img.ClaimedUntil != nil && img.ClaimedUntil.After(now)
 }
 
+// ensureValues: sem anotação, fields e objects saem vazios ({} e []) no
+// JSON, nunca null.
+func (img *Image) ensureValues() {
+	if img.Fields == nil {
+		img.Fields = map[string]any{}
+	}
+	if img.Objects == nil {
+		img.Objects = []annotation.Object{}
+	}
+	for i := range img.Objects {
+		if img.Objects[i].Fields == nil {
+			img.Objects[i].Fields = map[string]any{}
+		}
+	}
+}
+
 // ErrConflict indica que o documento mudou desde que foi lido.
 var ErrConflict = errors.New("alterado por outra pessoa")
 
 // ImageFilter: campos vazios são ignorados.
 type ImageFilter struct {
-	Package      string
-	Status       string
-	Equipment    string
-	Camera       string
-	DayTime      string
-	Weather      string
-	Direction    string
-	VehicleType  string
-	VehicleColor string
-	Plate        string
-	Limit        int64
-	Skip         int64
+	Package string
+	Status  string
+	// Fields: campo da imagem = valor (numa lista, basta conter o valor).
+	Fields map[string]string
+	// Object: todos valendo para o MESMO objeto (ex.: type=truck e
+	// color=white é um caminhão branco, não um caminhão e algo branco).
+	Object map[string]string
+	Limit  int64
+	Skip   int64
 }
 
 // HistoryEntry é um documento da collection image_history.
@@ -155,9 +159,14 @@ type Catalog interface {
 	CreateCamera(ctx context.Context, name string) error
 }
 
-// Profiles: o perfil de import (jpeg-ini) aplicado no upload.
-type Profiles interface {
+// ImportProfiles busca o perfil de IMPORT de INI usado no upload.
+type ImportProfiles interface {
 	FindProfile(ctx context.Context, name string) (*importer.Profile, error)
+}
+
+// Annotations busca o perfil de ANOTAÇÃO de um pacote.
+type Annotations interface {
+	FindProfile(ctx context.Context, name string) (*annotation.Profile, error)
 }
 
 // Listener é avisado quando uma imagem é apagada (ex.: as caixas dela).

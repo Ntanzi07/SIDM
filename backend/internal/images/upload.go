@@ -1,6 +1,7 @@
 package images
 
 import (
+	"SIDM/internal/annotation"
 	"SIDM/internal/crypt"
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
@@ -56,7 +57,8 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 		platform.WriteError(w, http.StatusBadRequest, "informe o pacote: POST /images?package=<nome>")
 		return
 	}
-	if _, err := s.catalog.FindPackage(r.Context(), pkg); err != nil {
+	annot, err := s.ProfileOf(r.Context(), pkg)
+	if err != nil {
 		if errors.Is(err, platform.ErrNotFound) {
 			platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe: crie antes com POST /packages", pkg))
 			return
@@ -107,14 +109,14 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
-		results = append(results, s.ingestOne(r.Context(), pkg, profile, part))
+		results = append(results, s.ingestOne(r.Context(), pkg, annot, profile, part))
 		part.Close()
 	}
 
 	platform.WriteJSON(w, http.StatusOK, results)
 }
 
-func (s *Service) ingestOne(ctx context.Context, pkg string, profile *importer.Profile, part *multipart.Part) UploadResult {
+func (s *Service) ingestOne(ctx context.Context, pkg string, annot *annotation.Profile, profile *importer.Profile, part *multipart.Part) UploadResult {
 	name := filepath.Base(part.FileName()) // nunca confie no caminho que vem do cliente
 	res := UploadResult{File: name}
 
@@ -150,13 +152,20 @@ func (s *Service) ingestOne(ctx context.Context, pkg string, profile *importer.P
 		QueuedAt:     now, // entra no fim da fila do pacote
 		IngestedAt:   now,
 		UpdatedAt:    now,
+		Fields:       map[string]any{},
+		Objects:      []annotation.Object{},
 	}
 
 	// Se o nome original já está no padrão v2 E o hash do nome bate com o
-	// conteúdo, pré-preenche a anotação. Continua pending: alguém confere.
-	if meta, err := filename.Parse(name); err == nil && meta.SHA1 == sum {
-		applyMeta(img, meta)
-		res.Prefilled = true
+	// conteúdo, pré-preenche a anotação (o v2 só existe no perfil veiculos).
+	// Continua pending: alguém confere.
+	if annot.Name == annotation.DefaultProfile {
+		if meta, err := filename.Parse(name); err == nil && meta.SHA1 == sum {
+			fit, _ := annot.Fit(ValuesFromMeta(meta))
+			if MergeAnnotation(img, fit, false) {
+				res.Prefilled = true
+			}
+		}
 	}
 
 	// INI embutido: lido do temporário (o arquivo em si nunca é alterado).
@@ -167,7 +176,9 @@ func (s *Service) ingestOne(ctx context.Context, pkg string, profile *importer.P
 			ann, rep := AnnotationFromINI(profile, sum, entries)
 			ann.Equipment, ann.Camera, res.Warnings = s.SanitizeAndRegister(ctx, ann.Equipment, ann.Camera)
 			res.Warnings = append(res.Warnings, ReportWarnings(rep)...)
-			if MergeAnnotation(img, ann, false) {
+			fit, dropped := annot.Fit(ValuesFromAnnotation(ann))
+			res.Warnings = append(res.Warnings, dropped...)
+			if MergeAnnotation(img, fit, false) {
 				res.Prefilled = true
 			}
 		}

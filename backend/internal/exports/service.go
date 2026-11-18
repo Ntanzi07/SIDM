@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -153,9 +154,12 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 		for skip := int64(0); ; skip += pageSize {
 			imgs, _, err := s.images.List(ctx, images.ImageFilter{
 				Package: pkg, Status: images.StatusVerified,
-				Equipment: f.Equipment, Camera: f.Camera, Direction: f.Direction, DayTime: f.DayTime,
-				Weather: f.Weather, VehicleType: f.VehicleType, VehicleColor: f.VehicleColor,
-				Limit: pageSize, Skip: skip,
+				Fields: nonEmpty(map[string]string{
+					"equipment": f.Equipment, "camera": f.Camera, "direction": f.Direction,
+					"day_time": f.DayTime, "weather": f.Weather,
+				}),
+				Object: nonEmpty(map[string]string{"type": f.VehicleType, "color": f.VehicleColor}),
+				Limit:  pageSize, Skip: skip,
 			})
 			if err != nil {
 				return nil, nil, err
@@ -221,27 +225,63 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 	return items, prev, nil
 }
 
-// imageMeta: os metadados da imagem que viram pasta ou parte do nome de
-// saída (os do veículo vêm do primeiro veículo; a condição é a primeira).
-func imageMeta(img *images.Image) export.Meta {
-	m := export.Meta{
-		"resolution": img.Resolution, "direction": img.Direction, "day_time": img.DayTime,
-		"weather": img.Weather, "capture_angle": img.CaptureAngle, "image_range": img.ImageRange,
-		"equipment": img.Equipment, "camera": img.Camera, "package": img.Package,
-	}
-	if len(img.Vehicles) > 0 {
-		v := img.Vehicles[0]
-		m["vehicle_type"], m["plate_type"], m["plate_category"], m["vehicle_color"] = v.Type, v.PlateType, v.PlateCategory, v.Color
-		m["plate"] = v.Plate
-	}
-	if len(img.Conditions) > 0 {
-		m["condition"] = img.Conditions[0]
-	}
-	if img.CapturedAt != nil {
-		t := img.CapturedAt.UTC()
-		m["captured_at"], m["date"] = t.Format("20060102T150405Z"), t.Format("20060102")
+// nonEmpty tira os filtros vazios.
+func nonEmpty(m map[string]string) map[string]string {
+	for k, v := range m {
+		if v == "" {
+			delete(m, k)
+		}
 	}
 	return m
+}
+
+// imageMeta: os metadados da imagem que viram pasta ou parte do nome de
+// saída. Cada campo da imagem vira meta[campo] (de uma lista, o primeiro
+// valor; "conditions" também vira "condition"; uma data vira AAAAMMDDTHHMMSSZ
+// e, a captured_at, também "date"). Do PRIMEIRO objeto saem meta[campo] (se
+// a imagem não tem um campo com o mesmo nome) e meta[<tipo>_<campo>]: no
+// perfil veiculos, isso dá plate, plate_type, vehicle_type, vehicle_color...
+func imageMeta(img *images.Image) export.Meta {
+	m := export.Meta{"package": img.Package}
+	for k, v := range img.Fields {
+		m[k] = metaValue(v)
+	}
+	if c, ok := img.Fields["conditions"].([]string); ok && len(c) > 0 {
+		m["condition"] = c[0]
+	}
+	if t, ok := img.Fields["captured_at"].(time.Time); ok {
+		m["date"] = t.UTC().Format("20060102")
+	}
+	if len(img.Objects) > 0 {
+		o := img.Objects[0]
+		for k, v := range o.Fields {
+			if _, taken := img.Fields[k]; !taken {
+				m[k] = metaValue(v)
+			}
+			m[o.Type+"_"+k] = metaValue(v)
+		}
+	}
+	return m
+}
+
+// metaValue: o valor de um campo como texto, para pasta e nome de arquivo.
+func metaValue(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case []string:
+		if len(x) > 0 {
+			return x[0]
+		}
+		return ""
+	case time.Time:
+		return x.UTC().Format("20060102T150405Z")
+	case float64:
+		return strconv.FormatFloat(x, 'f', -1, 64)
+	case bool:
+		return strconv.FormatBool(x)
+	}
+	return fmt.Sprint(v)
 }
 
 func (s *Service) opener(rel string) func() (io.ReadCloser, error) {

@@ -1,5 +1,7 @@
-import type { Vehicle } from '../types/annotation'
-
+// Opções dos campos do perfil veiculos, para os FILTROS e as PASTAS do export
+// (que ainda usam os campos fixos). A tela de anotação usa o perfil de
+// anotação do pacote (GET /annotation-profiles/{nome}), não esta lista.
+//
 // Opções dos campos codificados: [valor da API, rótulo em português].
 //
 // ATENÇÃO: a API trabalha com os VALORES das tabelas ("rear", "night",
@@ -82,25 +84,3 @@ export const annotationOptions = {
     ['multicolor', 'Fantasia'],
   ],
 } as const satisfies Record<string, Options>
-
-// Valores iniciais de uma imagem sem rascunho.
-export const defaultAnnotation = {
-  direction: 'rear',
-  capture_angle: 'lateral',
-  day_time: 'day',
-  image_range: 'narrow',
-  weather: 'clear',
-  conditions: ['no_damage'],
-} as const
-
-// Veículo novo no formulário. A cor começa vazia de propósito: é o campo
-// que mais varia, e um padrão errado passaria despercebido na revisão.
-export function defaultVehicle(): Vehicle {
-  return {
-    plate: '',
-    plate_type: 'mercosul',
-    plate_category: 'private',
-    type: 'car',
-    color: '',
-  }
-}

@@ -1,132 +1,235 @@
 package images
 
 import (
+	"context"
+	"fmt"
+	"maps"
+	"reflect"
+	"sort"
+	"time"
+
+	"SIDM/internal/annotation"
 	"SIDM/internal/filename"
 	"SIDM/internal/importer"
-	"fmt"
-	"net/http"
-	"reflect"
-	"strings"
-	"time"
 )
 
 // annotationRequest é o corpo do PUT /images/{sha1}.
-// Substitui TODOS os campos de anotação (não é patch campo a campo).
+// Substitui TODA a anotação (não é patch campo a campo).
 type annotationRequest struct {
-	Equipment    string     `json:"equipment"`
-	Camera       string     `json:"camera"`
-	Direction    string     `json:"direction"`
-	Resolution   string     `json:"resolution"`
-	CaptureAngle string     `json:"capture_angle"`
-	DayTime      string     `json:"day_time"`
-	ImageRange   string     `json:"image_range"`
-	Weather      string     `json:"weather"`
-	Conditions   []string   `json:"conditions"`
-	CapturedAt   *time.Time `json:"captured_at"`
-	Vehicles     []Vehicle  `json:"vehicles"`
+	Fields  map[string]any      `json:"fields"`  // os campos da imagem, pelo perfil do pacote
+	Objects []annotation.Object `json:"objects"` // os objetos sem caixa (ex.: os veículos)
 
 	// false: só salva o rascunho (continua pending).
-	// true: valida tudo, renomeia para o padrão v2 (na pasta do pacote) e marca verified.
+	// true: valida tudo (inclusive os obrigatórios), renomeia o arquivo e
+	// marca verified.
 	Complete bool `json:"complete"`
 }
 
-func (req annotationRequest) applyTo(img *Image) {
-	img.Equipment = req.Equipment
-	img.Camera = req.Camera
-	img.Direction = req.Direction
-	img.Resolution = req.Resolution
-	img.CaptureAngle = req.CaptureAngle
-	img.DayTime = req.DayTime
-	img.ImageRange = req.ImageRange
-	img.Weather = req.Weather
-	img.Conditions = req.Conditions
-	img.Vehicles = make([]Vehicle, 0, len(req.Vehicles))
-	for _, v := range req.Vehicles {
-		v.Plate = strings.ToUpper(strings.TrimSpace(v.Plate)) // placa sempre maiúscula: igual no nome e no banco
-		img.Vehicles = append(img.Vehicles, v)
-	}
-	img.CapturedAt = nil
-	if req.CapturedAt != nil {
-		t := req.CapturedAt.UTC()
-		img.CapturedAt = &t
-	}
-}
-
-// finalName valida a anotação completa e devolve o nome v2 (com extensão).
-// Se algo estiver errado, devolve a mensagem para o usuário.
+// finalName confere o que o perfil não confere sozinho (o cadastro de
+// equipamento e câmera) e devolve o nome do arquivo verificado e a versão do
+// padrão. Se algo estiver errado, devolve a mensagem para o usuário.
 //
-// Nenhum campo é obrigatório: o que não deu para saber (sem data, placa
-// ilegível, câmera desconhecida...) fica vazio, e no nome vira uma posição
-// vazia. O que VEM preenchido tem que ser válido.
-func (s *Service) finalName(r *http.Request, img *Image) (string, string) {
-	meta := MetaFromImage(img)
+// O perfil padrão (veiculos) usa o nome v2. Os outros perfis ainda não têm
+// modelo de nome: o arquivo continua <sha1>.ext, na pasta do pacote.
+func (s *Service) finalName(ctx context.Context, img *Image, p *annotation.Profile) (name, version, msg string) {
+	for _, ref := range []struct{ key, msg string }{
+		{annotation.RefEquipment, "equipamento %q não cadastrado"}, {annotation.RefCamera, "câmera %q não cadastrada"},
+	} {
+		v, _ := img.Fields[ref.key].(string)
+		if v == "" {
+			continue
+		}
+		exists := s.catalog.EquipmentExists
+		if ref.key == annotation.RefCamera {
+			exists = s.catalog.CameraExists
+		}
+		if ok, err := exists(ctx, v); err != nil || !ok {
+			return "", "", fmt.Sprintf(ref.msg, v)
+		}
+	}
 
-	// O Format já valida todos os códigos e formatos.
-	base, err := filename.Format(meta)
+	if p.Name != annotation.DefaultProfile {
+		return img.SHA1 + img.Ext, "", ""
+	}
+	// O Format valida os códigos e os formatos do v2.
+	base, err := filename.Format(MetaFromImage(img))
 	if err != nil {
-		return "", err.Error()
+		return "", "", err.Error()
 	}
-
-	// O Format só valida o FORMATO do equipamento/câmera; aqui conferimos o cadastro.
-	ctx := r.Context()
-	if img.Equipment != "" {
-		if ok, err := s.catalog.EquipmentExists(ctx, img.Equipment); err != nil || !ok {
-			return "", fmt.Sprintf("equipamento %q não cadastrado", img.Equipment)
-		}
-	}
-	if img.Camera != "" {
-		if ok, err := s.catalog.CameraExists(ctx, img.Camera); err != nil || !ok {
-			return "", fmt.Sprintf("câmera %q não cadastrada", img.Camera)
-		}
-	}
-
-	return base + img.Ext, ""
+	return base + img.Ext, filename.CurrentVersion, ""
 }
 
-// MetaFromImage converte o documento da imagem nos metadados do padrão v2.
-// Usado ao verificar e ao renomear em cascata (equipamento/câmera), para o
-// nome do arquivo ser montado sempre do mesmo jeito.
+// ---------- ponte com o nome v2 (perfil veiculos) ----------
+
+func str(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
+}
+
+// MetaFromImage converte a anotação (perfil veiculos) nos metadados do
+// padrão v2. Usado ao verificar e ao renomear em cascata (equipamento/câmera),
+// para o nome do arquivo ser montado sempre do mesmo jeito.
 func MetaFromImage(img *Image) filename.ImageMeta {
+	f := img.Fields
 	meta := filename.ImageMeta{
 		SHA1:         img.SHA1,
 		Version:      filename.CurrentVersion,
-		Equipment:    img.Equipment,
-		Camera:       img.Camera,
-		Direction:    img.Direction,
-		Resolution:   img.Resolution,
-		CaptureAngle: img.CaptureAngle,
-		DayTime:      img.DayTime,
-		ImageRange:   img.ImageRange,
-		Weather:      img.Weather,
-		Conditions:   img.Conditions,
+		Equipment:    str(f, "equipment"),
+		Camera:       str(f, "camera"),
+		Direction:    str(f, "direction"),
+		Resolution:   str(f, "resolution"),
+		CaptureAngle: str(f, "capture_angle"),
+		DayTime:      str(f, "day_time"),
+		ImageRange:   str(f, "image_range"),
+		Weather:      str(f, "weather"),
 	}
-	if img.CapturedAt != nil {
-		meta.CapturedAt = *img.CapturedAt
+	if c, ok := f["conditions"].([]string); ok {
+		meta.Conditions = c
 	}
-	for _, v := range img.Vehicles {
+	if t, ok := f["captured_at"].(time.Time); ok {
+		meta.CapturedAt = t
+	}
+	for _, o := range img.Objects {
+		if o.Type != "vehicle" {
+			continue
+		}
 		meta.Vehicles = append(meta.Vehicles, filename.Vehicle{
-			Plate: v.Plate, PlateType: v.PlateType,
-			PlateCategory: v.PlateCategory, Type: v.Type, Color: v.Color,
+			Plate: str(o.Fields, "plate"), PlateType: str(o.Fields, "plate_type"),
+			PlateCategory: str(o.Fields, "plate_category"), Type: str(o.Fields, "type"), Color: str(o.Fields, "color"),
 		})
 	}
 	return meta
 }
 
-// DiffHistory gera uma entrada para cada campo que mudou.
+// setNonEmpty põe o valor no mapa só se não for vazio.
+func setNonEmpty(m map[string]any, key string, v any) {
+	switch x := v.(type) {
+	case string:
+		if x == "" {
+			return
+		}
+	case []string:
+		if len(x) == 0 {
+			return
+		}
+	case time.Time:
+		if x.IsZero() {
+			return
+		}
+	}
+	m[key] = v
+}
+
+func vehicleObject(plate, plateType, plateCategory, typ, color string) annotation.Object {
+	f := map[string]any{}
+	setNonEmpty(f, "plate", plate)
+	setNonEmpty(f, "plate_type", plateType)
+	setNonEmpty(f, "plate_category", plateCategory)
+	setNonEmpty(f, "type", typ)
+	setNonEmpty(f, "color", color)
+	return annotation.Object{Type: "vehicle", Fields: f}
+}
+
+func vehicleFields(equipment, camera, direction, resolution, angle, dayTime, imageRange, weather string, conditions []string, captured time.Time) map[string]any {
+	f := map[string]any{}
+	setNonEmpty(f, "equipment", equipment)
+	setNonEmpty(f, "camera", camera)
+	setNonEmpty(f, "direction", direction)
+	setNonEmpty(f, "resolution", resolution)
+	setNonEmpty(f, "capture_angle", angle)
+	setNonEmpty(f, "day_time", dayTime)
+	setNonEmpty(f, "image_range", imageRange)
+	setNonEmpty(f, "weather", weather)
+	setNonEmpty(f, "conditions", conditions)
+	setNonEmpty(f, "captured_at", captured)
+	return f
+}
+
+// ValuesFromMeta: o que o nome v2 diz, nos campos do perfil veiculos.
+func ValuesFromMeta(m filename.ImageMeta) annotation.Values {
+	v := annotation.Values{
+		Fields: vehicleFields(m.Equipment, m.Camera, m.Direction, m.Resolution, m.CaptureAngle,
+			m.DayTime, m.ImageRange, m.Weather, m.Conditions, m.CapturedAt),
+		Objects: []annotation.Object{},
+	}
+	for _, x := range m.Vehicles {
+		v.Objects = append(v.Objects, vehicleObject(x.Plate, x.PlateType, x.PlateCategory, x.Type, x.Color))
+	}
+	return v
+}
+
+// ValuesFromAnnotation: o que o import (CSV ou INI) descobriu, nos campos do
+// perfil veiculos (os perfis de import ainda escrevem nesses campos).
+func ValuesFromAnnotation(a importer.Annotation) annotation.Values {
+	var captured time.Time
+	if a.CapturedAt != nil {
+		captured = a.CapturedAt.UTC()
+	}
+	v := annotation.Values{
+		Fields: vehicleFields(a.Equipment, a.Camera, a.Direction, a.Resolution, a.CaptureAngle,
+			a.DayTime, a.ImageRange, a.Weather, a.Conditions, captured),
+		Objects: []annotation.Object{},
+	}
+	for _, x := range a.Vehicles {
+		v.Objects = append(v.Objects, vehicleObject(x.Plate, x.PlateType, x.PlateCategory, x.Type, x.Color))
+	}
+	return v
+}
+
+// ---------- import e histórico ----------
+
+// MergeAnnotation aplica no rascunho da imagem uma anotação que veio de fora
+// (já encaixada no perfil com o Fit). overwrite=false: só preenche o que está
+// vazio (respeita quem já anotou); os objetos só entram se a imagem não tem
+// nenhum. Devolve true se algo mudou.
+//
+// Nunca altera o mapa que a imagem já tinha (cria outro): quem chamou pode
+// estar guardando a imagem de antes para o histórico.
+func MergeAnnotation(img *Image, v annotation.Values, overwrite bool) bool {
+	fields := maps.Clone(img.Fields)
+	if fields == nil {
+		fields = map[string]any{}
+	}
+	changed := false
+	for k, val := range v.Fields {
+		cur, has := fields[k]
+		if (overwrite || !has) && !reflect.DeepEqual(cur, val) {
+			fields[k] = val
+			changed = true
+		}
+	}
+	img.Fields = fields
+	if len(v.Objects) > 0 && (overwrite || len(img.Objects) == 0) && !reflect.DeepEqual(img.Objects, v.Objects) {
+		img.Objects = append([]annotation.Object(nil), v.Objects...)
+		changed = true
+	}
+	return changed
+}
+
+// DiffHistory gera uma entrada para cada campo que mudou (o nome do campo do
+// perfil; os objetos vão juntos, como "objects").
 func DiffHistory(before, after *Image, user string) []HistoryEntry {
 	old, cur := trackedFields(before), trackedFields(after)
-	now := time.Now().UTC()
+	keys := map[string]bool{}
+	for k := range old {
+		keys[k] = true
+	}
+	for k := range cur {
+		keys[k] = true
+	}
+	sorted := make([]string, 0, len(keys))
+	for k := range keys {
+		sorted = append(sorted, k)
+	}
+	sort.Strings(sorted)
 
+	now := time.Now().UTC()
 	var entries []HistoryEntry
-	for field, newVal := range cur {
-		if !reflect.DeepEqual(old[field], newVal) {
+	for _, field := range sorted {
+		if !reflect.DeepEqual(old[field], cur[field]) {
 			entries = append(entries, HistoryEntry{
-				ImageID:   after.SHA1,
-				Field:     field,
-				Old:       old[field],
-				New:       newVal,
-				ChangedBy: user,
-				ChangedAt: now,
+				ImageID: after.SHA1, Field: field, Old: old[field], New: cur[field],
+				ChangedBy: user, ChangedAt: now,
 			})
 		}
 	}
@@ -134,118 +237,14 @@ func DiffHistory(before, after *Image, user string) []HistoryEntry {
 }
 
 func trackedFields(img *Image) map[string]any {
-	var captured any
-	if img.CapturedAt != nil {
-		captured = *img.CapturedAt
+	out := map[string]any{"status": img.Status, "file_name": img.FileName}
+	for k, v := range img.Fields {
+		out[k] = v
 	}
-	return map[string]any{
-		"status":        img.Status,
-		"file_name":     img.FileName,
-		"equipment":     img.Equipment,
-		"camera":        img.Camera,
-		"direction":     img.Direction,
-		"resolution":    img.Resolution,
-		"capture_angle": img.CaptureAngle,
-		"day_time":      img.DayTime,
-		"image_range":   img.ImageRange,
-		"weather":       img.Weather,
-		"conditions":    img.Conditions,
-		"captured_at":   captured,
-		"vehicles":      img.Vehicles,
+	var objects any
+	if len(img.Objects) > 0 {
+		objects = img.Objects
 	}
-}
-
-func applyMeta(img *Image, m filename.ImageMeta) {
-	img.PatternVersion = m.Version
-	img.Equipment = m.Equipment
-	img.Camera = m.Camera
-	img.Direction = m.Direction
-	img.Resolution = m.Resolution
-	img.CaptureAngle = m.CaptureAngle
-	img.DayTime = m.DayTime
-	img.ImageRange = m.ImageRange
-	img.Weather = m.Weather
-	img.Conditions = m.Conditions
-	img.CapturedAt = nil
-	if !m.CapturedAt.IsZero() { // posição vazia no nome = data desconhecida
-		t := m.CapturedAt
-		img.CapturedAt = &t
-	}
-	img.Vehicles = make([]Vehicle, 0, len(m.Vehicles))
-	for _, v := range m.Vehicles {
-		img.Vehicles = append(img.Vehicles, Vehicle{
-			Plate: v.Plate, PlateType: v.PlateType, PlateCategory: v.PlateCategory,
-			Type: v.Type, Color: v.Color,
-		})
-	}
-}
-
-// MergeAnnotation aplica o que o import descobriu no rascunho da imagem.
-// overwrite=false: só preenche o que está vazio (respeita quem já anotou).
-// Devolve true se algo mudou.
-func MergeAnnotation(img *Image, a importer.Annotation, overwrite bool) bool {
-	changed := false
-	set := func(dst *string, v string) {
-		if v != "" && *dst != v && (overwrite || *dst == "") {
-			*dst = v
-			changed = true
-		}
-	}
-	set(&img.Equipment, a.Equipment)
-	set(&img.Camera, a.Camera)
-	set(&img.Direction, a.Direction)
-	set(&img.Resolution, a.Resolution)
-	set(&img.CaptureAngle, a.CaptureAngle)
-	set(&img.DayTime, a.DayTime)
-	set(&img.ImageRange, a.ImageRange)
-	set(&img.Weather, a.Weather)
-
-	if len(a.Conditions) > 0 && (overwrite || len(img.Conditions) == 0) && !equalStrings(img.Conditions, a.Conditions) {
-		img.Conditions = append([]string(nil), a.Conditions...)
-		changed = true
-	}
-	if a.CapturedAt != nil && (overwrite || img.CapturedAt == nil) &&
-		(img.CapturedAt == nil || !img.CapturedAt.Equal(*a.CapturedAt)) {
-		t := *a.CapturedAt
-		img.CapturedAt = &t
-		changed = true
-	}
-	if len(a.Vehicles) > 0 && (overwrite || len(img.Vehicles) == 0) {
-		vehicles := make([]Vehicle, len(a.Vehicles))
-		for i, v := range a.Vehicles {
-			vehicles[i] = Vehicle{
-				Plate: v.Plate, PlateType: v.PlateType, PlateCategory: v.PlateCategory,
-				Type: v.Type, Color: v.Color,
-			}
-		}
-		if !equalVehicles(img.Vehicles, vehicles) {
-			img.Vehicles = vehicles
-			changed = true
-		}
-	}
-	return changed
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func equalVehicles(a, b []Vehicle) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
+	out["objects"] = objects
+	return out
 }

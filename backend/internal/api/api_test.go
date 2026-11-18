@@ -28,12 +28,13 @@ import (
 )
 
 type testEnv struct {
-	pingErr error           // o /health falha com este erro
-	cat     *catalog.Memory // pacotes, equipamentos e câmeras
-	box     *boxes.Memory   // tarefas e caixas
-	img     *images.Memory  // imagens e histórico
-	imp     *imports.Memory // perfis de import
-	exp     *exports.Memory // perfis de export
+	pingErr error              // o /health falha com este erro
+	cat     *catalog.Memory    // pacotes, equipamentos e câmeras
+	box     *boxes.Memory      // tarefas e caixas
+	img     *images.Memory     // imagens e histórico
+	imp     *imports.Memory    // perfis de import
+	exp     *exports.Memory    // perfis de export
+	ann     *annotation.Memory // perfis de anotação
 	srv     *Server
 	files   *files.Storage
 	root    string
@@ -53,8 +54,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	cat.Packages[testPkg] = catalog.Package{Name: testPkg}
 	img := images.NewMemory()
 	imp := imports.NewMemory()
-	imgSvc := images.New(img, fs, nil, imp)
-	svc := catalog.New(cat, fs, imgSvc)
+	ann := annotation.NewMemory()
+	annSvc := annotation.New(ann)
+	imgSvc := images.New(img, fs, nil, imp, annSvc)
+	svc := catalog.New(cat, fs, imgSvc, annSvc)
 	imgSvc.SetCatalog(svc)
 	box := boxes.NewMemory()
 	bx := boxes.New(box, imgSvc, fs, svc)
@@ -64,11 +67,17 @@ func newTestEnv(t *testing.T) *testEnv {
 	exp := exports.NewMemory()
 	expSvc := exports.New(exp, imgSvc, bx, svc, fs)
 	bx.Listen(expSvc)
-	env := &testEnv{cat: cat, box: box, img: img, imp: imp, exp: exp, files: fs, root: root}
+	env := &testEnv{cat: cat, box: box, img: img, imp: imp, exp: exp, ann: ann, files: fs, root: root}
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
-		annotation.New(annotation.NewMemory()))
+		annSvc)
 	env.handler = env.srv.Routes()
 	return env
+}
+
+// fv: o valor de um campo como texto ("" se não tem).
+func fv(fields map[string]any, key string) string {
+	s, _ := fields[key].(string)
+	return s
 }
 
 // do executa um request e devolve a resposta gravada.
@@ -155,6 +164,10 @@ func errorMsg(t *testing.T, rec *httptest.ResponseRecorder) string {
 // pkgFile é o caminho real de um arquivo dentro da pasta do pacote de teste.
 func (e *testEnv) pkgFile(name string) string {
 	return filepath.Join(e.root, "dataset", testPkg, name)
+}
+
+func (e *testEnv) pkgFile2(pkg, name string) string {
+	return filepath.Join(e.root, "dataset", pkg, name)
 }
 
 func sha1Of(s string) string {

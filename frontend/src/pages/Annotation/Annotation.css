@@ -320,3 +320,67 @@
 .annotation-field--unknown select {
   color: #9aa3b2;
 }
+
+/* ---- campos do perfil de anotação ---- */
+
+.annotation-field--invalid input {
+  border-color: #e11d48;
+  color: #9f1239;
+}
+
+.annotation-field__error {
+  color: #be123c;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.annotation-required {
+  color: #be123c;
+  font-style: normal;
+}
+
+/* multi: ocupa a linha toda, com uma opção por "chip" */
+.annotation-field--wide {
+  grid-column: 1 / -1;
+}
+
+.annotation-multi {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.annotation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid #dfe3eb;
+  border-radius: 999px;
+  color: #566177;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.annotation-chip input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+}
+
+.annotation-chip--on {
+  border-color: #5963d9;
+  color: #5963d9;
+  background: #eef0fd;
+}
+
+.annotation-object-type {
+  margin-top: 10px;
+}
+
+.annotation-problems {
+  margin: 12px 0 0;
+  padding-left: 22px;
+}

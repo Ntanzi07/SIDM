@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/platform"
 )
 
@@ -15,14 +17,16 @@ type Service struct {
 	repo      Repo
 	dirs      Dirs
 	images    Images
+	profiles  Profiles
 	listeners []PackageListener
 	now       func() time.Time
 }
 
 // New monta o catálogo. images pode ser nil só em testes que não mexem em
-// imagens.
-func New(repo Repo, dirs Dirs, images Images, listeners ...PackageListener) *Service {
-	return &Service{repo: repo, dirs: dirs, images: images, listeners: listeners, now: func() time.Time { return time.Now().UTC() }}
+// imagens; profiles nil aceita só o perfil padrão.
+func New(repo Repo, dirs Dirs, images Images, profiles Profiles, listeners ...PackageListener) *Service {
+	return &Service{repo: repo, dirs: dirs, images: images, profiles: profiles, listeners: listeners,
+		now: func() time.Time { return time.Now().UTC() }}
 }
 
 // Listen acrescenta quem quer ser avisado das mudanças de pacote. Existe
@@ -34,16 +38,72 @@ func (s *Service) Listen(l PackageListener) { s.listeners = append(s.listeners, 
 
 // CreatePackage cadastra o pacote (nome já sanitizado) e cria a pasta: um
 // pacote vazio também aparece no disco.
-func (s *Service) CreatePackage(ctx context.Context, name, user string) error {
-	if err := s.repo.CreatePackage(ctx, Package{Name: name, CreatedBy: user, CreatedAt: s.now()}); err != nil {
+// profile vazio = o perfil padrão.
+func (s *Service) CreatePackage(ctx context.Context, name, profile, user string) error {
+	profile, err := s.checkProfile(ctx, profile)
+	if err != nil {
+		return err
+	}
+	if err := s.repo.CreatePackage(ctx, Package{Name: name, Profile: profile, CreatedBy: user, CreatedAt: s.now()}); err != nil {
 		return err
 	}
 	return s.dirs.EnsurePackageDir(name)
 }
 
+// checkProfile confere que o perfil de anotação existe (vazio = o padrão).
+func (s *Service) checkProfile(ctx context.Context, profile string) (string, error) {
+	profile = strings.TrimSpace(profile)
+	if profile == "" || profile == annotation.DefaultProfile {
+		return annotation.DefaultProfile, nil
+	}
+	if s.profiles == nil {
+		return "", &InvalidError{fmt.Sprintf("perfil de anotação %q não existe", profile)}
+	}
+	if _, err := s.profiles.FindProfile(ctx, profile); errors.Is(err, platform.ErrNotFound) {
+		return "", &InvalidError{fmt.Sprintf("perfil de anotação %q não existe", profile)}
+	} else if err != nil {
+		return "", err
+	}
+	return profile, nil
+}
+
 // FindPackage busca um pacote (platform.ErrNotFound se não existe).
 func (s *Service) FindPackage(ctx context.Context, name string) (*Package, error) {
-	return s.repo.FindPackage(ctx, name)
+	p, err := s.repo.FindPackage(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	p.normalize()
+	return p, nil
+}
+
+// normalize: pacote de antes dos perfis usa o padrão.
+func (p *Package) normalize() {
+	if p.Profile == "" {
+		p.Profile = annotation.DefaultProfile
+	}
+}
+
+// SetPackageProfile troca o perfil de anotação do pacote. Só enquanto não
+// há imagem verificada: o nome do arquivo de uma verificada saiu dos campos
+// do perfil antigo. (As pendentes ficam com o rascunho; o que o perfil novo
+// não tiver é recusado ao salvar, e a pessoa corrige.)
+func (s *Service) SetPackageProfile(ctx context.Context, name, profile string) error {
+	if _, err := s.repo.FindPackage(ctx, name); err != nil {
+		return err
+	}
+	profile, err := s.checkProfile(ctx, profile)
+	if err != nil {
+		return err
+	}
+	progress, err := s.images.PackageProgress(ctx, []string{name})
+	if err != nil {
+		return err
+	}
+	if n := progress[name].Verified; n > 0 {
+		return &InvalidError{fmt.Sprintf("o pacote já tem %d imagens verificadas com o perfil atual: o perfil não pode mais ser trocado", n)}
+	}
+	return s.repo.SetPackageProfile(ctx, name, profile)
 }
 
 // ListPackages devolve uma página de pacotes com o progresso de cada um.
@@ -65,6 +125,7 @@ func (s *Service) ListPackages(ctx context.Context, q string, limit, skip int64)
 		return nil, 0, err
 	}
 	for _, p := range pkgs {
+		p.normalize()
 		out = append(out, PackageSummary{Package: p, Progress: progress[p.Name]})
 	}
 	return out, total, nil

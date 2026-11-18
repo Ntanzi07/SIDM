@@ -36,8 +36,32 @@ func completeBody(mods ...func(map[string]any)) string {
 	for _, m := range mods {
 		m(b)
 	}
-	out, _ := json.Marshal(b)
-	return string(out)
+	return string(annotationJSON(b))
+}
+
+// annotationJSON leva um corpo "plano" (os campos do perfil veiculos e
+// "vehicles", como era antes dos perfis) para o formato do PUT:
+// {"fields": {...}, "objects": [{"type": "vehicle", "fields": {...}}], "complete": ...}.
+func annotationJSON(flat map[string]any) []byte {
+	body := map[string]any{"fields": map[string]any{}, "objects": []any{}}
+	for k, v := range flat {
+		switch k {
+		case "complete":
+			body["complete"] = v
+		case "vehicles":
+			objs := []any{}
+			if vs, ok := v.([]map[string]string); ok {
+				for _, x := range vs {
+					objs = append(objs, map[string]any{"type": "vehicle", "fields": x})
+				}
+			}
+			body["objects"] = objs
+		default:
+			body["fields"].(map[string]any)[k] = v
+		}
+	}
+	out, _ := json.Marshal(body)
+	return out
 }
 
 func TestListImages(t *testing.T) {
@@ -62,14 +86,21 @@ func TestListImages(t *testing.T) {
 	_ = rec
 
 	f := full
-	if f.Package != testPkg || f.Status != "pending" || f.Equipment != "8003-MF4739" {
+	if f.Package != testPkg || f.Status != "pending" || f.Fields["equipment"] != "8003-MF4739" {
 		t.Errorf("filtro não repassado: %+v", f)
 	}
-	if f.Plate != "ABC1D23" {
-		t.Errorf("placa deveria ir em maiúscula: %q", f.Plate)
+	if f.Object["plate"] != "ABC1D23" {
+		t.Errorf("placa deveria ir em maiúscula: %q", f.Object["plate"])
 	}
 	if f.Limit != 500 || f.Skip != 0 {
 		t.Errorf("limit/skip deveriam ser limitados: limit=%d skip=%d", f.Limit, f.Skip)
+	}
+
+	// os filtros genéricos, de qualquer perfil
+	env.do("GET", "/images?fields.riders=2&objects.color=black&vehicle_type=car", nil, nil)
+	f = env.img.LastFilter
+	if f.Fields["riders"] != "2" || f.Object["color"] != "black" || f.Object["type"] != "car" {
+		t.Errorf("filtros genéricos: %+v", f)
 	}
 }
 
@@ -143,11 +174,11 @@ func TestAnnotateRascunho(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedPending(t, "conteudo")
 
-	rec := env.doJSON("PUT", "/images/"+sha, `{"equipment":"8003-MF4739","day_time":"night"}`)
+	rec := env.doJSON("PUT", "/images/"+sha, `{"fields": {"equipment":"8003-MF4739","day_time":"night"}}`)
 	assertStatus(t, rec, http.StatusOK)
 
 	img := env.img.Images[sha]
-	if img.Status != images.StatusPending || img.DayTime != "night" {
+	if img.Status != images.StatusPending || img.Fields["day_time"] != "night" {
 		t.Errorf("rascunho não salvo como pending: %+v", img)
 	}
 	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
@@ -176,11 +207,12 @@ func TestAnnotateCompleto(t *testing.T) {
 	if img.Path != "dataset/"+testPkg+"/"+wantName {
 		t.Errorf("path = %q", img.Path)
 	}
-	if img.Vehicles[0].Plate != "ABC1D23" {
-		t.Errorf("placa deveria ser salva em maiúscula: %q", img.Vehicles[0].Plate)
+	if img.Objects[0].Fields["plate"] != "ABC1D23" {
+		t.Errorf("placa deveria ser salva em maiúscula: %v", img.Objects[0].Fields["plate"])
 	}
-	if !img.CapturedAt.Equal(time.Date(2026, 9, 3, 11, 25, 23, 0, time.UTC)) {
-		t.Errorf("captured_at não convertido para UTC: %v", img.CapturedAt)
+	stored := env.img.Images[sha].Fields["captured_at"].(time.Time)
+	if !stored.Equal(time.Date(2026, 9, 3, 11, 25, 23, 0, time.UTC)) || stored.Location() != time.UTC {
+		t.Errorf("captured_at não convertido para UTC: %v", stored)
 	}
 
 	if _, err := os.Stat(env.pkgFile(wantName)); err != nil {
@@ -211,7 +243,7 @@ func TestAnnotateEditarVerificada(t *testing.T) {
 	assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody()), http.StatusOK)
 
 	t.Run("rascunho é recusado", func(t *testing.T) {
-		assertStatus(t, env.doJSON("PUT", "/images/"+sha, `{"day_time":"day"}`), http.StatusConflict)
+		assertStatus(t, env.doJSON("PUT", "/images/"+sha, `{"fields": {"day_time":"day"}}`), http.StatusConflict)
 	})
 
 	t.Run("completo renomeia de novo na pasta do pacote", func(t *testing.T) {
@@ -238,14 +270,16 @@ func TestAnnotateInvalido(t *testing.T) {
 		body    string
 		wantMsg string
 	}{
-		{"código desconhecido", completeBody(func(b map[string]any) { b["day_time"] = "tarde" }), "período"},
-		{"condição vazia na lista", completeBody(func(b map[string]any) { b["conditions"] = []string{"glare", ""} }), "condição vazia"},
+		{"opção desconhecida", completeBody(func(b map[string]any) { b["day_time"] = "tarde" }), "fields.day_time"},
+		{"condição desconhecida", completeBody(func(b map[string]any) { b["conditions"] = []string{"glare", "neve"} }), "fields.conditions"},
 		{"equipamento não cadastrado", completeBody(func(b map[string]any) { b["equipment"] = "9999-XX" }), "não cadastrado"},
 		{"câmera não cadastrada", completeBody(func(b map[string]any) { b["camera"] = "outra-cam" }), "não cadastrada"},
 		{"placa inválida", completeBody(func(b map[string]any) {
 			b["vehicles"] = []map[string]string{{"plate": "ABC", "plate_type": "br", "plate_category": "private", "type": "car", "color": "red"}}
-		}), "placa"},
-		{"campo com nome errado", `{"daytime":"night"}`, "unknown field"},
+		}), "objects[0].plate"},
+		{"campo fora do perfil", `{"fields": {"daytime":"night"}}`, "não existe no perfil"},
+		{"objeto fora do perfil", `{"objects": [{"type": "helmet", "fields": {}}]}`, "não existe no perfil"},
+		{"campo com nome errado", `{"feilds": {}}`, "unknown field"},
 		{"JSON quebrado", `{`, "JSON inválido"},
 	}
 	for _, tc := range cases {
@@ -290,8 +324,8 @@ func TestAnnotateImagemInexistente(t *testing.T) {
 }
 
 func TestDiffHistory(t *testing.T) {
-	before := &images.Image{SHA1: "x", Status: "pending", DayTime: "day", Conditions: []string{"glare"}}
-	after := &images.Image{SHA1: "x", Status: "pending", DayTime: "night", Conditions: []string{"glare"}}
+	before := &images.Image{SHA1: "x", Status: "pending", Fields: map[string]any{"day_time": "day", "conditions": []string{"glare"}}}
+	after := &images.Image{SHA1: "x", Status: "pending", Fields: map[string]any{"day_time": "night", "conditions": []string{"glare"}}}
 
 	entries := images.DiffHistory(before, after, "nathan")
 	if len(entries) != 1 {

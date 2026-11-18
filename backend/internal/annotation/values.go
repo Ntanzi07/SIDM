@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 )
@@ -75,7 +76,7 @@ func checkFields(ps *problems, base string, defs []Field, in map[string]any, com
 	for _, f := range defs {
 		known[f.Key] = true
 		path := base + "." + f.Key
-		v, err := f.clean(in[f.Key])
+		v, err := f.Clean(in[f.Key])
 		switch {
 		case err != nil:
 			ps.add(path, "%s", err)
@@ -93,8 +94,8 @@ func checkFields(ps *problems, base string, defs []Field, in map[string]any, com
 	return out
 }
 
-// clean confere e limpa UM valor. Devolve nil quando está vazio.
-func (f *Field) clean(v any) (any, error) {
+// Clean confere e limpa UM valor. Devolve nil quando está vazio.
+func (f *Field) Clean(v any) (any, error) {
 	if v == nil {
 		return nil, nil
 	}
@@ -182,6 +183,8 @@ func (f *Field) clean(v any) (any, error) {
 		switch t := v.(type) {
 		case time.Time:
 			return t.UTC(), nil
+		case interface{ Time() time.Time }: // a data do Mongo (bson.DateTime)
+			return t.Time().UTC(), nil
 		case string:
 			if t = strings.TrimSpace(t); t == "" {
 				return nil, nil
@@ -256,4 +259,53 @@ func number(v any) (float64, bool) {
 		return f, err == nil
 	}
 	return 0, false
+}
+
+// Fit encaixa no perfil uma anotação que veio de fora (import de CSV, INI,
+// nome v2 do arquivo): fica só o que o perfil tem e é válido; o resto sai e
+// vira aviso. Ao contrário do Check, nunca falha: um valor ruim não pode
+// derrubar o import das outras imagens.
+func (p *Profile) Fit(v Values) (Values, []string) {
+	out := Values{Fields: map[string]any{}, Objects: []Object{}}
+	var warnings []string
+	fit := func(where string, def func(string) (*Field, bool), in map[string]any) map[string]any {
+		clean := map[string]any{}
+		for _, k := range sortedKeys(in) {
+			f, ok := def(k)
+			if !ok {
+				if in[k] != nil && in[k] != "" {
+					warnings = append(warnings, fmt.Sprintf("%s%s: o perfil %s não tem este campo", where, k, p.Name))
+				}
+				continue
+			}
+			val, err := f.Clean(in[k])
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("%s%s: %v", where, k, err))
+				continue
+			}
+			if val != nil {
+				clean[k] = val
+			}
+		}
+		return clean
+	}
+	out.Fields = fit("", p.Field, v.Fields)
+	for _, o := range v.Objects {
+		t, ok := p.Object(o.Type)
+		if !ok || t.Box {
+			warnings = append(warnings, fmt.Sprintf("objeto %q: o perfil %s não tem este tipo (sem caixa)", o.Type, p.Name))
+			continue
+		}
+		out.Objects = append(out.Objects, Object{Type: o.Type, Fields: fit(o.Type+".", t.Field, o.Fields)})
+	}
+	return out, warnings
+}
+
+func sortedKeys(m map[string]any) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

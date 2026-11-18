@@ -1,6 +1,7 @@
 package images
 
 import (
+	"SIDM/internal/annotation"
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
 	"SIDM/internal/platform"
@@ -54,6 +55,12 @@ func handleCodes(w http.ResponseWriter, r *http.Request) {
 
 var sha1Re = regexp.MustCompile(`^[0-9a-f]{40}$`)
 
+// Os filtros de antes dos perfis (perfil veiculos).
+var (
+	legacyFields = map[string]bool{"equipment": true, "camera": true, "day_time": true, "weather": true, "direction": true}
+	legacyObject = map[string]string{"vehicle_type": "type", "vehicle_color": "color", "plate": "plate"}
+)
+
 // imageFromPath lê o {sha1} da URL e busca a imagem. Se der errado, já
 // escreve a resposta de erro e retorna ok=false.
 func (s *Service) imageFromPath(w http.ResponseWriter, r *http.Request) (*Image, bool) {
@@ -74,24 +81,43 @@ func (s *Service) imageFromPath(w http.ResponseWriter, r *http.Request) (*Image,
 	return img, true
 }
 
-// GET /images?package=...&status=pending&equipment=...&camera=...&day_time=...&weather=...
+// GET /images?package=...&status=pending&fields.<campo>=...&objects.<campo>=...&limit=50&skip=0
 //
-//	&direction=...&vehicle_type=...&vehicle_color=...&plate=...&limit=50&skip=0
+// fields.<campo>: um campo da imagem (numa lista, basta conter o valor).
+// objects.<campo>: todos valendo para o MESMO objeto (ex.: objects.type=truck
+// e objects.color=white é um caminhão branco).
+//
+// Os nomes de antes dos perfis continuam valendo: equipment, camera,
+// day_time, weather, direction (= fields.*) e vehicle_type, vehicle_color,
+// plate (= objects.type, objects.color, objects.plate).
 func (s *Service) handleListImages(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	f := ImageFilter{
-		Package:      q.Get("package"),
-		Status:       q.Get("status"),
-		Equipment:    q.Get("equipment"),
-		Camera:       q.Get("camera"),
-		DayTime:      q.Get("day_time"),
-		Weather:      q.Get("weather"),
-		Direction:    q.Get("direction"),
-		VehicleType:  q.Get("vehicle_type"),
-		VehicleColor: q.Get("vehicle_color"),
-		Plate:        strings.ToUpper(q.Get("plate")),
-		Limit:        platform.IntParam(q, "limit", 50, 1, 500),
-		Skip:         platform.IntParam(q, "skip", 0, 0, 1<<31),
+		Package: q.Get("package"),
+		Status:  q.Get("status"),
+		Fields:  map[string]string{},
+		Object:  map[string]string{},
+		Limit:   platform.IntParam(q, "limit", 50, 1, 500),
+		Skip:    platform.IntParam(q, "skip", 0, 0, 1<<31),
+	}
+	for key, vals := range q {
+		v := strings.TrimSpace(vals[0])
+		if v == "" {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(key, "fields."):
+			f.Fields[strings.TrimPrefix(key, "fields.")] = v
+		case strings.HasPrefix(key, "objects."):
+			f.Object[strings.TrimPrefix(key, "objects.")] = v
+		case legacyFields[key]:
+			f.Fields[key] = v
+		case legacyObject[key] != "":
+			f.Object[legacyObject[key]] = v
+		}
+	}
+	if p, ok := f.Object["plate"]; ok {
+		f.Object["plate"] = strings.ToUpper(p) // placa é guardada em maiúsculas
 	}
 
 	items, total, err := s.repo.ListImages(r.Context(), f)
@@ -202,13 +228,26 @@ func (s *Service) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A anotação passa pelo perfil do pacote: limpa (espaços, maiúsculas,
+	// datas em UTC) e, ao verificar, cobra os obrigatórios.
+	profile, err := s.ProfileOf(r.Context(), img.Package)
+	if err != nil {
+		platform.ServerError(w, err)
+		return
+	}
+	clean, err := profile.Check(annotation.Values{Fields: req.Fields, Objects: req.Objects}, req.Complete)
+	if err != nil {
+		writeProblems(w, err)
+		return
+	}
+
 	before := *img // cópia para o histórico, para desfazer e para o optimistic locking
-	req.applyTo(img)
+	img.Fields, img.Objects = clean.Fields, clean.Objects
 	img.UpdatedAt = now
 
 	moved := false
 	if req.Complete {
-		name, msg := s.finalName(r, img)
+		name, version, msg := s.finalName(r.Context(), img, profile)
 		if msg != "" {
 			platform.WriteError(w, http.StatusBadRequest, msg)
 			return
@@ -224,7 +263,7 @@ func (s *Service) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 		img.Path = newPath
 		img.FileName = name
 		img.Status = StatusVerified
-		img.PatternVersion = filename.CurrentVersion
+		img.PatternVersion = version
 		img.ClaimedBy, img.ClaimedUntil = "", nil // verificada sai da fila
 	} else if img.ClaimedBy == user {
 		until := now.Add(claimLease) // salvar rascunho renova o prazo
@@ -249,6 +288,17 @@ func (s *Service) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	platform.WriteJSON(w, http.StatusOK, img)
+}
+
+// writeProblems: o erro do Check do perfil, com a lista de problemas
+// (cada um com o caminho do campo, para a tela marcar).
+func writeProblems(w http.ResponseWriter, err error) {
+	var invalid *annotation.InvalidError
+	if errors.As(err, &invalid) {
+		platform.WriteJSON(w, http.StatusBadRequest, map[string]any{"error": invalid.Msg, "problems": invalid.Problems})
+		return
+	}
+	platform.ServerError(w, err)
 }
 
 type existsRequest struct {
@@ -420,13 +470,17 @@ func (s *Service) handleReopen(w http.ResponseWriter, r *http.Request) {
 
 	moved := false
 	if img.Status == StatusVerified {
+		// Sem modelo de nome (perfil que não é o veiculos), a verificada já
+		// se chama <sha1>.ext: não há o que mover.
 		pendingPath := files.PendingPath(img.Package, img.SHA1, img.Ext)
-		if err := s.files.Move(img.Path, pendingPath); err != nil {
-			platform.ServerError(w, err)
-			return
+		if pendingPath != img.Path {
+			if err := s.files.Move(img.Path, pendingPath); err != nil {
+				platform.ServerError(w, err)
+				return
+			}
+			moved = true
 		}
-		moved = true
-		img.Path, img.FileName, img.Status = pendingPath, "", StatusPending
+		img.Path, img.FileName, img.Status, img.PatternVersion = pendingPath, "", StatusPending, ""
 	}
 
 	if err := s.repo.ReplaceImage(r.Context(), img, before.UpdatedAt); err != nil {
@@ -440,7 +494,7 @@ func (s *Service) handleReopen(w http.ResponseWriter, r *http.Request) {
 		platform.ServerError(w, err)
 		return
 	}
-	if moved {
+	if before.Status != img.Status { // reabriu uma verificada: vai para o histórico
 		if err := s.repo.InsertHistory(r.Context(), DiffHistory(&before, img, user)); err != nil {
 			platform.LogError(err)
 		}

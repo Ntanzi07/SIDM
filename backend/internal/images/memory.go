@@ -1,10 +1,13 @@
 package images
 
 import (
+	"SIDM/internal/annotation"
 	"SIDM/internal/catalog"
 	"SIDM/internal/importer"
 	"SIDM/internal/platform"
 	"context"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -112,6 +115,7 @@ func (m *Memory) FindImage(ctx context.Context, sha1 string) (*Image, error) {
 	if !ok {
 		return nil, platform.ErrNotFound
 	}
+	img.ensureValues()
 	return &img, nil
 }
 
@@ -162,6 +166,7 @@ func (m *Memory) ClaimNext(ctx context.Context, pkg, user, skip string, lease ti
 	best.ClaimedBy, best.ClaimedUntil = user, &until
 	m.Images[best.SHA1] = *best
 	out := *best
+	out.ensureValues()
 	return &out, nil
 }
 
@@ -187,9 +192,8 @@ func (m *Memory) ListImages(ctx context.Context, f ImageFilter) ([]Image, int64,
 	out := []Image{}
 	for _, img := range m.Images {
 		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
-			(f.Equipment == "" || img.Equipment == f.Equipment) && (f.Camera == "" || img.Camera == f.Camera) &&
-			(f.DayTime == "" || img.DayTime == f.DayTime) && (f.Weather == "" || img.Weather == f.Weather) &&
-			(f.Direction == "" || img.Direction == f.Direction) {
+			matchFields(img.Fields, f.Fields) && matchObject(img.Objects, f.Object) {
+			img.ensureValues()
 			out = append(out, img)
 		}
 	}
@@ -233,17 +237,43 @@ func (m *Memory) FindImagesByKeys(ctx context.Context, pkg, by string, keys []st
 			k = img.SHA1
 		}
 		if (pkg == "" || img.Package == pkg) && want[k] {
+			img.ensureValues()
 			out = append(out, img)
 		}
 	}
 	return out, nil
 }
 
-func imageField(img *Image, reg catalog.Registry) *string {
-	if reg == catalog.Cameras {
-		return &img.Camera
+// matchFields: igual ao Mongo, numa lista basta conter o valor.
+func matchFields(have map[string]any, want map[string]string) bool {
+	for k, v := range want {
+		switch x := have[k].(type) {
+		case string:
+			if x != v {
+				return false
+			}
+		case []string:
+			if !slices.Contains(x, v) {
+				return false
+			}
+		default:
+			return false
+		}
 	}
-	return &img.Equipment
+	return true
+}
+
+// matchObject: algum objeto tem TODOS os valores ($elemMatch).
+func matchObject(objs []annotation.Object, want map[string]string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	for _, o := range objs {
+		if matchFields(o.Fields, want) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Memory) CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error) {
@@ -251,7 +281,7 @@ func (m *Memory) CountUsing(ctx context.Context, reg catalog.Registry, name stri
 	defer m.mu.Unlock()
 	var n int64
 	for _, img := range m.Images {
-		if *imageField(&img, reg) == name {
+		if img.Fields[reg.ImageField()] == name {
 			n++
 		}
 	}
@@ -263,8 +293,9 @@ func (m *Memory) RenameOnPending(ctx context.Context, reg catalog.Registry, oldN
 	defer m.mu.Unlock()
 	var n int64
 	for id, img := range m.Images {
-		if f := imageField(&img, reg); *f == oldName && img.Status == StatusPending {
-			*f, img.UpdatedAt = newName, now
+		if img.Fields[reg.ImageField()] == oldName && img.Status == StatusPending {
+			img.Fields = maps.Clone(img.Fields)
+			img.Fields[reg.ImageField()], img.UpdatedAt = newName, now
 			m.Images[id] = img
 			n++
 		}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
@@ -64,6 +65,7 @@ func (m *MongoRepo) FindImage(ctx context.Context, sha1 string) (*Image, error) 
 	if err != nil {
 		return nil, fmt.Errorf("buscar imagem %s: %w", sha1, err)
 	}
+	img.fromBSON()
 	return &img, nil
 }
 
@@ -98,29 +100,72 @@ func (f ImageFilter) toBSON() bson.D {
 	}
 	add("package", f.Package)
 	add("status", f.Status)
-	add("equipment", f.Equipment)
-	add("camera", f.Camera)
-	add("day_time", f.DayTime)
-	add("weather", f.Weather)
-	add("direction", f.Direction)
+	for _, k := range sortedKeys(f.Fields) {
+		add("fields."+k, f.Fields[k]) // numa lista, o Mongo casa se ela contém o valor
+	}
 
-	// Filtros de veículo usam $elemMatch: todas as condições precisam valer
-	// para o MESMO veículo. Sem isso, "caminhão branco" traria uma imagem
+	// Os filtros de objeto usam $elemMatch: todas as condições precisam valer
+	// para o MESMO objeto. Sem isso, "caminhão branco" traria uma imagem
 	// com um caminhão preto e um carro branco.
-	vehicle := bson.D{}
-	if f.VehicleType != "" {
-		vehicle = append(vehicle, bson.E{Key: "type", Value: f.VehicleType})
-	}
-	if f.VehicleColor != "" {
-		vehicle = append(vehicle, bson.E{Key: "color", Value: f.VehicleColor})
-	}
-	if f.Plate != "" {
-		vehicle = append(vehicle, bson.E{Key: "plate", Value: f.Plate})
-	}
-	if len(vehicle) > 0 {
-		filter = append(filter, bson.E{Key: "vehicles", Value: bson.D{{Key: "$elemMatch", Value: vehicle}}})
+	if len(f.Object) > 0 {
+		obj := bson.D{}
+		for _, k := range sortedKeys(f.Object) {
+			obj = append(obj, bson.E{Key: "fields." + k, Value: f.Object[k]})
+		}
+		filter = append(filter, bson.E{Key: "objects", Value: bson.D{{Key: "$elemMatch", Value: obj}}})
 	}
 	return filter
+}
+
+func sortedKeys(m map[string]string) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// fromBSON troca os tipos que o Mongo devolve dentro de fields/objects pelos
+// mesmos que o Check do perfil produz ([]string, time.Time, float64). Assim
+// a imagem lida do banco e a recém-anotada são comparáveis (o histórico não
+// acusa mudança onde não houve) e o JSON sai igual.
+func (img *Image) fromBSON() {
+	img.ensureValues()
+	for k, v := range img.Fields {
+		img.Fields[k] = bsonValue(v)
+	}
+	for i := range img.Objects {
+		for k, v := range img.Objects[i].Fields {
+			img.Objects[i].Fields[k] = bsonValue(v)
+		}
+	}
+}
+
+func bsonValue(v any) any {
+	switch x := v.(type) {
+	case bson.A:
+		strs := make([]string, 0, len(x))
+		for _, e := range x {
+			s, ok := e.(string)
+			if !ok {
+				out := make([]any, len(x))
+				for i, e := range x {
+					out[i] = bsonValue(e)
+				}
+				return out
+			}
+			strs = append(strs, s)
+		}
+		return strs
+	case bson.DateTime:
+		return x.Time().UTC()
+	case int32:
+		return float64(x)
+	case int64:
+		return float64(x)
+	}
+	return v
 }
 
 // ListImages devolve uma página de resultados e o total que bate com o filtro.
@@ -146,6 +191,9 @@ func (m *MongoRepo) ListImages(ctx context.Context, f ImageFilter) ([]Image, int
 	items := []Image{}
 	if err := cur.All(ctx, &items); err != nil {
 		return nil, 0, fmt.Errorf("ler imagens: %w", err)
+	}
+	for i := range items {
+		items[i].fromBSON()
 	}
 	return items, total, nil
 }
@@ -272,6 +320,7 @@ func claimOne(ctx context.Context, coll *mongo.Collection, filter, update bson.D
 	if err != nil {
 		return nil, fmt.Errorf("pegar próxima imagem: %w", err)
 	}
+	img.fromBSON()
 	return &img, nil
 }
 
@@ -401,7 +450,7 @@ func (m *MongoRepo) DeletePackageImages(ctx context.Context, name string) (int64
 
 // CountUsing conta as imagens (de qualquer status) que usam o item.
 func (m *MongoRepo) CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error) {
-	n, err := m.db.Collection("images").CountDocuments(ctx, bson.D{{Key: reg.ImageField(), Value: name}})
+	n, err := m.db.Collection("images").CountDocuments(ctx, bson.D{{Key: "fields." + reg.ImageField(), Value: name}})
 	if err != nil {
 		return 0, fmt.Errorf("contar imagens com %s %s: %w", reg.ImageField(), name, err)
 	}
@@ -413,7 +462,7 @@ func (m *MongoRepo) CountUsing(ctx context.Context, reg catalog.Registry, name s
 // então basta o banco. O updated_at muda junto: quem estiver com a imagem
 // aberta recebe 409 ao salvar, e recarrega com o nome novo.
 func (m *MongoRepo) RenameOnPending(ctx context.Context, reg catalog.Registry, oldName, newName string, now time.Time) (int64, error) {
-	field := reg.ImageField()
+	field := "fields." + reg.ImageField()
 	res, err := m.db.Collection("images").UpdateMany(ctx,
 		bson.D{{Key: field, Value: oldName}, {Key: "status", Value: StatusPending}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: field, Value: newName}, {Key: "updated_at", Value: now}}}})
@@ -482,6 +531,9 @@ func (m *MongoRepo) FindImagesByKeys(ctx context.Context, pkg, by string, keys [
 		var imgs []Image
 		if err := cur.All(ctx, &imgs); err != nil {
 			return nil, fmt.Errorf("ler imagens do import: %w", err)
+		}
+		for i := range imgs {
+			imgs[i].fromBSON()
 		}
 		out = append(out, imgs...)
 	}

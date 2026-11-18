@@ -1,25 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
-import { annotationOptions } from '../../data/annotationOptions'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
-import { getImage, listPackageImages, reopenImage } from '../../services/api'
-import type { ImageDetail } from '../../types/annotation'
+import { getAnnotationProfile, getImage, getPackage, listPackageImages, reopenImage } from '../../services/api'
+import type { AnnotationProfile, ImageDetail } from '../../types/annotation'
+import { displayValue, fieldLabel } from '../../utils/annotationForm'
 import './Viewer.css'
-
-type Options = readonly (readonly [string, string])[]
-
-// Valor da API -> rótulo em português ("rear" -> "Traseira").
-function labelOf(options: Options, value: string | undefined): string {
-  if (!value) return 'Não informado'
-  return options.find(([option]) => option === value)?.[1] ?? value
-}
-
-function formatDate(iso: string | undefined): string {
-  if (!iso) return 'Não informado'
-  const date = new Date(iso)
-  return Number.isNaN(date.getTime()) ? iso : date.toLocaleString('pt-BR')
-}
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
@@ -43,12 +29,23 @@ export function ImageViewerPage() {
   const index = Math.max(0, Number.parseInt(searchParams.get('i') ?? '0', 10) || 0)
 
   const [image, setImage] = useState<ImageDetail | null>(null)
+  const [profile, setProfile] = useState<AnnotationProfile | null>(null)
   const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [confirmEdit, setConfirmEdit] = useState(false)
   const [reopening, setReopening] = useState(false)
   const boxSets = useImageBoxes(image?.sha1)
+
+  // O perfil do pacote: os nomes dos campos e das opções.
+  useEffect(() => {
+    let active = true
+    getPackage(packageName)
+      .then((summary) => (summary ? getAnnotationProfile(summary.profile) : null))
+      .then((p) => { if (active) setProfile(p) })
+      .catch(() => { /* sem o perfil, mostra as chaves e os valores crus */ })
+    return () => { active = false }
+  }, [packageName])
 
   useEffect(() => {
     let active = true
@@ -145,38 +142,31 @@ export function ImageViewerPage() {
             </div>
 
             <div className="viewer-fields">
-              <Field label="Equipamento" value={image.equipment || 'Não informado'} />
-              <Field label="Câmera" value={image.camera || 'Não informado'} />
-              <Field label="Data e hora" value={formatDate(image.captured_at)} />
-              <Field label="Direção" value={labelOf(annotationOptions.direction, image.direction)} />
-              <Field label="Resolução" value={image.resolution || 'Não informado'} />
-              <Field label="Ângulo" value={labelOf(annotationOptions.capture_angle, image.capture_angle)} />
-              <Field label="Período" value={labelOf(annotationOptions.day_time, image.day_time)} />
-              <Field label="Alcance" value={labelOf(annotationOptions.image_range, image.image_range)} />
-              <Field label="Clima" value={labelOf(annotationOptions.weather, image.weather)} />
-              <Field
-                label="Condições"
-                value={image.conditions?.length ? image.conditions.map((c) => labelOf(annotationOptions.condition, c)).join(', ') : 'Não informado'}
-              />
+              {(profile?.fields ?? Object.keys(image.fields).map((key) => ({ key, type: 'text' as const }))).map((field) => (
+                <Field key={field.key} label={fieldLabel(field)} value={displayValue(field, image.fields[field.key])} />
+              ))}
             </div>
 
-            <h3>Veículos</h3>
-            {image.vehicles?.length ? image.vehicles.map((vehicle, i) => (
-              <div className="viewer-vehicle" key={i}>
-                <strong>{vehicle.plate || 'Placa não informada'}</strong>
-                <span>
-                  {[
-                    labelOf(annotationOptions.type, vehicle.type),
-                    labelOf(annotationOptions.plate_type, vehicle.plate_type),
-                    labelOf(annotationOptions.plate_category, vehicle.plate_category),
-                    labelOf(annotationOptions.color, vehicle.color),
-                  ].join(' · ')}
-                </span>
-              </div>
-            )) : <p className="viewer-empty">Nenhum veículo.</p>}
+            {(profile?.objects ?? []).filter((type) => !type.box).map((type) => {
+              const objects = image.objects.filter((object) => object.type === type.key)
+              return (
+                <div key={type.key}>
+                  <h3>{fieldLabel(type)}</h3>
+                  {objects.length ? objects.map((object, i) => {
+                    const [first, ...rest] = type.fields
+                    return (
+                      <div className="viewer-vehicle" key={i}>
+                        <strong>{first ? `${displayValue(first, object.fields[first.key]).replace('Não informado', `${fieldLabel(first)} não informado(a)`)}` : `${fieldLabel(type)} ${i + 1}`}</strong>
+                        <span>{rest.map((field) => displayValue(field, object.fields[field.key])).join(' · ')}</span>
+                      </div>
+                    )
+                  }) : <p className="viewer-empty">Nenhum(a).</p>}
+                </div>
+              )
+            })}
 
             {image.file_name && (
-              <p className="viewer-filename" title="Nome do arquivo no padrão v2">{image.file_name}</p>
+              <p className="viewer-filename" title={image.pattern_version ? 'Nome do arquivo no padrão v2' : 'Nome do arquivo'}>{image.file_name}</p>
             )}
           </div>
         </div>
@@ -191,7 +181,7 @@ export function ImageViewerPage() {
             <div className="modal-body">
               <p>
                 A imagem volta para <strong>pendente</strong> e abre na tela de anotação, reservada para você.
-                O arquivo perde o nome v2 até ser verificada de novo. A anotação atual fica como rascunho e as
+                O arquivo perde o nome final até ser verificada de novo. A anotação atual fica como rascunho e as
                 caixas do CVAT não mudam.
               </p>
             </div>

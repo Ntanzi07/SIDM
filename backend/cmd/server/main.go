@@ -53,9 +53,30 @@ func main() {
 	// com os outros pelos Services. Os Listen são as cascatas: quem guarda o
 	// nome de um pacote, imagem ou tarefa é avisado quando ele muda.
 	db := client.Database(mongoDB)
+
+	// Os perfis de anotação vêm primeiro: o catálogo (cada pacote tem um) e
+	// as imagens (cada anotação passa por ele) dependem deles.
+	annRepo := annotation.NewMongoRepo(db)
+	if err := annRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar os perfis de anotação no Mongo: %v", err)
+	}
+	ann := annotation.New(annRepo)
+
+	// As imagens de antes dos perfis vão para fields/objects (uma vez só:
+	// nas próximas subidas não há mais nada para migrar).
+	imgRepo := images.NewMongoRepo(db)
+	if n, err := imgRepo.Migrate(ctx); err != nil {
+		log.Fatalf("falha ao migrar as imagens: %v", err)
+	} else if n > 0 {
+		log.Printf("%d imagens migradas para os campos do perfil de anotação", n)
+	}
+	if err := imgRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar as imagens no Mongo: %v", err)
+	}
+
 	impRepo := imports.NewMongoRepo(db)
-	img := images.New(images.NewMongoRepo(db), fs, nil, impRepo) // impRepo: o perfil jpeg-ini do upload
-	cat := catalog.New(catalog.NewMongoRepo(db), fs, img)
+	img := images.New(imgRepo, fs, nil, impRepo, ann) // impRepo: o perfil jpeg-ini do upload
+	cat := catalog.New(catalog.NewMongoRepo(db), fs, img, ann)
 	img.SetCatalog(cat)
 
 	boxRepo := boxes.NewMongoRepo(db)
@@ -74,12 +95,6 @@ func main() {
 	}
 	exp := exports.New(expRepo, img, bx, cat, fs)
 	bx.Listen(exp) // os perfis de export guardam a tarefa
-
-	annRepo := annotation.NewMongoRepo(db)
-	if err := annRepo.EnsureIndexes(ctx); err != nil {
-		log.Fatalf("falha ao preparar os perfis de anotação no Mongo: %v", err)
-	}
-	ann := annotation.New(annRepo)
 
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
 	srv := api.New(ping, cat, img, bx, imp, exp, ann)

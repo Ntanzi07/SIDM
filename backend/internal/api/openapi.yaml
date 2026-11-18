@@ -35,8 +35,8 @@ tags:
       O que se anota em cada imagem: os **campos da imagem** e os **tipos de
       objeto** (cada um com os seus campos; com caixa, o tipo é uma label do
       CVAT). O padrão `veiculos` reproduz os campos de sempre, com os códigos do
-      nome v2. Por enquanto é só o cadastro e a validação: os próximos passos
-      ligam o perfil ao pacote, às imagens, ao import e ao export.
+      nome v2. Cada pacote tem um perfil (`profile`), e as imagens guardam a
+      anotação em `fields` e `objects`.
   - name: caixas
     description: |
       Caixas (bounding boxes) anotadas no CVAT, por **tarefa** (ex.: `capacete`,
@@ -256,33 +256,58 @@ paths:
     post:
       tags: [pacotes]
       summary: Criar pacote
-      description: O nome vira nome de pasta no servidor, por isso é sanitizado. A pasta é criada na hora.
+      description: |
+        O nome vira nome de pasta no servidor, por isso é sanitizado. A pasta é
+        criada na hora. `profile` é o perfil de anotação das imagens (sem ele, o
+        padrão `veiculos`).
       parameters:
         - $ref: "#/components/parameters/XUser"
-      requestBody: { $ref: "#/components/requestBodies/Name" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PackageBody" }
+            example: { name: Motos Setembro, profile: capacete-moto }
       responses:
-        "201": { $ref: "#/components/responses/NameCreated" }
+        "201":
+          description: Criado; o nome já sanitizado e o perfil.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string, example: Motos-Setembro }
+                  profile: { type: string, example: capacete-moto }
         "400": { $ref: "#/components/responses/BadRequest" }
         "409": { $ref: "#/components/responses/Conflict" }
 
   /packages/{name}:
     patch:
       tags: [pacotes]
-      summary: Renomear pacote
-      description: Renomeia a pasta no servidor, o cadastro e o caminho de todas as imagens. O nome dos arquivos não muda.
+      summary: Renomear pacote ou trocar o perfil
+      description: |
+        `name`: renomeia a pasta no servidor, o cadastro e o caminho de todas as
+        imagens (o nome dos arquivos não muda). `profile`: troca o perfil de
+        anotação, **só enquanto o pacote não tem imagem verificada** (o nome do
+        arquivo delas saiu do perfil atual). Com os dois, o perfil vai primeiro.
       parameters:
         - $ref: "#/components/parameters/PackageName"
-      requestBody: { $ref: "#/components/requestBodies/Name" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PackageBody" }
       responses:
         "200":
-          description: Renomeado.
+          description: Alterado.
           content:
             application/json:
               schema:
                 type: object
                 properties:
                   name: { type: string }
-                  images: { type: integer }
+                  profile: { type: string }
+                  images: { type: integer, description: Imagens levadas para o nome novo. }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
@@ -870,11 +895,21 @@ paths:
       tags: [imagens]
       summary: Buscar imagens
       description: |
-        Filtros de veículo valem para o **mesmo** veículo: "caminhão branco" não
-        traz uma imagem com um caminhão preto e um carro branco.
+        Filtros pelos campos do perfil de anotação: `fields.<campo>=valor` (um
+        campo da imagem; numa lista, basta conter o valor) e
+        `objects.<campo>=valor` (os de objeto valem para o **mesmo** objeto:
+        `objects.type=truck&objects.color=white` não traz uma imagem com um
+        caminhão preto e um carro branco). Ex.: `fields.day_time=night`.
+
+        Os nomes de antes dos perfis continuam valendo: `equipment`, `camera`,
+        `day_time`, `weather` e `direction` (= `fields.*`), e `vehicle_type`,
+        `vehicle_color` e `plate` (= `objects.type`, `objects.color`,
+        `objects.plate`).
       parameters:
         - { name: package, in: query, schema: { type: string } }
         - { name: status, in: query, schema: { type: string, enum: [pending, verified] } }
+        - { name: fields.day_time, in: query, description: "Exemplo de fields.<campo>.", schema: { type: string } }
+        - { name: objects.color, in: query, description: "Exemplo de objects.<campo>.", schema: { type: string } }
         - { name: equipment, in: query, schema: { type: string } }
         - { name: camera, in: query, schema: { type: string } }
         - { name: day_time, in: query, schema: { type: string } }
@@ -999,16 +1034,20 @@ paths:
       tags: [imagens]
       summary: Salvar rascunho ou verificar
       description: |
-        Substitui **todos** os campos de anotação.
+        Substitui **toda** a anotação: os campos (`fields`) e os objetos sem
+        caixa (`objects`), pelo **perfil de anotação do pacote**.
 
         - `complete: false`: salva o rascunho (continua pending, não renomeia).
-        - `complete: true`: valida tudo, renomeia para o padrão v2 e marca verified.
+        - `complete: true`: valida tudo (inclusive os campos obrigatórios do
+          perfil), renomeia o arquivo e marca verified.
 
-        **Nenhum campo é obrigatório.** O que a imagem não tem, ou não dá para
-        conferir (sem data, placa ilegível, câmera desconhecida, nenhum veículo),
-        fica vazio (`""`, `null` ou lista vazia) e vira uma **posição vazia** no
-        nome v2. O que vem preenchido tem que ser válido (código existente, placa
-        com 7 caracteres, equipamento/câmera cadastrados).
+        O que vem preenchido tem que ser válido no perfil; os erros voltam todos
+        juntos em `problems`, cada um com o caminho (ex.: `fields.day_time`,
+        `objects[0].plate`). Equipamento e câmera precisam estar cadastrados.
+
+        **Nome do arquivo:** no perfil `veiculos`, o padrão v2 (o que não se sabe
+        vira uma posição vazia). Nos outros perfis o arquivo continua
+        `<sha1>.ext` (o modelo de nome por perfil ainda vai entrar).
 
         Usa optimistic locking: se alguém gravou no meio, responde 409.
       parameters:
@@ -1025,7 +1064,7 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Image" }
-        "400": { $ref: "#/components/responses/BadRequest" }
+        "400": { $ref: "#/components/responses/Problems" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409": { $ref: "#/components/responses/Conflict" }
     delete:
@@ -1402,6 +1441,7 @@ components:
         type: { type: string, enum: [choice, multi, text, number, bool, datetime, ref] }
         required: { type: boolean, description: Obrigatório para verificar. }
         help: { type: string }
+        default: { description: "O valor que a tela já traz numa imagem sem rascunho (tem que ser válido no campo)." }
         options:
           type: array
           description: "choice e multi. `code` é a forma curta no nome do arquivo (se uma opção tem, todas têm)."
@@ -1743,15 +1783,6 @@ components:
           description: sha1 das imagens que não deu para renomear agora.
         complete: { type: boolean, description: "false: repita o pedido para terminar." }
 
-    Vehicle:
-      type: object
-      properties:
-        plate: { type: string, example: ABC1D23 }
-        plate_type: { type: string, example: mercosul }
-        plate_category: { type: string, example: private }
-        type: { type: string, example: truck }
-        color: { type: string, example: white }
-
     Image:
       type: object
       properties:
@@ -1764,22 +1795,20 @@ components:
         ext: { type: string }
         size: { type: integer }
         encryption: { type: string, description: "Se o arquivo chegou criptografado, o formato aberto (ex. rc4-legacy)." }
-        pattern_version: { type: string }
-        equipment: { type: string }
-        camera: { type: string }
-        direction: { type: string }
-        resolution: { type: string }
-        capture_angle: { type: string }
-        day_time: { type: string }
-        image_range: { type: string }
-        weather: { type: string }
-        conditions:
+        pattern_version: { type: string, description: '"v2" quando o arquivo tem o nome v2 (perfil veiculos).' }
+        fields:
+          type: object
+          additionalProperties: true
+          description: Os campos da imagem, pelo perfil de anotação do pacote.
+          example: { equipment: 8003-MF4739, direction: rear, day_time: night, conditions: [glare], captured_at: "2026-09-03T11:25:23Z" }
+        objects:
           type: array
-          items: { type: string }
-        captured_at: { type: string, format: date-time }
-        vehicles:
-          type: array
-          items: { $ref: "#/components/schemas/Vehicle" }
+          description: Os objetos sem caixa (ex. os veículos).
+          items:
+            type: object
+            properties:
+              type: { type: string, example: vehicle }
+              fields: { type: object, additionalProperties: true, example: { plate: ABC1D23, type: truck, color: white } }
         ini:
           type: array
           description: O INI embutido no arquivo, na ordem original (sem a assinatura).
@@ -1798,48 +1827,37 @@ components:
         value: { type: string, example: GGB5H24 }
 
     AnnotationRequest:
+      allOf:
+        - $ref: "#/components/schemas/AnnotationValues"
+        - type: object
+          properties:
+            complete:
+              type: boolean
+              description: "false: rascunho. true: verifica (cobra os obrigatórios) e renomeia o arquivo."
+      example:
+        fields:
+          equipment: 8003-MF4739
+          camera: hikvision-233
+          direction: front
+          resolution: 1920x1080
+          day_time: day
+          conditions: [no_damage]
+          captured_at: "2026-09-03T08:25:23-03:00"
+        objects:
+          - { type: vehicle, fields: { plate: ABC1D23, plate_type: mercosul, plate_category: private, type: truck, color: white } }
+        complete: true
+
+    PackageBody:
       type: object
       properties:
-        equipment: { type: string }
-        camera: { type: string }
-        direction: { type: string }
-        resolution: { type: string }
-        capture_angle: { type: string }
-        day_time: { type: string }
-        image_range: { type: string }
-        weather: { type: string }
-        conditions:
-          type: array
-          items: { type: string }
-        captured_at:
-          type: string
-          format: date-time
-          description: Pode ter fuso (ex. -03:00); o servidor converte para UTC.
-        vehicles:
-          type: array
-          items: { $ref: "#/components/schemas/Vehicle" }
-        complete:
-          type: boolean
-          description: "false: rascunho. true: verifica e renomeia para v2."
-      example:
-        equipment: 8003-MF4739
-        camera: hikvision-233
-        direction: front
-        resolution: 1920x1080
-        capture_angle: lateral
-        day_time: day
-        image_range: narrow
-        weather: clear
-        conditions: [no_damage]
-        captured_at: "2026-09-03T08:25:23-03:00"
-        vehicles:
-          - { plate: ABC1D23, plate_type: mercosul, plate_category: private, type: truck, color: white }
-        complete: true
+        name: { type: string, example: Noturnas Setembro }
+        profile: { type: string, example: veiculos, description: Perfil de anotação. }
 
     PackageSummary:
       type: object
       properties:
         name: { type: string }
+        profile: { type: string, description: O perfil de anotação do pacote., example: veiculos }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         total: { type: integer }
@@ -1998,3 +2016,8 @@ components:
               field: { type: string }
               value: { type: string }
               error: { type: string }
+        outside_profile:
+          type: array
+          description: Valores que o perfil de anotação do pacote não tem ou não aceita (ficam de fora; até 100).
+          items: { type: string, example: "linha 2: weather: o perfil capacete-moto não tem este campo" }
+        outside_profile_count: { type: integer }

@@ -13,21 +13,21 @@ const DefaultProfile = "veiculos"
 // códigos vêm das tabelas do filename (as do nome v2), para nunca saírem de
 // sincronia; aqui ficam só os nomes da tela.
 var vehicleLabels = map[string]map[string]string{
-	"direction":     {"front": "Dianteira", "rear": "Traseira"},
-	"capture_angle": {"lateral": "Lateral", "overhead": "Sobre a via"},
-	"day_time":      {"day": "Dia", "night": "Noite"},
+	"direction":     {"front": "Frontal", "rear": "Traseira"},
+	"capture_angle": {"lateral": "Lateral à via", "overhead": "Sobre a via"},
+	"day_time":      {"day": "Diurno", "night": "Noturno"},
 	"image_range":   {"narrow": "Estreito (1 placa)", "wide": "Amplo (várias placas)"},
-	"weather":       {"clear": "Limpo", "rain": "Chuva", "fog": "Neblina"},
+	"weather":       {"clear": "Sem chuva", "rain": "Chuva", "fog": "Neblina"},
 	"conditions": {
-		"no_damage": "Sem avarias", "plate_shadow": "Sombra na placa", "duplicate_plate": "Placa duplicada",
-		"distorted_plate": "Placa distorcida", "glare": "Reflexo", "low_resolution": "Baixa resolução",
-		"low_contrast": "Baixo contraste", "distorted_image": "Imagem distorcida", "multiple_plates": "Várias placas",
+		"no_damage": "Sem avarias", "plate_shadow": "Sombra na placa", "duplicate_plate": "Placa duplicada (caminhões)",
+		"distorted_plate": "Placa distorcida", "glare": "Ofuscamento", "low_resolution": "Baixa resolução",
+		"low_contrast": "Baixo contraste", "distorted_image": "Imagem distorcida", "multiple_plates": "Diversas placas",
 	},
-	"plate_type": {"br": "BR (antiga)", "mercosul": "Mercosul"},
+	"plate_type": {"br": "Brasileira (antiga)", "mercosul": "Mercosul"},
 	"plate_category": {
 		"rental": "Aluguel", "learner": "Aprendizagem", "collection": "Coleção", "diplomatic": "Diplomática",
-		"official_special": "Especial (oficial)", "manufacturer_test": "Experiência (fabricante)",
-		"government": "Oficial", "private": "Particular",
+		"official_special": "Especial (oficiais)", "manufacturer_test": "Experiência/fabricante",
+		"government": "Oficial (governo)", "private": "Particular",
 	},
 	"vehicle_type": {"car": "Carro", "motorcycle": "Moto", "truck": "Caminhão", "bus": "Ônibus"},
 	"vehicle_color": {
@@ -58,8 +58,12 @@ func codedOptions(table string) []Option {
 // mesmas chaves que as imagens já usam no banco (para a migração ser só
 // mudar de lugar) e os mesmos códigos do nome v2.
 func Vehicles() Profile {
-	choice := func(key, label, table string) Field {
-		return Field{Key: key, Label: label, Type: TypeChoice, Options: codedOptions(table)}
+	choice := func(key, label, table string, def ...string) Field {
+		f := Field{Key: key, Label: label, Type: TypeChoice, Options: codedOptions(table)}
+		if len(def) > 0 {
+			f.Default = def[0]
+		}
+		return f
 	}
 	return Profile{
 		Name:        DefaultProfile,
@@ -68,13 +72,13 @@ func Vehicles() Profile {
 		Fields: []Field{
 			{Key: "equipment", Label: "Equipamento", Type: TypeRef, Ref: RefEquipment},
 			{Key: "camera", Label: "Câmera", Type: TypeRef, Ref: RefCamera},
-			choice("direction", "Direção", "direction"),
+			choice("direction", "Direção", "direction", "rear"),
 			choice("resolution", "Resolução", "resolution"),
-			choice("capture_angle", "Ângulo de captura", "capture_angle"),
-			choice("day_time", "Dia/noite", "day_time"),
-			choice("image_range", "Alcance da imagem", "image_range"),
-			choice("weather", "Clima", "weather"),
-			{Key: "conditions", Label: "Condições", Type: TypeMulti, Options: codedOptions("conditions")},
+			choice("capture_angle", "Ângulo de captura", "capture_angle", "lateral"),
+			choice("day_time", "Período", "day_time", "day"),
+			choice("image_range", "Abrangência", "image_range", "narrow"),
+			choice("weather", "Clima", "weather", "clear"),
+			{Key: "conditions", Label: "Condições", Type: TypeMulti, Options: codedOptions("conditions"), Default: []string{"no_damage"}},
 			{Key: "captured_at", Label: "Data e hora da captura", Type: TypeDateTime},
 		},
 		Objects: []ObjectType{{
@@ -82,9 +86,11 @@ func Vehicles() Profile {
 			Fields: []Field{
 				{Key: "plate", Label: "Placa", Type: TypeText, Pattern: "[A-Z0-9]{7}", Upper: true,
 					Help: "ABC1234 (BR) ou ABC1D23 (Mercosul); vazio se ilegível"},
-				choice("plate_type", "Tipo de placa", "plate_type"),
-				choice("plate_category", "Categoria da placa", "plate_category"),
-				choice("type", "Tipo de veículo", "vehicle_type"),
+				choice("plate_type", "Tipo de placa", "plate_type", "mercosul"),
+				choice("plate_category", "Categoria da placa", "plate_category", "private"),
+				choice("type", "Tipo de veículo", "vehicle_type", "car"),
+				// sem valor inicial: é o que mais varia, e um padrão errado
+				// passaria despercebido na revisão
 				choice("color", "Cor", "vehicle_color"),
 			},
 		}},

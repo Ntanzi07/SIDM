@@ -85,6 +85,19 @@ func (m *MongoRepo) RenamePackage(ctx context.Context, oldName, newName string) 
 	return nil
 }
 
+func (m *MongoRepo) SetPackageProfile(ctx context.Context, name, profile string) error {
+	res, err := m.packages().UpdateOne(ctx,
+		bson.D{{Key: "name", Value: name}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "profile", Value: profile}}}})
+	if err != nil {
+		return fmt.Errorf("trocar o perfil do pacote %s: %w", name, err)
+	}
+	if res.MatchedCount == 0 {
+		return platform.ErrNotFound
+	}
+	return nil
+}
+
 func (m *MongoRepo) DeletePackage(ctx context.Context, name string) error {
 	res, err := m.packages().DeleteOne(ctx, bson.D{{Key: "name", Value: name}})
 	if err != nil {

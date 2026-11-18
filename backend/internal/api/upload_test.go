@@ -76,7 +76,7 @@ func TestUploadPrefill(t *testing.T) {
 			t.Fatal("esperava prefilled")
 		}
 		img := env.img.Images[sha]
-		if img.Equipment != "8003-MF4739" || img.DayTime != "day" || len(img.Vehicles) != 1 {
+		if img.Fields["equipment"] != "8003-MF4739" || img.Fields["day_time"] != "day" || len(img.Objects) != 1 {
 			t.Errorf("metadados não pré-preenchidos: %+v", img)
 		}
 		if img.Status != images.StatusPending {

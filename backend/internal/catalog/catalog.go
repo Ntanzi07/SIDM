@@ -9,13 +9,17 @@
 package catalog
 
 import (
+	"SIDM/internal/annotation"
 	"context"
 	"time"
 )
 
 // Package é um lote de imagens enviado junto. Vira uma pasta em dataset/.
 type Package struct {
-	Name      string    `bson:"name" json:"name"`
+	Name string `bson:"name" json:"name"`
+	// Profile é o perfil de anotação das imagens do pacote (vazio no banco =
+	// o padrão, "veiculos": os pacotes de antes dos perfis).
+	Profile   string    `bson:"profile,omitempty" json:"profile"`
 	CreatedBy string    `bson:"created_by" json:"created_by"`
 	CreatedAt time.Time `bson:"created_at" json:"created_at"`
 }
@@ -43,7 +47,8 @@ const (
 	Cameras    Registry = "cameras"
 )
 
-// ImageField é o campo da imagem que aponta para este cadastro.
+// ImageField é o campo do perfil de anotação que aponta para este cadastro
+// (na imagem, em fields.<campo>). O nome é fixo em todos os perfis.
 func (r Registry) ImageField() string {
 	if r == Cameras {
 		return "camera"
@@ -73,6 +78,7 @@ type Repo interface {
 	ListPackages(ctx context.Context, q string, limit, skip int64) ([]Package, int64, error)
 	RenamePackage(ctx context.Context, oldName, newName string) error
 	DeletePackage(ctx context.Context, name string) error
+	SetPackageProfile(ctx context.Context, name, profile string) error
 
 	// Search: os ATIVOS cujo nome contém q, em ordem alfabética.
 	Search(ctx context.Context, reg Registry, q string, limit, skip int64) ([]string, int64, error)
@@ -82,6 +88,16 @@ type Repo interface {
 	SetActive(ctx context.Context, reg Registry, name string, active bool) error
 	Delete(ctx context.Context, reg Registry, name string) error
 }
+
+// Profiles diz se um perfil de anotação existe (o módulo annotation).
+type Profiles interface {
+	FindProfile(ctx context.Context, name string) (*annotation.Profile, error)
+}
+
+// InvalidError é um pedido que não dá para atender como veio (vira 400).
+type InvalidError struct{ Msg string }
+
+func (e *InvalidError) Error() string { return e.Msg }
 
 // Images é o que o catálogo precisa de quem cuida das imagens.
 type Images interface {

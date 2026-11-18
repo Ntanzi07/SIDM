@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { annotationOptions, defaultAnnotation, defaultVehicle } from '../data/annotationOptions'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createCamera,
   createEquipment,
   deleteImage,
-  getCodes,
+  getAnnotationProfile,
   getImage,
   getPackage,
   imageFileUrl,
@@ -14,12 +13,13 @@ import {
   saveAnnotation,
   searchCameras,
   searchEquipments,
-  type CodesResponse,
+  RequestError,
   type PackageSummary,
+  type Problem,
 } from '../services/api'
 import { getUser } from '../services/user'
-import type { AnnotationForm, ImageDetail, Vehicle } from '../types/annotation'
-import { guessDayTime, isoToLocalInput, localInputToISO } from '../utils/datetime'
+import type { AnnotationForm, AnnotationProfile, FormValue, ImageDetail } from '../types/annotation'
+import { formFromImage, formToAPI, listObjectTypes, newObject } from '../utils/annotationForm'
 
 // A anotação segue a FILA do backend (POST /packages/{nome}/next): cada
 // imagem fica reservada para quem pegou por 15 minutos, então duas pessoas
@@ -28,8 +28,8 @@ import { guessDayTime, isoToLocalInput, localInputToISO } from '../utils/datetim
 // "Próxima" pula a imagem (ela vai para o fim da fila). "Anterior" reabre as
 // imagens já vistas nesta sessão, guardadas em `history`.
 
-// Detecta a resolução pelo tamanho real da imagem. O valor é o próprio
-// tamanho ("1280x960"), se ele estiver na tabela do GET /codes.
+// Detecta a resolução pelo tamanho real da imagem ("1280x960"), se o perfil
+// tem esse valor entre as opções do campo "resolution".
 function detectResolution(url: string, known: Set<string>): Promise<string> {
   return new Promise((resolve) => {
     const img = new Image()
@@ -42,71 +42,8 @@ function detectResolution(url: string, known: Set<string>): Promise<string> {
   })
 }
 
-const emptyForm: AnnotationForm = {
-  equipment: '',
-  camera: '',
-  direction: defaultAnnotation.direction,
-  resolution: '',
-  capture_angle: defaultAnnotation.capture_angle,
-  day_time: defaultAnnotation.day_time,
-  image_range: defaultAnnotation.image_range,
-  weather: defaultAnnotation.weather,
-  conditions: [...defaultAnnotation.conditions],
-  captured_at: '',
-  vehicles: [defaultVehicle()],
-}
-
-function formFromImage(image: ImageDetail): AnnotationForm {
-  const capturedAt = isoToLocalInput(image.captured_at)
-  return {
-    equipment: image.equipment ?? '',
-    camera: image.camera ?? '',
-    direction: image.direction ?? emptyForm.direction,
-    resolution: image.resolution ?? '',
-    capture_angle: image.capture_angle ?? emptyForm.capture_angle,
-    day_time: image.day_time ?? (guessDayTime(capturedAt) || emptyForm.day_time),
-    image_range: image.image_range ?? emptyForm.image_range,
-    weather: image.weather ?? emptyForm.weather,
-    conditions: image.conditions?.length ? image.conditions : emptyForm.conditions,
-    captured_at: capturedAt,
-    vehicles: image.vehicles?.length ? image.vehicles.map(withPlateType) : [defaultVehicle()],
-  }
-}
-
-// Placa Mercosul: AAA1A11 (letra na 5ª posição). Antiga: AAA1111.
-// Só preenche quando o tipo da placa veio vazio (ex.: import sem essa coluna).
-function withPlateType(vehicle: Vehicle): Vehicle {
-  if (vehicle.plate_type) return vehicle
-  const plate = vehicle.plate.replace(/[\s-]/g, '').toUpperCase()
-  if (/^[A-Z]{3}\d[A-Z]\d{2}$/.test(plate)) return { ...vehicle, plate_type: 'mercosul' }
-  if (/^[A-Z]{3}\d{4}$/.test(plate)) return { ...vehicle, plate_type: 'br' }
-  return vehicle
-}
-
-// Campos com valor fora das opções (ex.: rascunho de um import sem tradução).
-function invalidValues(form: AnnotationForm, vehicles: Vehicle[]): string[] {
-  const allowed = (options: readonly (readonly [string, string])[]) => new Set(options.map(([value]) => value))
-  const checks: Array<[string, string, readonly (readonly [string, string])[]]> = [
-    ['direção', form.direction, annotationOptions.direction],
-    ['ângulo', form.capture_angle, annotationOptions.capture_angle],
-    ['período', form.day_time, annotationOptions.day_time],
-    ['alcance', form.image_range, annotationOptions.image_range],
-    ['clima', form.weather, annotationOptions.weather],
-    ...form.conditions.map((value): [string, string, typeof annotationOptions.condition] => ['condição', value, annotationOptions.condition]),
-  ]
-  vehicles.forEach((vehicle, i) => {
-    const n = vehicles.length > 1 ? ` (veículo ${i + 1})` : ''
-    checks.push(
-      [`tipo${n}`, vehicle.type, annotationOptions.type],
-      [`tipo da placa${n}`, vehicle.plate_type, annotationOptions.plate_type],
-      [`categoria${n}`, vehicle.plate_category, annotationOptions.plate_category],
-      [`cor${n}`, vehicle.color, annotationOptions.color],
-    )
-  })
-  return checks
-    .filter(([, value, options]) => value !== '' && !allowed(options).has(value))
-    .map(([label, value]) => `${label} ("${value}")`)
-}
+const emptyProfile: AnnotationProfile = { name: '', fields: [], objects: [] }
+const emptyForm: AnnotationForm = { fields: {}, objects: [] }
 
 // Compara nomes de cadastro do jeito que o backend normaliza (espaço vira
 // hífen), sem diferenciar maiúscula: "hikvision 233" acha "hikvision-233".
@@ -148,7 +85,7 @@ function messageOf(error: unknown, fallback: string): string {
 // initialSha1: abre esta imagem primeiro (ex.: "Editar" numa verificada),
 // em vez da próxima da fila. Depois de salvar, segue pela fila normalmente.
 export function useAnnotator(packageName: string, initialSha1?: string) {
-  const [codes, setCodes] = useState<CodesResponse>({})
+  const [profile, setProfile] = useState<AnnotationProfile>(emptyProfile)
   const [summary, setSummary] = useState<PackageSummary>()
   const [image, setImage] = useState<ImageDetail | null>(null)
   const [form, setForm] = useState<AnnotationForm>(emptyForm)
@@ -158,36 +95,39 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
+  const [problems, setProblems] = useState<Problem[]>([]) // os erros de validação, campo a campo
   const [message, setMessage] = useState('')
 
   // A imagem aberta, para devolver à fila ao sair da página.
   const current = useRef<ImageDetail | null>(null)
 
-  // Os tamanhos conhecidos ("640x480"...), a partir do GET /codes.
-  const resolutionBySize = useMemo(() => new Set(Object.values(codes.resolution ?? {})), [codes.resolution])
-
   const refreshSummary = useCallback(() => {
     getPackage(packageName).then(setSummary).catch(() => { /* o progresso é só informativo */ })
   }, [packageName])
 
-  // Mostra uma imagem: monta o formulário e detecta o que der.
-  const show = useCallback(async (detail: ImageDetail | null, bySize: Set<string>) => {
+  // Mostra uma imagem: monta o formulário pelo perfil e detecta o que der.
+  const show = useCallback(async (detail: ImageDetail | null, p: AnnotationProfile) => {
     current.current = detail
     setImage(detail)
+    setProblems([])
     if (!detail) {
       setForm(emptyForm)
       return
     }
-    const base = formFromImage(detail)
-    if (!detail.resolution) base.resolution = await detectResolution(imageFileUrl(detail.sha1), bySize)
+    const base = formFromImage(p, detail)
+    const resolution = p.fields.find((field) => field.key === 'resolution' && field.type === 'choice')
+    if (resolution && !base.fields.resolution) {
+      const known = new Set((resolution.options ?? []).map((option) => option.value))
+      base.fields.resolution = await detectResolution(imageFileUrl(detail.sha1), known)
+    }
     setForm(base)
   }, [])
 
   // Pega a próxima da fila (pulando `skip`, se vier) e registra no histórico.
-  const pull = useCallback(async (skip: string | undefined, bySize: Set<string>) => {
+  const pull = useCallback(async (skip: string | undefined, p: AnnotationProfile) => {
     const detail = await nextImage(packageName, skip)
     setFinished(!detail)
-    await show(detail, bySize)
+    await show(detail, p)
     if (detail) {
       setHistory((list) => {
         const next = [...list.filter((sha) => sha !== detail.sha1), detail.sha1]
@@ -200,21 +140,23 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
 
   useEffect(() => {
     let active = true
-    Promise.all([getCodes(), getPackage(packageName)])
-      .then(async ([codesResponse, packageSummary]) => {
+    getPackage(packageName)
+      .then(async (packageSummary) => {
         if (!active) return
-        setCodes(codesResponse)
+        if (!packageSummary) throw new Error(`O pacote "${packageName}" não existe.`)
+        const p = await getAnnotationProfile(packageSummary.profile)
+        if (!active) return
         setSummary(packageSummary)
-        const bySize = new Set(Object.values(codesResponse.resolution ?? {}))
+        setProfile(p)
         if (initialSha1) {
           const detail = await reopenImage(initialSha1)
           if (!active) return
           setFinished(false)
-          await show(detail, bySize)
+          await show(detail, p)
           setHistory([detail.sha1])
           setPosition(0)
         } else {
-          await pull(undefined, bySize)
+          await pull(undefined, p)
         }
       })
       .catch((requestError: unknown) => { if (active) setError(messageOf(requestError, 'Não foi possível abrir a fila.')) })
@@ -236,11 +178,19 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   const run = useCallback(async (action: () => Promise<void>, fallback: string) => {
     setSaving(true)
     setError('')
+    setProblems([])
     setMessage('')
     try {
       await action()
     } catch (requestError: unknown) {
-      setError(messageOf(requestError, fallback))
+      if (requestError instanceof RequestError && requestError.problems.length > 0) {
+        // O erro aparece embaixo de cada campo; no topo, só o aviso.
+        const n = requestError.problems.length
+        setError(n === 1 ? 'Revise o campo marcado.' : `Revise os ${n} pontos marcados.`)
+        setProblems(requestError.problems)
+      } else {
+        setError(messageOf(requestError, fallback))
+      }
     } finally {
       setSaving(false)
     }
@@ -248,9 +198,9 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
 
   // Próxima: pula a atual (ela volta no fim da fila).
   const skip = useCallback(() => run(
-    () => pull(image?.status === 'pending' ? image.sha1 : undefined, resolutionBySize),
+    () => pull(image?.status === 'pending' ? image.sha1 : undefined, profile),
     'Não foi possível pegar a próxima imagem.',
-  ), [image, pull, resolutionBySize, run])
+  ), [image, profile, pull, run])
 
   // Anterior: reabre a imagem vista antes, nesta sessão.
   const previous = useCallback(() => run(async () => {
@@ -262,42 +212,43 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       && new Date(detail.claimed_until ?? 0) > new Date()
     if (reservedByOther) setMessage(`Esta imagem está com ${detail.claimed_by} agora: dá para ver, mas não salvar.`)
     setFinished(false)
-    await show(detail, resolutionBySize)
+    await show(detail, profile)
     setPosition(position - 1)
-  }, 'Não foi possível abrir a imagem anterior.'), [history, image, position, resolutionBySize, run, show])
+  }, 'Não foi possível abrir a imagem anterior.'), [history, image, position, profile, run, show])
 
   // Volta para a imagem mais recente do histórico (depois de usar "Anterior").
   const forward = useCallback(() => run(async () => {
     if (position >= history.length - 1) {
-      await pull(undefined, resolutionBySize)
+      await pull(undefined, profile)
       return
     }
     const detail = await getImage(history[position + 1])
-    await show(detail, resolutionBySize)
+    await show(detail, profile)
     setPosition(position + 1)
-  }, 'Não foi possível abrir a imagem.'), [history, position, pull, resolutionBySize, run, show])
+  }, 'Não foi possível abrir a imagem.'), [history, position, profile, pull, run, show])
 
-  const updateForm = useCallback(<K extends keyof AnnotationForm>(field: K, value: AnnotationForm[K]) => {
-    setForm((currentForm) => ({ ...currentForm, [field]: value }))
+  // Um campo da imagem.
+  const updateField = useCallback((key: string, value: FormValue) => {
+    setForm((currentForm) => ({ ...currentForm, fields: { ...currentForm.fields, [key]: value } }))
   }, [])
 
-  const updateVehicle = useCallback((index: number, patch: Partial<Vehicle>) => {
+  // Um campo de um objeto.
+  const updateObject = useCallback((index: number, key: string, value: FormValue) => {
     setForm((currentForm) => ({
       ...currentForm,
-      vehicles: currentForm.vehicles.map((vehicle, i) => i === index ? { ...vehicle, ...patch } : vehicle),
+      objects: currentForm.objects.map((object, i) => i === index ? { ...object, values: { ...object.values, [key]: value } } : object),
     }))
   }, [])
 
-  const addVehicle = useCallback(() => {
-    setForm((currentForm) => ({ ...currentForm, vehicles: [...currentForm.vehicles, defaultVehicle()] }))
-  }, [])
+  const addObject = useCallback((type: string) => {
+    const objectType = listObjectTypes(profile).find((t) => t.key === type)
+    if (!objectType) return
+    setForm((currentForm) => ({ ...currentForm, objects: [...currentForm.objects, newObject(objectType)] }))
+  }, [profile])
 
-  // Pode ficar sem nenhum veículo (imagem sem veículo, ou sem como identificar).
-  const removeVehicle = useCallback((index: number) => {
-    setForm((currentForm) => ({
-      ...currentForm,
-      vehicles: currentForm.vehicles.filter((_, i) => i !== index),
-    }))
+  // Pode ficar sem nenhum objeto (ex.: imagem sem veículo).
+  const removeObject = useCallback((index: number) => {
+    setForm((currentForm) => ({ ...currentForm, objects: currentForm.objects.filter((_, i) => i !== index) }))
   }, [])
 
   const deleteCurrentImage = useCallback(async () => {
@@ -307,48 +258,39 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       await deleteImage(image.sha1)
       current.current = null
       setHistory((list) => list.filter((sha) => sha !== image.sha1))
-      await pull(undefined, resolutionBySize)
+      await pull(undefined, profile)
       setMessage('Imagem excluída.')
       ok = true
     }, 'Não foi possível excluir a imagem.')
     return ok
-  }, [image, pull, resolutionBySize, run])
+  }, [image, profile, pull, run])
 
   const save = useCallback(() => run(async () => {
     if (!image) return
-    const vehicles = form.vehicles.map((vehicle) => ({ ...vehicle, plate: vehicle.plate.replace(/\s/g, '').toUpperCase() }))
-    // Nenhum campo é obrigatório: vazio = não informado. Só o que veio
-    // preenchido precisa ser válido.
-    if (form.captured_at && !localInputToISO(form.captured_at)) {
-      throw new Error('Data e hora inválidas.')
-    }
-    const capturedAt = localInputToISO(form.captured_at)
-    const badPlate = vehicles.find((vehicle) => vehicle.plate && !/^[A-Z0-9]{7}$/.test(vehicle.plate))
-    if (badPlate) {
-      throw new Error(`Placa "${badPlate.plate}" inválida: são 7 letras/números. Se não dá para ler, deixe vazio.`)
-    }
-    const invalid = invalidValues(form, vehicles)
-    if (invalid.length > 0) {
-      throw new Error(`Valor inválido em ${invalid.join(', ')}. Escolha uma opção da lista.`)
-    }
     // Equipamento e câmera precisam estar cadastrados (o backend confere).
-    // Se não estiverem, a pessoa confirma o cadastro aqui mesmo.
-    const equipment = form.equipment.trim() ? await ensureRegistered('equipment', form.equipment) : ''
-    const camera = form.camera.trim() ? await ensureRegistered('camera', form.camera) : ''
-    setForm((currentForm) => ({ ...currentForm, equipment, camera }))
-    await saveAnnotation(image.sha1, { ...form, equipment, camera, vehicles }, capturedAt)
+    // Se não estiverem, a pessoa confirma o cadastro aqui mesmo. O resto (o
+    // que é obrigatório, as opções, os formatos) quem confere é o perfil, no
+    // backend: os erros voltam campo a campo.
+    const fields = { ...form.fields }
+    for (const field of profile.fields) {
+      const typed = typeof fields[field.key] === 'string' ? (fields[field.key] as string).trim() : ''
+      if (field.type === 'ref' && field.ref && typed) fields[field.key] = await ensureRegistered(field.ref, typed)
+    }
+    const next = { ...form, fields }
+    setForm(next)
+    await saveAnnotation(image.sha1, formToAPI(profile, next))
     const wasRevisiting = position < history.length - 1
     if (wasRevisiting) {
       // Corrigiu uma anterior: volta para onde estava.
       const detail = await getImage(history[position + 1])
-      await show(detail, resolutionBySize)
+      await show(detail, profile)
       setPosition(position + 1)
       refreshSummary()
     } else {
-      await pull(undefined, resolutionBySize)
+      await pull(undefined, profile)
     }
     setMessage('Anotação salva.')
-  }, 'Não foi possível salvar a anotação.'), [form, history, image, position, pull, refreshSummary, resolutionBySize, run, show])
+  }, 'Não foi possível salvar a anotação.'), [form, history, image, position, profile, pull, refreshSummary, run, show])
 
   const progress = {
     done: summary?.verified ?? 0,
@@ -357,16 +299,16 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   }
 
   return {
-    codes,
+    profile,
     image,
     form,
     finished,
     canGoBack: position > 0,
     revisiting: position < history.length - 1,
-    updateForm,
-    updateVehicle,
-    addVehicle,
-    removeVehicle,
+    updateField,
+    updateObject,
+    addObject,
+    removeObject,
     skip,
     previous,
     forward,
@@ -375,6 +317,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     loading,
     saving,
     error,
+    problems,
     message,
     progress,
   }

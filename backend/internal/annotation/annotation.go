@@ -53,6 +53,9 @@ type Field struct {
 	Type     string `json:"type" bson:"type"`
 	Required bool   `json:"required,omitempty" bson:"required,omitempty"` // obrigatório para verificar
 	Help     string `json:"help,omitempty" bson:"help,omitempty"`
+	// Default é o valor que a tela já traz numa imagem sem rascunho (ex.:
+	// "rear"). Tem que ser um valor válido do campo.
+	Default any `json:"default,omitempty" bson:"default,omitempty"`
 
 	Options []Option `json:"options,omitempty" bson:"options,omitempty"` // choice, multi
 
@@ -88,6 +91,36 @@ type Profile struct {
 	Objects     []ObjectType `json:"objects" bson:"objects"`
 	CreatedBy   string       `json:"created_by,omitempty" bson:"created_by,omitempty"`
 	UpdatedAt   time.Time    `json:"updated_at,omitzero" bson:"updated_at"`
+}
+
+// Field devolve o campo da imagem com essa chave.
+func (p *Profile) Field(key string) (*Field, bool) {
+	for i := range p.Fields {
+		if p.Fields[i].Key == key {
+			return &p.Fields[i], true
+		}
+	}
+	return nil, false
+}
+
+// Object devolve o tipo de objeto com essa chave.
+func (p *Profile) Object(key string) (*ObjectType, bool) {
+	for i := range p.Objects {
+		if p.Objects[i].Key == key {
+			return &p.Objects[i], true
+		}
+	}
+	return nil, false
+}
+
+// Field devolve o campo do objeto com essa chave.
+func (o *ObjectType) Field(key string) (*Field, bool) {
+	for i := range o.Fields {
+		if o.Fields[i].Key == key {
+			return &o.Fields[i], true
+		}
+	}
+	return nil, false
 }
 
 // Object é um objeto anotado numa imagem (o valor, não o tipo).

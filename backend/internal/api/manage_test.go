@@ -46,7 +46,7 @@ func TestRenomearEquipamentoSemImagens(t *testing.T) {
 func TestRenomearEquipamentoEmCascata(t *testing.T) {
 	env := newTestEnv(t)
 	pending := env.seedPending(t, "pendente")
-	assertStatus(t, env.doJSON("PUT", "/images/"+pending, `{"equipment":"8003-MF4739","day_time":"night"}`), http.StatusOK)
+	assertStatus(t, env.doJSON("PUT", "/images/"+pending, `{"fields": {"equipment":"8003-MF4739","day_time":"night"}}`), http.StatusOK)
 	verified := env.seedVerified(t, "verificada")
 	oldFile := env.img.Images[verified].FileName
 
@@ -55,13 +55,13 @@ func TestRenomearEquipamentoEmCascata(t *testing.T) {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
 
-	if env.img.Images[pending].Equipment != "9000-XYZ" {
+	if env.img.Images[pending].Fields["equipment"] != "9000-XYZ" {
 		t.Error("a pendente deveria usar o nome novo")
 	}
 
 	v := env.img.Images[verified]
-	if v.Equipment != "9000-XYZ" || !strings.Contains(v.FileName, "_9000-XYZ_") {
-		t.Errorf("verificada: equipment=%q file=%q", v.Equipment, v.FileName)
+	if v.Fields["equipment"] != "9000-XYZ" || !strings.Contains(v.FileName, "_9000-XYZ_") {
+		t.Errorf("verificada: equipment=%v file=%q", v.Fields["equipment"], v.FileName)
 	}
 	if _, err := os.Stat(env.pkgFile(v.FileName)); err != nil {
 		t.Error("o arquivo com o nome novo deveria existir")
@@ -103,10 +103,10 @@ func TestRenomearCamera(t *testing.T) {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
 	v := env.img.Images[verified]
-	if v.Camera != "Intelbras-3230" || !strings.Contains(v.FileName, "_Intelbras-3230_") {
-		t.Errorf("camera=%q file=%q", v.Camera, v.FileName)
+	if fv(v.Fields, "camera") != "Intelbras-3230" || !strings.Contains(v.FileName, "_Intelbras-3230_") {
+		t.Errorf("camera=%q file=%q", fv(v.Fields, "camera"), v.FileName)
 	}
-	if v.Equipment != "8003-MF4739" {
+	if v.Fields["equipment"] != "8003-MF4739" {
 		t.Error("renomear a câmera não pode mexer no equipamento")
 	}
 }
@@ -216,7 +216,7 @@ func TestExcluirCadastroEmUsoDesativa(t *testing.T) {
 	if !exists || active {
 		t.Errorf("deveria continuar cadastrada, mas desativada: exists=%v active=%v", exists, active)
 	}
-	if env.img.Images[sha].Camera != "hikvision-233" {
+	if fv(env.img.Images[sha].Fields, "camera") != "hikvision-233" {
 		t.Error("as imagens que usam não podem ser alteradas")
 	}
 
