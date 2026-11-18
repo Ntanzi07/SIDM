@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"SIDM/internal/api"
+	"SIDM/internal/catalog"
 	"SIDM/internal/files"
 	"SIDM/internal/store"
 )
@@ -43,7 +44,10 @@ func main() {
 	}
 	log.Printf("imagens em %s", imagesDir)
 
-	srv := api.New(s, fs)
+	// Os módulos. O catálogo já tem o seu repositório; o resto ainda usa o
+	// store, que também faz o lado das imagens e das caixas do catálogo.
+	cat := catalog.New(catalog.NewMongoRepo(s.DB()), fs, api.NewLegacyImages(s, fs), s)
+	srv := api.New(s, fs, cat)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

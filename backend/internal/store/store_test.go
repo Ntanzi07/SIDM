@@ -1,58 +1,27 @@
 package store
 
-// Testes de INTEGRAÇÃO: rodam contra o Mongo de verdade (docker compose up -d mongo).
-// Usam o usuário root do .env e um banco descartável (sidm_test_<timestamp>),
-// apagado no fim de cada teste. O banco "sidm" de verdade nunca é tocado.
-//
-// Sem Mongo disponível, os testes são pulados (t.Skip): assim o `go test ./...`
-// não quebra numa máquina sem Docker. Para forçar outra URI: MONGO_TEST_URI.
+// Testes de INTEGRAÇÃO: rodam contra o Mongo de verdade (ver platform/mongotest).
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/v2/bson"
-	"go.mongodb.org/mongo-driver/v2/mongo"
-	"go.mongodb.org/mongo-driver/v2/mongo/options"
 
+	"SIDM/internal/catalog"
 	"SIDM/internal/importer"
+	"SIDM/internal/platform/mongotest"
 )
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	_ = godotenv.Load("../../../.env") // backend/internal/store -> SIDM/.env
-
-	uri := os.Getenv("MONGO_TEST_URI")
-	if uri == "" {
-		user := os.Getenv("MONGO_ROOT_USER")
-		if user == "" {
-			t.Skip("sem MONGO_TEST_URI nem MONGO_ROOT_USER no .env: pulando integração")
-		}
-		port := os.Getenv("MONGO_PORT")
-		if port == "" {
-			port = "27017"
-		}
-		u := url.URL{
-			Scheme:   "mongodb",
-			User:     url.UserPassword(user, os.Getenv("MONGO_ROOT_PASSWORD")),
-			Host:     "localhost:" + port,
-			Path:     "/",
-			RawQuery: "authSource=admin",
-		}
-		uri = u.String()
-	}
-
+	uri := mongotest.URI(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-
-	dbName := fmt.Sprintf("sidm_test_%d", time.Now().UnixNano())
-	s, err := New(ctx, uri, dbName)
+	s, err := New(ctx, uri, mongotest.DBName())
 	if err != nil {
 		t.Skipf("Mongo indisponível (%v): pulando integração", err)
 	}
@@ -61,16 +30,8 @@ func testStore(t *testing.T) *Store {
 		_ = s.db.Drop(bg)
 		_ = s.Close(bg)
 	})
-
-	// Os mesmos índices únicos do mongo/init/01-init.js.
-	for _, coll := range []string{"equipments", "cameras", "packages", "import_profiles"} {
-		_, err := s.db.Collection(coll).Indexes().CreateOne(ctx, mongo.IndexModel{
-			Keys:    bson.D{{Key: "name", Value: 1}},
-			Options: options.Index().SetUnique(true),
-		})
-		if err != nil {
-			t.Fatalf("criar índice em %s: %v", coll, err)
-		}
+	if err := mongotest.UniqueNames(ctx, s.db); err != nil {
+		t.Fatal(err)
 	}
 	return s
 }
@@ -95,65 +56,6 @@ func TestPing(t *testing.T) {
 	s := testStore(t)
 	if err := s.Ping(context.Background()); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestCadastro(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-
-	if err := s.CreateEquipment(ctx, "8003-MF4739"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreateEquipment(ctx, "1000-AAA"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreateEquipment(ctx, "8003-MF4739"); !errors.Is(err, ErrDuplicate) {
-		t.Errorf("duplicado: err = %v, want ErrDuplicate", err)
-	}
-
-	// Um inativo, inserido direto, não pode aparecer na lista nem no Exists.
-	_, err := s.db.Collection("equipments").InsertOne(ctx, bson.D{{Key: "name", Value: "9999-OLD"}, {Key: "active", Value: false}})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	names, total, err := s.SearchEquipments(ctx, "", 10, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fmt.Sprint(names) != "[1000-AAA 8003-MF4739]" || total != 2 {
-		t.Errorf("SearchEquipments = %v (total %d); esperava só ativos, em ordem alfabética", names, total)
-	}
-
-	if ok, _ := s.EquipmentExists(ctx, "8003-MF4739"); !ok {
-		t.Error("EquipmentExists(ativo) = false")
-	}
-	if ok, _ := s.EquipmentExists(ctx, "9999-OLD"); ok {
-		t.Error("EquipmentExists(inativo) = true")
-	}
-
-	// Câmeras usam a mesma lógica em outra collection.
-	if err := s.CreateCamera(ctx, "hikvision-233"); err != nil {
-		t.Fatal(err)
-	}
-	cams, _, _ := s.SearchCameras(ctx, "", 10, 0)
-	if len(cams) != 1 || cams[0] != "hikvision-233" {
-		t.Errorf("SearchCameras = %v", cams)
-	}
-	if ok, _ := s.CameraExists(ctx, "8003-MF4739"); ok {
-		t.Error("equipamento não pode ser encontrado como câmera")
-	}
-}
-
-func TestListaVaziaNaoENil(t *testing.T) {
-	s := testStore(t)
-	names, _, err := s.SearchCameras(context.Background(), "", 10, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if names == nil {
-		t.Error("lista vazia deve ser []string{}, não nil (senão o JSON sai null)")
 	}
 }
 
@@ -371,32 +273,9 @@ func TestInsertHistory(t *testing.T) {
 	}
 }
 
-func TestPacotes(t *testing.T) {
+func TestPackageProgress(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-
-	if err := s.CreatePackage(ctx, "antigo", "nathan"); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(5 * time.Millisecond) // created_at diferente para testar a ordem
-	if err := s.CreatePackage(ctx, "novo", "maria"); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(5 * time.Millisecond)
-	if err := s.CreatePackage(ctx, "vazio", "nathan"); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.CreatePackage(ctx, "antigo", "outro"); !errors.Is(err, ErrDuplicate) {
-		t.Errorf("duplicado: err = %v, want ErrDuplicate", err)
-	}
-
-	p, err := s.FindPackage(ctx, "novo")
-	if err != nil || p.CreatedBy != "maria" {
-		t.Errorf("FindPackage = %+v, %v", p, err)
-	}
-	if _, err := s.FindPackage(ctx, "nao-existe"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("inexistente: err = %v, want ErrNotFound", err)
-	}
 
 	// antigo: 2 verificadas + 1 pendente. novo: 1 pendente. vazio: nada.
 	for i, st := range []string{StatusVerified, StatusVerified, StatusPending} {
@@ -407,41 +286,22 @@ func TestPacotes(t *testing.T) {
 	img := newImage("novo-0", time.Now())
 	img.Package = "novo"
 	s.InsertImage(ctx, img)
+	outro := newImage("outro-0", time.Now())
+	outro.Package = "outro" // pacote não pedido: não entra
+	s.InsertImage(ctx, outro)
 
-	pkgs, total, err := s.ListPackages(ctx, "", 10, 0)
+	got, err := s.PackageProgress(ctx, []string{"antigo", "novo", "vazio"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if total != 3 {
-		t.Errorf("total = %d, want 3", total)
+	want := map[string]catalog.Progress{
+		"antigo": {Total: 3, Verified: 2, Pending: 1},
+		"novo":   {Total: 1, Pending: 1},
 	}
-	got := map[string]PackageSummary{}
-	var order []string
-	for _, p := range pkgs {
-		got[p.Name] = p
-		order = append(order, p.Name)
-	}
-
-	if fmt.Sprint(order) != "[vazio novo antigo]" {
-		t.Errorf("ordem = %v, want mais novos primeiro", order)
-	}
-	check := func(name string, total, verified, pending int64) {
-		t.Helper()
-		p := got[name]
-		if p.Total != total || p.Verified != verified || p.Pending != pending {
-			t.Errorf("%s: total=%d verified=%d pending=%d; want %d/%d/%d",
-				name, p.Total, p.Verified, p.Pending, total, verified, pending)
-		}
-	}
-	check("antigo", 3, 2, 1)
-	check("novo", 1, 0, 1)
-	check("vazio", 0, 0, 0)
-
-	if got["antigo"].CreatedBy != "nathan" {
-		t.Error("o resumo deveria trazer os dados do pacote (inline)")
+	if fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("PackageProgress = %v, want %v", got, want)
 	}
 }
-
 func TestClaimNextOrdemPularERecarregar(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
@@ -583,10 +443,9 @@ func TestReleaseClaim(t *testing.T) {
 	}
 }
 
-func TestPacotesInProgress(t *testing.T) {
+func TestPackageProgressInProgress(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	s.CreatePackage(ctx, "pacote-1", "nathan")
 	for _, id := range []string{"p1", "p2", "p3"} {
 		s.InsertImage(ctx, newImage(id, time.Now()))
 	}
@@ -594,80 +453,14 @@ func TestPacotesInProgress(t *testing.T) {
 	s.ClaimNext(ctx, "pacote-1", "maria", "", time.Hour, time.Now())
 	s.ClaimNext(ctx, "pacote-1", "joao", "", -time.Minute, time.Now()) // já nasce vencido
 
-	pkgs, _, err := s.ListPackages(ctx, "", 10, 0)
+	got, err := s.PackageProgress(ctx, []string{"pacote-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pkgs[0].InProgress != 2 || pkgs[0].Pending != 3 {
-		t.Errorf("in_progress=%d pending=%d; want 2 e 3", pkgs[0].InProgress, pkgs[0].Pending)
+	if p := got["pacote-1"]; p.InProgress != 2 || p.Pending != 3 {
+		t.Errorf("in_progress=%d pending=%d; want 2 e 3", p.InProgress, p.Pending)
 	}
 }
-
-func TestSearchEquipments(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-	for _, n := range []string{"8003-MF4739", "8005-MF4700", "9000-ABC", "7000-mf9999", "1.2-ponto"} {
-		if err := s.CreateEquipment(ctx, n); err != nil {
-			t.Fatal(err)
-		}
-	}
-
-	cases := []struct {
-		q         string
-		limit     int64
-		skip      int64
-		want      string
-		wantTotal int64
-	}{
-		{"mf47", 10, 0, "[8003-MF4739 8005-MF4700]", 2}, // contém, no meio do nome
-		{"MF9", 10, 0, "[7000-mf9999]", 1},              // sem diferenciar maiúscula
-		{"", 2, 0, "[1.2-ponto 7000-mf9999]", 5},        // sem busca, paginado
-		{"", 2, 4, "[9000-ABC]", 5},                     // última página
-		{"xyz", 10, 0, "[]", 0},                         // nada
-		{".", 10, 0, "[1.2-ponto]", 1},                  // "." é literal, não "qualquer caractere"
-		{".*", 10, 0, "[]", 0},                          // regex do usuário é escapada
-		{"(a+)+$", 10, 0, "[]", 0},                      // nem regex maliciosa passa
-	}
-	for _, tc := range cases {
-		t.Run(fmt.Sprintf("q=%q limit=%d skip=%d", tc.q, tc.limit, tc.skip), func(t *testing.T) {
-			names, total, err := s.SearchEquipments(ctx, tc.q, tc.limit, tc.skip)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if fmt.Sprint(names) != tc.want || total != tc.wantTotal {
-				t.Errorf("got %v (total %d), want %s (total %d)", names, total, tc.want, tc.wantTotal)
-			}
-		})
-	}
-}
-
-func TestListPackagesBuscaEPaginacao(t *testing.T) {
-	s := testStore(t)
-	ctx := context.Background()
-	for _, n := range []string{"Noturnas-Setembro", "Diurnas-2026", "Noturnas-Outubro"} {
-		s.CreatePackage(ctx, n, "nathan")
-		time.Sleep(5 * time.Millisecond)
-	}
-
-	pkgs, total, err := s.ListPackages(ctx, "noturnas", 10, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if total != 2 || len(pkgs) != 2 || pkgs[0].Name != "Noturnas-Outubro" {
-		t.Errorf("busca: total=%d %+v; want 2, mais novo primeiro", total, pkgs)
-	}
-
-	pkgs, total, _ = s.ListPackages(ctx, "", 1, 1)
-	if total != 3 || len(pkgs) != 1 || pkgs[0].Name != "Diurnas-2026" {
-		t.Errorf("página 2 de 1: total=%d %+v", total, pkgs)
-	}
-
-	pkgs, total, _ = s.ListPackages(ctx, "nada", 10, 0)
-	if total != 0 || pkgs == nil {
-		t.Errorf("sem resultados: total=%d pkgs=%v (deve ser [] e não nil)", total, pkgs)
-	}
-}
-
 func TestPerfisDeImport(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()

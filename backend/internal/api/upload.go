@@ -52,7 +52,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "informe o pacote: POST /images?package=<nome>")
 		return
 	}
-	if _, err := s.store.FindPackage(r.Context(), pkg); err != nil {
+	if _, err := s.catalog.FindPackage(r.Context(), pkg); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe: crie antes com POST /packages", pkg))
 			return

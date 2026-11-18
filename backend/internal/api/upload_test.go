@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/catalog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -112,7 +113,7 @@ func TestUploadNaoMultipart(t *testing.T) {
 
 func TestUploadRepetidaEmOutroPacoteEPulada(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.packages["pacote-novo"] = store.Package{Name: "pacote-novo"}
+	env.cat.Packages["pacote-novo"] = catalog.Package{Name: "pacote-novo"}
 	shaA := env.seedPending(t, "imagem A") // já está no pacote-teste
 
 	res := env.uploadTo(t, "pacote-novo",

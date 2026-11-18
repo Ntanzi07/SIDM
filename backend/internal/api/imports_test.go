@@ -416,14 +416,14 @@ func TestImportCadastraEquipamentoECameraNovos(t *testing.T) {
 	if len(rep.NewCameras) != 1 || rep.NewCameras[0] != "Intelbras-VIP-3230" {
 		t.Errorf("new_cameras = %v (hikvision-233 já existe e não entra)", rep.NewCameras)
 	}
-	if env.db.equipments["9999-NOVO"] || env.db.cameras["Intelbras-VIP-3230"] {
+	if env.cat.Equipments["9999-NOVO"] || env.cat.Cameras["Intelbras-VIP-3230"] {
 		t.Fatal("o ensaio cadastrou!")
 	}
 
 	// Aplicar: cadastra e grava a imagem já com o nome sanitizado.
 	rep = decodeImport(t, env.postFile(t, path+"&dry_run=false", "file", csv))
-	if !env.db.equipments["9999-NOVO"] || !env.db.cameras["Intelbras-VIP-3230"] {
-		t.Errorf("deveria ter cadastrado: equipments=%v cameras=%v", env.db.equipments, env.db.cameras)
+	if !env.cat.Equipments["9999-NOVO"] || !env.cat.Cameras["Intelbras-VIP-3230"] {
+		t.Errorf("deveria ter cadastrado: equipments=%v cameras=%v", env.cat.Equipments, env.cat.Cameras)
 	}
 	img := env.db.images[sha]
 	if img.Equipment != "9999-NOVO" || img.Camera != "Intelbras-VIP-3230" {
@@ -450,7 +450,7 @@ func TestImportNomeImpossivelDeSanitizar(t *testing.T) {
 	if len(rep.InvalidNames) != 1 || rep.InvalidNames[0].Value != "8003/MF" || rep.InvalidNames[0].Line != 2 {
 		t.Errorf("invalid_names = %+v", rep.InvalidNames)
 	}
-	if len(rep.NewEquipments) != 0 || len(env.db.equipments) != 1 {
+	if len(rep.NewEquipments) != 0 || len(env.cat.Equipments) != 1 {
 		t.Error("nome inválido não pode ser cadastrado")
 	}
 	img := env.db.images[sha]

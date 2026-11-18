@@ -11,9 +11,6 @@ import (
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// ErrNotFound indica que o documento não existe.
-var ErrNotFound = errors.New("não encontrado")
-
 // FindImage busca uma imagem pelo sha1.
 func (s *Store) FindImage(ctx context.Context, sha1 string) (*Image, error) {
 	var img Image
@@ -148,25 +145,6 @@ func (s *Store) InsertHistory(ctx context.Context, entries []HistoryEntry) error
 		return fmt.Errorf("gravar histórico: %w", err)
 	}
 	return nil
-}
-
-// EquipmentExists / CameraExists: o nome está cadastrado e ativo?
-func (s *Store) EquipmentExists(ctx context.Context, name string) (bool, error) {
-	return s.activeNameExists(ctx, "equipments", name)
-}
-
-func (s *Store) CameraExists(ctx context.Context, name string) (bool, error) {
-	return s.activeNameExists(ctx, "cameras", name)
-}
-
-func (s *Store) activeNameExists(ctx context.Context, collection, name string) (bool, error) {
-	n, err := s.db.Collection(collection).CountDocuments(ctx,
-		bson.D{{Key: "name", Value: name}, {Key: "active", Value: true}},
-		options.Count().SetLimit(1))
-	if err != nil {
-		return false, fmt.Errorf("consultar %s: %w", collection, err)
-	}
-	return n > 0, nil
 }
 
 // ExistingImage diz onde uma imagem já cadastrada está e em que estado.

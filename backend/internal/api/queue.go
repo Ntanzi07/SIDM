@@ -45,7 +45,7 @@ func (s *Server) handleNext(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pkg := r.PathValue("name")
-	if _, err := s.store.FindPackage(r.Context(), pkg); err != nil {
+	if _, err := s.catalog.FindPackage(r.Context(), pkg); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe", pkg))
 			return

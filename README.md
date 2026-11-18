@@ -69,14 +69,16 @@ SIDM/
 └── backend/                Go
     ├── cmd/server/         main: lê o .env, conecta no Mongo, sobe o HTTP
     └── internal/
+        ├── platform/       o que todos usam: erros, respostas HTTP, usuário, Mongo de teste
+        ├── catalog/        MÓDULO: pacotes, equipamentos e câmeras (regras, Mongo, HTTP)
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── boxes/          leitura das caixas exportadas do CVAT (COCO 1.0)
-        ├── export/         datasets de treino: perfis, divisão, COCO (RF-DETR) e YOLO
-        ├── store/          Mongo: imagens, pacotes, fila, cadastros, perfis, histórico
-        └── api/            handlers HTTP (dependem da interface Store) + openapi.yaml
+        ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC
+        ├── store/          Mongo do que ainda não é módulo: imagens, fila, caixas, perfis, histórico
+        └── api/            handlers HTTP do que ainda não é módulo + openapi.yaml
 ```
 
 ---
@@ -129,6 +131,31 @@ Na tela de anotação, todo campo tem a opção **"Não informado"**.
 
 A referência completa, com exemplos e o "Try it out", está em **`/docs`** (Swagger UI).
 A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no binário.
+
+### Organização do backend (monólito modular)
+
+O backend é **um binário só**, organizado por **assunto** (módulos), e não por
+camada. A reorganização está em andamento: o `catalog` já é um módulo; imagens,
+import, caixas e export ainda vivem em `api/` + `store/` e vão sair um por vez.
+
+Cada módulo segue o mesmo formato (veja `internal/catalog/`):
+
+| arquivo | o que tem |
+|---|---|
+| `catalog.go` | os tipos e as **interfaces** do que o módulo precisa dos outros |
+| `service.go` | as regras (é o que os outros módulos chamam) |
+| `mongo.go` | as coleções **dele** (e de nenhuma outra) |
+| `memory.go` | o mesmo repositório em memória, para os testes |
+| `http.go` | os handlers e a lista de rotas (`Routes()`) |
+
+**Regras:**
+- um módulo só lê e escreve as coleções dele;
+- o que ele precisa de outro, pede por uma interface pequena declarada nele
+  (ex.: o catálogo declara `Images`, com o progresso dos pacotes e as cascatas);
+- as cascatas viram **avisos**: ao renomear ou apagar um pacote, o catálogo avisa
+  quem guarda o pacote (`PackageListener`), e cada um cuida das suas coleções;
+- o `main.go` monta os módulos e liga as interfaces;
+- a API não muda com a reorganização: o frontend não percebe.
 
 | Rota | O que faz |
 |---|---|

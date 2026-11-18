@@ -26,24 +26,17 @@ import (
 	"time"
 
 	"SIDM/internal/boxes"
+	"SIDM/internal/catalog"
 	"SIDM/internal/export"
 	"SIDM/internal/files"
 	"SIDM/internal/importer"
 	"SIDM/internal/store"
 )
 
-type searchCall struct {
-	q           string
-	limit, skip int64
-}
-
 // memStore guarda tudo em maps. Os campos *Err permitem simular falhas do banco.
 type memStore struct {
 	mu sync.Mutex
 
-	equipments map[string]bool // nome -> ativo (a chave existir = está cadastrado)
-	cameras    map[string]bool
-	packages   map[string]store.Package
 	profiles   map[string]importer.Profile
 	images     map[string]store.Image
 	history    []store.HistoryEntry
@@ -51,7 +44,6 @@ type memStore struct {
 	tasks      map[string]store.Task
 	exportProf map[string]export.Profile
 	lastFilter store.ImageFilter
-	lastSearch searchCall
 
 	pingErr       error
 	listErr       error
@@ -61,9 +53,6 @@ type memStore struct {
 
 func newMemStore() *memStore {
 	return &memStore{
-		equipments: map[string]bool{},
-		cameras:    map[string]bool{},
-		packages:   map[string]store.Package{},
 		boxSets:    map[string]store.BoxSet{},
 		tasks:      map[string]store.Task{},
 		exportProf: map[string]export.Profile{},
@@ -73,33 +62,6 @@ func newMemStore() *memStore {
 }
 
 func (m *memStore) Ping(ctx context.Context) error { return m.pingErr }
-
-func (m *memStore) SearchEquipments(ctx context.Context, q string, limit, skip int64) ([]string, int64, error) {
-	return m.search(m.equipments, q, limit, skip)
-}
-
-func (m *memStore) SearchCameras(ctx context.Context, q string, limit, skip int64) ([]string, int64, error) {
-	return m.search(m.cameras, q, limit, skip)
-}
-
-// search imita o store de verdade: contém, sem diferenciar maiúscula,
-// em ordem alfabética, paginado.
-func (m *memStore) search(set map[string]bool, q string, limit, skip int64) ([]string, int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.lastSearch = searchCall{q: q, limit: limit, skip: skip}
-	if m.listErr != nil {
-		return nil, 0, m.listErr
-	}
-	all := []string{}
-	for n, active := range set {
-		if active && strings.Contains(strings.ToLower(n), strings.ToLower(q)) {
-			all = append(all, n)
-		}
-	}
-	sort.Strings(all)
-	return paginate(all, limit, skip), int64(len(all)), nil
-}
 
 func paginate[T any](all []T, limit, skip int64) []T {
 	if skip >= int64(len(all)) {
@@ -112,87 +74,32 @@ func paginate[T any](all []T, limit, skip int64) []T {
 	return all[skip:end]
 }
 
-func (m *memStore) CreateEquipment(ctx context.Context, name string) error {
-	return m.create(m.equipments, name)
-}
-
-func (m *memStore) CreateCamera(ctx context.Context, name string) error {
-	return m.create(m.cameras, name)
-}
-
-func (m *memStore) create(set map[string]bool, name string) error {
+// PackageProgress: as imagens de cada pacote pedido, por status.
+func (m *memStore) PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := set[name]; ok {
-		return store.ErrDuplicate
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
 	}
-	set[name] = true
-	return nil
-}
-
-func (m *memStore) EquipmentExists(ctx context.Context, name string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.equipments[name], nil
-}
-
-func (m *memStore) CameraExists(ctx context.Context, name string) (bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.cameras[name], nil
-}
-
-func (m *memStore) CreatePackage(ctx context.Context, name, createdBy string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.packages[name]; ok {
-		return store.ErrDuplicate
-	}
-	m.packages[name] = store.Package{Name: name, CreatedBy: createdBy}
-	return nil
-}
-
-func (m *memStore) FindPackage(ctx context.Context, name string) (*store.Package, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	p, ok := m.packages[name]
-	if !ok {
-		return nil, store.ErrNotFound
-	}
-	return &p, nil
-}
-
-func (m *memStore) ListPackages(ctx context.Context, q string, limit, skip int64) ([]store.PackageSummary, int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.lastSearch = searchCall{q: q, limit: limit, skip: skip}
-	if m.listErr != nil {
-		return nil, 0, m.listErr
-	}
-	out := []store.PackageSummary{}
-	for _, p := range m.packages {
-		if !strings.Contains(strings.ToLower(p.Name), strings.ToLower(q)) {
+	out := map[string]catalog.Progress{}
+	for _, img := range m.images {
+		if !want[img.Package] {
 			continue
 		}
-		sum := store.PackageSummary{Package: p}
-		for _, img := range m.images {
-			if img.Package != p.Name {
-				continue
-			}
-			sum.Total++
-			if img.Status == store.StatusVerified {
-				sum.Verified++
-			} else {
-				sum.Pending++
-				if img.ClaimedUntil != nil && img.ClaimedUntil.After(time.Now()) {
-					sum.InProgress++
-				}
+		p := out[img.Package]
+		p.Total++
+		if img.Status == store.StatusVerified {
+			p.Verified++
+		} else {
+			p.Pending++
+			if img.ClaimedUntil != nil && img.ClaimedUntil.After(time.Now()) {
+				p.InProgress++
 			}
 		}
-		out = append(out, sum)
+		out[img.Package] = p
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return paginate(out, limit, skip), int64(len(out)), nil
+	return out, nil
 }
 
 func (m *memStore) InsertImage(ctx context.Context, img *store.Image) error {
@@ -447,53 +354,14 @@ func (m *memStore) FindImagesByKeys(ctx context.Context, pkg, by string, keys []
 	return out, nil
 }
 
-func (m *memStore) registry(reg store.Registry) map[string]bool {
-	if reg == store.Cameras {
-		return m.cameras
-	}
-	return m.equipments
-}
-
-func (m *memStore) FindRegistry(ctx context.Context, reg store.Registry, name string) (*store.RegistryEntry, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	active, ok := m.registry(reg)[name]
-	if !ok {
-		return nil, store.ErrNotFound
-	}
-	return &store.RegistryEntry{Name: name, Active: active}, nil
-}
-
-func (m *memStore) SetRegistryActive(ctx context.Context, reg store.Registry, name string, active bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	set := m.registry(reg)
-	if _, ok := set[name]; !ok {
-		return store.ErrNotFound
-	}
-	set[name] = active
-	return nil
-}
-
-func (m *memStore) DeleteRegistry(ctx context.Context, reg store.Registry, name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	set := m.registry(reg)
-	if _, ok := set[name]; !ok {
-		return store.ErrNotFound
-	}
-	delete(set, name)
-	return nil
-}
-
-func imageField(img *store.Image, reg store.Registry) *string {
-	if reg == store.Cameras {
+func imageField(img *store.Image, reg catalog.Registry) *string {
+	if reg == catalog.Cameras {
 		return &img.Camera
 	}
 	return &img.Equipment
 }
 
-func (m *memStore) CountImagesUsing(ctx context.Context, reg store.Registry, name string) (int64, error) {
+func (m *memStore) CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var n int64
@@ -505,7 +373,7 @@ func (m *memStore) CountImagesUsing(ctx context.Context, reg store.Registry, nam
 	return n, nil
 }
 
-func (m *memStore) RenameOnPending(ctx context.Context, reg store.Registry, oldName, newName string, now time.Time) (int64, error) {
+func (m *memStore) RenameOnPending(ctx context.Context, reg catalog.Registry, oldName, newName string, now time.Time) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var n int64
@@ -519,20 +387,9 @@ func (m *memStore) RenameOnPending(ctx context.Context, reg store.Registry, oldN
 	return n, nil
 }
 
-func (m *memStore) RenamePackage(ctx context.Context, oldName, newName string) (int64, error) {
+func (m *memStore) RenamePackageImages(ctx context.Context, oldName, newName string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	p, ok := m.packages[oldName]
-	if !ok {
-		return 0, store.ErrNotFound
-	}
-	if _, exists := m.packages[newName]; exists {
-		return 0, store.ErrDuplicate
-	}
-	delete(m.packages, oldName)
-	p.Name = newName
-	m.packages[newName] = p
-
 	var n int64
 	for id, img := range m.images {
 		if img.Package == oldName {
@@ -542,21 +399,12 @@ func (m *memStore) RenamePackage(ctx context.Context, oldName, newName string) (
 			n++
 		}
 	}
-	for id, set := range m.boxSets {
-		if set.Package == oldName {
-			set.Package = newName
-			m.boxSets[id] = set
-		}
-	}
 	return n, nil
 }
 
-func (m *memStore) DeletePackage(ctx context.Context, name string) (int64, error) {
+func (m *memStore) DeletePackageImages(ctx context.Context, name string) (int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, ok := m.packages[name]; !ok {
-		return 0, store.ErrNotFound
-	}
 	deleted := map[string]bool{}
 	for id, img := range m.images {
 		if img.Package == name {
@@ -571,13 +419,31 @@ func (m *memStore) DeletePackage(ctx context.Context, name string) (int64, error
 		}
 	}
 	m.history = kept
+	return int64(len(deleted)), nil
+}
+
+// PackageRenamed / PackageDeleted: as caixas (catalog.PackageListener).
+func (m *memStore) PackageRenamed(ctx context.Context, oldName, newName string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for id, set := range m.boxSets {
+		if set.Package == oldName {
+			set.Package = newName
+			m.boxSets[id] = set
+		}
+	}
+	return nil
+}
+
+func (m *memStore) PackageDeleted(ctx context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for id, set := range m.boxSets {
 		if set.Package == name {
 			delete(m.boxSets, id)
 		}
 	}
-	delete(m.packages, name)
-	return int64(len(deleted)), nil
+	return nil
 }
 
 func boxKey(task, sha1 string) string { return task + "|" + sha1 }
@@ -839,6 +705,7 @@ func (m *memStore) ListExportProfiles(ctx context.Context) ([]export.Profile, er
 
 type testEnv struct {
 	db      *memStore
+	cat     *catalog.Memory // pacotes, equipamentos e câmeras
 	files   *files.Storage
 	root    string
 	handler http.Handler
@@ -852,10 +719,12 @@ func newTestEnv(t *testing.T) *testEnv {
 		t.Fatal(err)
 	}
 	db := newMemStore()
-	db.equipments["8003-MF4739"] = true
-	db.cameras["hikvision-233"] = true
-	db.packages[testPkg] = store.Package{Name: testPkg}
-	return &testEnv{db: db, files: fs, root: root, handler: New(db, fs).Routes()}
+	cat := catalog.NewMemory()
+	cat.Equipments["8003-MF4739"] = true
+	cat.Cameras["hikvision-233"] = true
+	cat.Packages[testPkg] = catalog.Package{Name: testPkg}
+	svc := catalog.New(cat, fs, NewLegacyImages(db, fs), db)
+	return &testEnv{db: db, cat: cat, files: fs, root: root, handler: New(db, fs, svc).Routes()}
 }
 
 // do executa um request e devolve a resposta gravada.
@@ -999,14 +868,16 @@ func TestCodes(t *testing.T) {
 // ---------- busca de equipamentos e câmeras (autocomplete) ----------
 
 type namePage struct {
-	Total int64      `json:"total"`
-	Items []nameItem `json:"items"`
+	Total int64 `json:"total"`
+	Items []struct {
+		Name string `json:"name"`
+	} `json:"items"`
 }
 
 func TestSearchEquipments(t *testing.T) {
 	env := newTestEnv(t)
 	for _, n := range []string{"8004-MF1234", "8005-MF4700", "9000-ABC", "7000-mf9999"} {
-		env.db.equipments[n] = true
+		env.cat.Equipments[n] = true
 	}
 
 	cases := []struct {
@@ -1044,16 +915,16 @@ func TestSearchLimites(t *testing.T) {
 	env := newTestEnv(t)
 
 	env.do("GET", "/cameras", nil, nil)
-	if env.db.lastSearch.limit != 10 {
-		t.Errorf("limit padrão = %d, want 10 (as primeiras opções do autocomplete)", env.db.lastSearch.limit)
+	if env.cat.LastSearch.Limit != 10 {
+		t.Errorf("limit padrão = %d, want 10 (as primeiras opções do autocomplete)", env.cat.LastSearch.Limit)
 	}
 	env.do("GET", "/cameras?limit=9999", nil, nil)
-	if env.db.lastSearch.limit != 50 {
-		t.Errorf("limit máximo = %d, want 50", env.db.lastSearch.limit)
+	if env.cat.LastSearch.Limit != 50 {
+		t.Errorf("limit máximo = %d, want 50", env.cat.LastSearch.Limit)
 	}
 	env.do("GET", "/cameras?q=%20%20hik%20%20", nil, nil)
-	if env.db.lastSearch.q != "hik" {
-		t.Errorf("busca deveria ignorar espaços nas pontas: %q", env.db.lastSearch.q)
+	if env.cat.LastSearch.Q != "hik" {
+		t.Errorf("busca deveria ignorar espaços nas pontas: %q", env.cat.LastSearch.Q)
 	}
 
 	long := strings.Repeat("a", 65)
@@ -1070,7 +941,7 @@ func TestSearchVaziaRetornaArray(t *testing.T) {
 
 func TestSearchBancoFora(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.listErr = errBoom
+	env.cat.Err = errBoom
 	rec := env.do("GET", "/equipments?q=80", nil, nil)
 	assertStatus(t, rec, http.StatusInternalServerError)
 	if strings.Contains(rec.Body.String(), "banco caiu") {
@@ -1132,7 +1003,7 @@ func TestCreatePackage(t *testing.T) {
 	if resp["name"] != "Noturnas-Setembro" {
 		t.Errorf("name = %q", resp["name"])
 	}
-	if env.db.packages["Noturnas-Setembro"].CreatedBy != "nathan" {
+	if env.cat.Packages["Noturnas-Setembro"].CreatedBy != "nathan" {
 		t.Error("created_by deveria vir do X-User")
 	}
 	if info, err := os.Stat(filepath.Join(env.root, "dataset", "Noturnas-Setembro")); err != nil || !info.IsDir() {
@@ -1169,7 +1040,7 @@ func TestListPackagesComProgresso(t *testing.T) {
 	rec := env.do("GET", "/packages", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
 
-	var resp page[store.PackageSummary]
+	var resp page[catalog.PackageSummary]
 	decode(t, rec, &resp)
 	if resp.Total != 1 || len(resp.Items) != 1 {
 		t.Fatalf("pacotes = %+v", resp)
@@ -1183,10 +1054,10 @@ func TestListPackagesComProgresso(t *testing.T) {
 func TestListPackagesBuscaEPaginacao(t *testing.T) {
 	env := newTestEnv(t)
 	for _, n := range []string{"Noturnas-Setembro", "Noturnas-Outubro", "Diurnas-2026"} {
-		env.db.packages[n] = store.Package{Name: n}
+		env.cat.Packages[n] = catalog.Package{Name: n}
 	}
 
-	var resp page[store.PackageSummary]
+	var resp page[catalog.PackageSummary]
 	decode(t, env.do("GET", "/packages?q=noturnas", nil, nil), &resp)
 	if resp.Total != 2 || len(resp.Items) != 2 {
 		t.Errorf("busca por 'noturnas': total=%d items=%d, want 2", resp.Total, len(resp.Items))
@@ -1198,7 +1069,7 @@ func TestListPackagesBuscaEPaginacao(t *testing.T) {
 	}
 
 	env.do("GET", "/packages", nil, nil)
-	if env.db.lastSearch.limit != 20 {
-		t.Errorf("limit padrão = %d, want 20", env.db.lastSearch.limit)
+	if env.cat.LastSearch.Limit != 20 {
+		t.Errorf("limit padrão = %d, want 20", env.cat.LastSearch.Limit)
 	}
 }

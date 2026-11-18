@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/catalog"
 	"bufio"
 	"bytes"
 	"net/http"
@@ -45,7 +46,7 @@ func specOperations(t *testing.T) map[string]bool {
 // esquecer a doc), este teste falha e diz qual é.
 func TestTodaRotaEstaDocumentada(t *testing.T) {
 	env := newTestEnv(t)
-	srv := New(env.db, env.files)
+	srv := New(env.db, env.files, catalog.New(env.cat, env.files, NewLegacyImages(env.db, env.files), env.db))
 	spec := specOperations(t)
 
 	code := map[string]bool{}

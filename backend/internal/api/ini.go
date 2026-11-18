@@ -70,8 +70,8 @@ func (s *Server) sanitizeAndRegister(ctx context.Context, equipment, camera stri
 		return name
 	}
 
-	equipment = clean(equipment, "equipamento", filename.SanitizeEquipment, s.store.EquipmentExists, s.store.CreateEquipment)
-	camera = clean(camera, "câmera", filename.SanitizeCamera, s.store.CameraExists, s.store.CreateCamera)
+	equipment = clean(equipment, "equipamento", filename.SanitizeEquipment, s.catalog.EquipmentExists, s.catalog.CreateEquipment)
+	camera = clean(camera, "câmera", filename.SanitizeCamera, s.catalog.CameraExists, s.catalog.CreateCamera)
 	return equipment, camera, warnings
 }
 

@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -67,25 +65,6 @@ func (s *Server) handleListImages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, page[store.Image]{Total: total, Items: items})
-}
-
-// intParam lê um número da query string, com padrão e limites.
-func intParam(q url.Values, key string, def, min, max int64) int64 {
-	v, err := strconv.ParseInt(q.Get(key), 10, 64)
-	if err != nil {
-		return def
-	}
-	return clamp(v, min, max)
-}
-
-func clamp(v, min, max int64) int64 {
-	if v < min {
-		return min
-	}
-	if v > max {
-		return max
-	}
-	return v
 }
 
 // GET /images/{sha1}
@@ -297,12 +276,12 @@ func (s *Server) finalName(r *http.Request, img *store.Image) (string, string) {
 	// O Format só valida o FORMATO do equipamento/câmera; aqui conferimos o cadastro.
 	ctx := r.Context()
 	if img.Equipment != "" {
-		if ok, err := s.store.EquipmentExists(ctx, img.Equipment); err != nil || !ok {
+		if ok, err := s.catalog.EquipmentExists(ctx, img.Equipment); err != nil || !ok {
 			return "", fmt.Sprintf("equipamento %q não cadastrado", img.Equipment)
 		}
 	}
 	if img.Camera != "" {
-		if ok, err := s.store.CameraExists(ctx, img.Camera); err != nil || !ok {
+		if ok, err := s.catalog.CameraExists(ctx, img.Camera); err != nil || !ok {
 			return "", fmt.Sprintf("câmera %q não cadastrada", img.Camera)
 		}
 	}

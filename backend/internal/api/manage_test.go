@@ -1,13 +1,12 @@
 package api
 
 import (
+	"SIDM/internal/catalog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"SIDM/internal/store"
 )
 
 // seedVerified sobe uma imagem e verifica (equipamento 8003-MF4739, câmera hikvision-233).
@@ -18,10 +17,10 @@ func (e *testEnv) seedVerified(t *testing.T, content string) string {
 	return sha
 }
 
-func decodeRegistry(t *testing.T, env *testEnv, method, path, body string) (registryReport, int) {
+func decodeRegistry(t *testing.T, env *testEnv, method, path, body string) (catalog.UpdateReport, int) {
 	t.Helper()
 	rec := env.doJSON(method, path, body)
-	var rep registryReport
+	var rep catalog.UpdateReport
 	if rec.Code == http.StatusOK {
 		decode(t, rec, &rep)
 	}
@@ -36,10 +35,10 @@ func TestRenomearEquipamentoSemImagens(t *testing.T) {
 	if code != http.StatusOK || rep.Name != "8003-NOVO" || !rep.Renamed || rep.Merged || !rep.Complete {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
-	if _, ok := env.db.equipments["8003-MF4739"]; ok {
+	if _, ok := env.cat.Equipments["8003-MF4739"]; ok {
 		t.Error("o nome antigo deveria ter sumido")
 	}
-	if !env.db.equipments["8003-NOVO"] {
+	if !env.cat.Equipments["8003-NOVO"] {
 		t.Error("o nome novo deveria existir e estar ativo")
 	}
 }
@@ -84,13 +83,13 @@ func TestRenomearEquipamentoEmCascata(t *testing.T) {
 
 func TestRenomearParaNomeExistenteFunde(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.equipments["8003-DUPLICADO"] = true
+	env.cat.Equipments["8003-DUPLICADO"] = true
 
 	rep, code := decodeRegistry(t, env, "PATCH", "/equipments/8003-MF4739", `{"name":"8003-DUPLICADO"}`)
 	if code != http.StatusOK || !rep.Merged || rep.Name != "8003-DUPLICADO" {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
-	if _, ok := env.db.equipments["8003-MF4739"]; ok {
+	if _, ok := env.cat.Equipments["8003-MF4739"]; ok {
 		t.Error("depois da fusão, o nome antigo deveria sumir")
 	}
 }
@@ -122,7 +121,7 @@ func TestRenomearComFalhaPodeSerRepetido(t *testing.T) {
 	if code != http.StatusOK || rep.Complete || len(rep.Failed) != 1 || rep.Failed[0] != verified {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
-	if _, ok := env.db.equipments["8003-MF4739"]; !ok {
+	if _, ok := env.cat.Equipments["8003-MF4739"]; !ok {
 		t.Error("com falha, o nome antigo tem que ficar (para dar para repetir)")
 	}
 	if _, err := os.Stat(env.pkgFile(oldFile)); err != nil {
@@ -135,7 +134,7 @@ func TestRenomearComFalhaPodeSerRepetido(t *testing.T) {
 	if !rep.Complete || rep.VerifiedRenamed != 1 {
 		t.Errorf("repetindo: %+v", rep)
 	}
-	if _, ok := env.db.equipments["8003-MF4739"]; ok {
+	if _, ok := env.cat.Equipments["8003-MF4739"]; ok {
 		t.Error("agora o nome antigo deveria ter sumido")
 	}
 }
@@ -188,7 +187,7 @@ func TestEditarCadastroErros(t *testing.T) {
 
 func TestExcluirCadastroSemUsoApaga(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.equipments["sem-uso"] = true
+	env.cat.Equipments["sem-uso"] = true
 
 	rec := env.do("DELETE", "/equipments/sem-uso", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
@@ -197,7 +196,7 @@ func TestExcluirCadastroSemUsoApaga(t *testing.T) {
 	if resp["deleted"] != true || resp["deactivated"] != false {
 		t.Errorf("resp = %v", resp)
 	}
-	if _, ok := env.db.equipments["sem-uso"]; ok {
+	if _, ok := env.cat.Equipments["sem-uso"]; ok {
 		t.Error("deveria ter sido apagado de vez")
 	}
 }
@@ -213,7 +212,7 @@ func TestExcluirCadastroEmUsoDesativa(t *testing.T) {
 	if resp["deleted"] != false || resp["deactivated"] != true || resp["images"] != float64(1) {
 		t.Errorf("resp = %v", resp)
 	}
-	active, exists := env.db.cameras["hikvision-233"]
+	active, exists := env.cat.Cameras["hikvision-233"]
 	if !exists || active {
 		t.Errorf("deveria continuar cadastrada, mas desativada: exists=%v active=%v", exists, active)
 	}
@@ -250,14 +249,14 @@ func TestRenomearPacote(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(env.root, "dataset", testPkg)); !os.IsNotExist(err) {
 		t.Error("a pasta antiga deveria ter sumido")
 	}
-	if _, ok := env.db.packages[testPkg]; ok {
+	if _, ok := env.cat.Packages[testPkg]; ok {
 		t.Error("o nome antigo do pacote deveria ter sumido")
 	}
 }
 
 func TestRenomearPacoteErros(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.packages["outro"] = store.Package{Name: "outro"}
+	env.cat.Packages["outro"] = catalog.Package{Name: "outro"}
 
 	assertStatus(t, env.doJSON("PATCH", "/packages/"+testPkg, `{"name":"outro"}`), http.StatusConflict)
 	assertStatus(t, env.doJSON("PATCH", "/packages/"+testPkg, `{"name":"../etc"}`), http.StatusBadRequest)
@@ -267,7 +266,7 @@ func TestRenomearPacoteErros(t *testing.T) {
 
 func TestExcluirPacoteApagaTudo(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.packages["manter"] = store.Package{Name: "manter"}
+	env.cat.Packages["manter"] = catalog.Package{Name: "manter"}
 	sha := env.seedVerified(t, "verificada") // gera histórico
 	env.seedPending(t, "pendente")
 	other := env.uploadTo(t, "manter", upFile{"outra.jpg", "de outro pacote"})[0].SHA1

@@ -2,64 +2,23 @@ package api
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"log"
 	"net/http"
-	"strings"
+	"net/url"
 	"time"
 
+	"SIDM/internal/catalog"
 	"SIDM/internal/export"
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
 	"SIDM/internal/importer"
+	"SIDM/internal/platform"
 	"SIDM/internal/store"
 )
 
-// Rotas:
-//   GET  /health               ok se o Mongo responde
-//   GET  /codes                tabelas fixas do padrão (para os dropdowns)
-//   GET  /equipments?q=&limit= busca equipamentos (autocomplete), paginado
-//   GET  /cameras?q=&limit=    busca câmeras (autocomplete), paginado
-//   POST /equipments           cadastra equipamento {"name":...}
-//   POST /cameras              cadastra câmera {"name":...}
-//   PATCH/DELETE /equipments/{name}, /cameras/{name}  renomeia (cascata) / desativa
-//   POST /packages             cria pacote {"name":...}
-//   PATCH /packages/{name}     renomeia pacote (pasta + imagens)
-//   DELETE /packages/{name}?confirm=<name>  apaga pacote, imagens e arquivos
-//   GET  /packages?q=&limit=   pacotes com progresso, paginado
-//   POST /packages/{name}/next pega a próxima imagem da fila (X-User obrigatório)
-//   POST /images/{sha1}/release devolve a imagem para a fila
-//   POST /imports/inspect      "raio-x" de um CSV (colunas, exemplos, valores distintos)
-//   POST /import-profiles      cria um perfil de import (o "modelo" de um CSV)
-//   GET  /import-profiles      lista os perfis, paginado
-//   GET  /import-profiles/{name}  um perfil
-//   PUT  /import-profiles/{name}  atualiza um perfil (o JSON inteiro)
-//   POST /images/{sha1}/reopen    reabre para edição (verificada volta a pendente) e reserva
-//   DELETE /images/{sha1}         apaga a imagem (registro, histórico, caixas e arquivo)
-//   GET  /images/{sha1}/boxes     caixas (CVAT) de uma imagem
-//   GET  /packages/{name}/cvat.zip         imagens do pacote para o CVAT
-//   POST /packages/{name}/boxes/import     importa o COCO 1.0 do CVAT (ensaio por padrão)
-//   GET  /packages/{name}/boxes            resumo das caixas do pacote
-//   GET  /boxes/labels                     labels existentes em todos os pacotes
-//   GET|POST /export-profiles, GET|PUT|DELETE /export-profiles/{name}   perfis de export
-//   POST /exports/preview, POST /exports/download                       dataset RF-DETR/YOLO
-//   PATCH  /import-profiles/{name}  renomeia {"name": "..."}
-//   DELETE /import-profiles/{name}  apaga
-//   POST /packages/{name}/import?profile=X&dry_run=false  importa um CSV para os rascunhos
-//   POST /images/exists        checa hashes antes do upload
-//   POST /images?package=X     upload para o pacote X (pending)
-//   GET  /images               busca com filtros, paginado
-//   GET  /images/{sha1}        detalhe de uma imagem
-//   GET  /images/{sha1}/file   o arquivo da imagem
-//   PUT  /images/{sha1}        salva rascunho / verifica (renomeia para v2)
-//   POST /export               TODO: zip das imagens selecionadas
-//   GET  /docs                 Swagger UI (documentação interativa)
-//   GET  /openapi.yaml         a especificação OpenAPI
-//
-// Toda listagem responde no mesmo formato: {"total": N, "items": [...]},
-// com ?limit= e ?skip= para paginar.
+// A lista de rotas é a tabela de routes() (as daqui e as dos módulos), e
+// cada uma está documentada no openapi.yaml (o teste em docs_test.go
+// confere). Toda listagem responde no mesmo formato: {"total": N,
+// "items": [...]}, com ?limit= e ?skip= para paginar.
 
 // Store é tudo que a API precisa do banco.
 // A API depende desta interface, e não do *store.Store concreto: assim os
@@ -69,24 +28,15 @@ import (
 type Store interface {
 	Ping(ctx context.Context) error
 
-	SearchEquipments(ctx context.Context, q string, limit, skip int64) ([]string, int64, error)
-	SearchCameras(ctx context.Context, q string, limit, skip int64) ([]string, int64, error)
-	CreateEquipment(ctx context.Context, name string) error
-	CreateCamera(ctx context.Context, name string) error
-	EquipmentExists(ctx context.Context, name string) (bool, error)
-	CameraExists(ctx context.Context, name string) (bool, error)
-
-	FindRegistry(ctx context.Context, reg store.Registry, name string) (*store.RegistryEntry, error)
-	SetRegistryActive(ctx context.Context, reg store.Registry, name string, active bool) error
-	DeleteRegistry(ctx context.Context, reg store.Registry, name string) error
-	CountImagesUsing(ctx context.Context, reg store.Registry, name string) (int64, error)
-	RenameOnPending(ctx context.Context, reg store.Registry, oldName, newName string, now time.Time) (int64, error)
-
-	CreatePackage(ctx context.Context, name, createdBy string) error
-	RenamePackage(ctx context.Context, oldName, newName string) (int64, error)
-	DeletePackage(ctx context.Context, name string) (int64, error)
-	FindPackage(ctx context.Context, name string) (*store.Package, error)
-	ListPackages(ctx context.Context, q string, limit, skip int64) ([]store.PackageSummary, int64, error)
+	// O lado das imagens e das caixas das operações do catálogo (ver
+	// legacy_images.go e store/catalog.go).
+	PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error)
+	RenamePackageImages(ctx context.Context, oldName, newName string) (int64, error)
+	DeletePackageImages(ctx context.Context, name string) (int64, error)
+	CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error)
+	RenameOnPending(ctx context.Context, reg catalog.Registry, oldName, newName string, now time.Time) (int64, error)
+	PackageRenamed(ctx context.Context, oldName, newName string) error
+	PackageDeleted(ctx context.Context, name string) error
 
 	InsertImage(ctx context.Context, img *store.Image) error
 	DeleteImage(ctx context.Context, sha1 string) error
@@ -130,12 +80,15 @@ type Store interface {
 }
 
 type Server struct {
-	store Store
-	files *files.Storage
+	store   Store
+	files   *files.Storage
+	catalog *catalog.Service
 }
 
-func New(s Store, fs *files.Storage) *Server {
-	return &Server{store: s, files: fs}
+// New monta a API. O catálogo (pacotes, equipamentos, câmeras) já é um
+// módulo: as rotas dele entram junto, e os outros handlers usam o Service.
+func New(s Store, fs *files.Storage, cat *catalog.Service) *Server {
+	return &Server{store: s, files: fs, catalog: cat}
 }
 
 // route é uma linha da tabela de rotas.
@@ -148,23 +101,10 @@ type route struct {
 // para o teste conseguir percorrer a lista e conferir que cada rota está
 // documentada no openapi.yaml (ver docs_test.go).
 func (s *Server) routes() []route {
-	return []route{
+	rts := []route{
 		{"GET", "/health", s.handleHealth},
 		{"GET", "/codes", s.handleCodes},
 
-		{"GET", "/equipments", s.handleSearchNames(s.store.SearchEquipments)},
-		{"POST", "/equipments", s.handleCreateNamed(filename.SanitizeEquipment, s.store.CreateEquipment)},
-		{"PATCH", "/equipments/{name}", s.handleUpdateRegistry(store.Equipments, filename.SanitizeEquipment)},
-		{"DELETE", "/equipments/{name}", s.handleDeleteRegistry(store.Equipments)},
-		{"GET", "/cameras", s.handleSearchNames(s.store.SearchCameras)},
-		{"POST", "/cameras", s.handleCreateNamed(filename.SanitizeCamera, s.store.CreateCamera)},
-		{"PATCH", "/cameras/{name}", s.handleUpdateRegistry(store.Cameras, filename.SanitizeCamera)},
-		{"DELETE", "/cameras/{name}", s.handleDeleteRegistry(store.Cameras)},
-
-		{"GET", "/packages", s.handleListPackages},
-		{"POST", "/packages", s.handleCreatePackage},
-		{"PATCH", "/packages/{name}", s.handleRenamePackage},
-		{"DELETE", "/packages/{name}", s.handleDeletePackage},
 		{"POST", "/packages/{name}/next", s.handleNext},
 		{"POST", "/packages/{name}/import", s.handleImport},
 
@@ -203,6 +143,13 @@ func (s *Server) routes() []route {
 		{"PATCH", "/import-profiles/{name}", s.handleRenameProfile},
 		{"DELETE", "/import-profiles/{name}", s.handleDeleteProfile},
 	}
+	// As rotas dos módulos.
+	for _, m := range []platform.Module{s.catalog} {
+		for _, rt := range m.Routes() {
+			rts = append(rts, route{rt.Method, rt.Path, rt.Handler})
+		}
+	}
+	return rts
 }
 
 // Routes registra todas as rotas, mais a documentação, e devolve o handler
@@ -239,104 +186,23 @@ type page[T any] struct {
 	Items []T   `json:"items"`
 }
 
-type nameItem struct {
-	Name string `json:"name"`
+// Os ajudantes de resposta ficam no platform; estes atalhos ficam até os
+// handlers daqui irem para os módulos.
+func (s *Server) serverError(w http.ResponseWriter, err error) { platform.ServerError(w, err) }
+
+func (s *Server) logError(err error) { platform.LogError(err) }
+
+func userFrom(r *http.Request) string { return platform.UserFrom(r) }
+
+func writeJSON(w http.ResponseWriter, status int, v any) { platform.WriteJSON(w, status, v) }
+
+func writeError(w http.ResponseWriter, status int, msg string) { platform.WriteError(w, status, msg) }
+
+func intParam(q url.Values, key string, def, minV, maxV int64) int64 {
+	return platform.IntParam(q, key, def, minV, maxV)
 }
 
-// handleSearchNames: GET /equipments?q=mf47&limit=10&skip=0
-// Pensado para autocomplete: o front chama a cada letra digitada (com
-// debounce) e mostra as primeiras opções. Sem q, lista todos em ordem.
-func (s *Server) handleSearchNames(
-	search func(ctx context.Context, q string, limit, skip int64) ([]string, int64, error),
-) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		q := r.URL.Query()
-		query := strings.TrimSpace(q.Get("q"))
-		if len(query) > 64 {
-			writeError(w, http.StatusBadRequest, "busca longa demais (máx. 64 caracteres)")
-			return
-		}
-
-		names, total, err := search(r.Context(), query,
-			intParam(q, "limit", 10, 1, 50),
-			intParam(q, "skip", 0, 0, 1<<31))
-		if err != nil {
-			s.serverError(w, err)
-			return
-		}
-
-		items := make([]nameItem, len(names))
-		for i, n := range names {
-			items[i] = nameItem{Name: n}
-		}
-		writeJSON(w, http.StatusOK, page[nameItem]{Total: total, Items: items})
-	}
-}
-
-// handleCreateNamed serve para equipamentos e câmeras: o fluxo é o mesmo,
-// só mudam a sanitização e a collection. Por isso recebe as duas funções.
-func (s *Server) handleCreateNamed(
-	sanitize func(string) (string, error),
-	create func(context.Context, string) error,
-) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		r.Body = http.MaxBytesReader(w, r.Body, 1<<10) // corpo de no máximo 1 KB
-
-		var req struct {
-			Name string `json:"name"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, `JSON inválido: esperado {"name": "..."}`)
-			return
-		}
-
-		name, err := sanitize(req.Name)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		if err := create(r.Context(), name); err != nil {
-			if errors.Is(err, store.ErrDuplicate) {
-				writeError(w, http.StatusConflict, fmt.Sprintf("%q já está cadastrado", name))
-				return
-			}
-			s.serverError(w, err)
-			return
-		}
-
-		writeJSON(w, http.StatusCreated, map[string]string{"name": name})
-	}
-}
-
-// serverError loga o erro real e devolve uma mensagem genérica:
-// detalhes internos (como erro do Mongo) não devem vazar para o cliente.
-func (s *Server) serverError(w http.ResponseWriter, err error) {
-	log.Printf("erro interno: %v", err)
-	http.Error(w, "erro interno", http.StatusInternalServerError)
-}
-
-// userFrom diz quem está fazendo a ação.
-// TODO: quando tiver login, o usuário vem da sessão, não de um header.
-func userFrom(r *http.Request) string {
-	if u := r.Header.Get("X-User"); u != "" {
-		return u
-	}
-	return "anonymous"
-}
-
-func (s *Server) logError(err error) {
-	log.Printf("erro: %v", err)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		log.Printf("erro ao escrever JSON: %v", err)
-	}
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+// packageByName: ver catalog.Service.PackageByName.
+func (s *Server) packageByName(w http.ResponseWriter, r *http.Request, name string) (*catalog.Package, bool) {
+	return s.catalog.PackageByName(w, r, name)
 }

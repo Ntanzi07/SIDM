@@ -420,7 +420,7 @@ func (s *Server) opener(rel string) func() (io.ReadCloser, error) {
 // foi renomeado ou apagado).
 func (s *Server) checkPackages(w http.ResponseWriter, r *http.Request, p *export.Profile) bool {
 	for _, name := range p.Packages {
-		if _, err := s.store.FindPackage(r.Context(), name); errors.Is(err, store.ErrNotFound) {
+		if _, err := s.catalog.FindPackage(r.Context(), name); errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("o pacote %q do perfil não existe (foi renomeado ou apagado?)", name))
 			return false
 		} else if err != nil {

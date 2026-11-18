@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/catalog"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -120,7 +121,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 	e := env.seedNamed(t, "e.jpg", realJPEG(t, 64, 48, 6))
 	f := env.seedNamed(t, "f.jpg", realJPEG(t, 64, 48, 7))
 	// imagem de OUTRO pacote: o import procura no banco todo, então casa
-	env.db.packages["outro"] = store.Package{Name: "outro"}
+	env.cat.Packages["outro"] = catalog.Package{Name: "outro"}
 	other := env.uploadTo(t, "outro", upFile{"x.jpg", realJPEG(t, 64, 48, 8)})[0].SHA1
 
 	coco := cocoJSON(
@@ -334,7 +335,7 @@ func TestZipParaOCVAT(t *testing.T) {
 		}
 	}
 
-	env.db.packages["vazio"] = store.Package{Name: "vazio"}
+	env.cat.Packages["vazio"] = catalog.Package{Name: "vazio"}
 	assertStatus(t, env.do("GET", "/packages/vazio/cvat.zip", nil, nil), http.StatusNotFound)
 	assertStatus(t, env.do("GET", "/packages/nao-existe/cvat.zip", nil, nil), http.StatusNotFound)
 }

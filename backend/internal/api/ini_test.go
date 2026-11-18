@@ -99,7 +99,7 @@ func TestUploadComPerfilDeINI(t *testing.T) {
 	if img.Equipment != "MFR1-0001" {
 		t.Errorf("equipamento deveria vir sanitizado: %q", img.Equipment)
 	}
-	if !env.db.equipments["MFR1-0001"] {
+	if !env.cat.Equipments["MFR1-0001"] {
 		t.Error("o equipamento do INI deveria ser cadastrado automaticamente")
 	}
 	want := time.Date(2026, 9, 18, 13, 32, 28, 321e6, time.UTC)
@@ -176,7 +176,7 @@ func TestImportComPerfilDeINISemArquivo(t *testing.T) {
 	if a.Equipment != "MFR1-0001" || len(a.Vehicles) != 1 || a.Vehicles[0].Plate != "AAA1111" {
 		t.Errorf("imagem a = %+v", a)
 	}
-	if !env.db.equipments["MFR1-0001"] {
+	if !env.cat.Equipments["MFR1-0001"] {
 		t.Error("equipamento deveria ter sido cadastrado")
 	}
 }

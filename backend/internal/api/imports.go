@@ -327,7 +327,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "informe o perfil: ?profile=<nome>")
 		return
 	}
-	if _, err := s.store.FindPackage(r.Context(), pkg); err != nil {
+	if _, err := s.catalog.FindPackage(r.Context(), pkg); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe", pkg))
 			return
@@ -446,11 +446,11 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	// fique apontando para um cadastro que não existe.
 	var ok2 bool
 	if rep.NewEquipments, ok2 = s.registerMissing(w, r, sortedSet(equipments), dryRun,
-		s.store.EquipmentExists, s.store.CreateEquipment); !ok2 {
+		s.catalog.EquipmentExists, s.catalog.CreateEquipment); !ok2 {
 		return
 	}
 	if rep.NewCameras, ok2 = s.registerMissing(w, r, sortedSet(cameras), dryRun,
-		s.store.CameraExists, s.store.CreateCamera); !ok2 {
+		s.catalog.CameraExists, s.catalog.CreateCamera); !ok2 {
 		return
 	}
 

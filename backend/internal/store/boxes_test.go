@@ -118,21 +118,16 @@ func TestMigracaoDasCaixasAntigas(t *testing.T) {
 func TestCaixasNoRenomearEApagarPacote(t *testing.T) {
 	s := testStore(t)
 	ctx := context.Background()
-	s.CreatePackage(ctx, "velho", "nathan")
-	s.CreatePackage(ctx, "outro", "nathan")
-	img := newImage("a", time.Now())
-	img.Package, img.Path = "velho", "dataset/velho/a.jpg"
-	s.InsertImage(ctx, img)
 	s.ReplaceBoxSets(ctx, []BoxSet{boxSet("t", "a", "velho", "placa"), boxSet("t", "z", "outro", "placa")})
 
-	if _, err := s.RenamePackage(ctx, "velho", "novo"); err != nil {
+	if err := s.PackageRenamed(ctx, "velho", "novo"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.FindImageBoxSets(ctx, "a"); len(got) != 1 || got[0].Package != "novo" {
 		t.Errorf("as caixas deveriam ir junto com o pacote: %+v", got)
 	}
 
-	if _, err := s.DeletePackage(ctx, "novo"); err != nil {
+	if err := s.PackageDeleted(ctx, "novo"); err != nil {
 		t.Fatal(err)
 	}
 	if got, _ := s.FindImageBoxSets(ctx, "a"); len(got) != 0 {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/catalog"
 	"archive/zip"
 	"bytes"
 	"encoding/json"
@@ -42,7 +43,7 @@ func seedExport(t *testing.T, env *testEnv) (night1, night2, day string) {
 	pending := env.seedPending(t, "pendente")
 	put(pending, "placa")
 
-	env.db.packages["outro"] = store.Package{Name: "outro"}
+	env.cat.Packages["outro"] = catalog.Package{Name: "outro"}
 	other := env.uploadTo(t, "outro", upFile{"o.jpg", "outro"})[0].SHA1
 	assertStatus(t, env.doJSON("PUT", "/images/"+other, completeBody()), http.StatusOK)
 	put(other, "placa")
