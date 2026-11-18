@@ -1,0 +1,10 @@
+---
+description: Regras do projeto SIDM (sempre aplicadas)
+alwaysApply: true
+---
+
+As instruções do projeto ficam em `AGENTS.md` e na pasta `contexto/`. Antes de mudar
+código, leia `AGENTS.md`, `contexto/regras.md` e `contexto/arquitetura.md`.
+
+@AGENTS.md
+@contexto/regras.md
