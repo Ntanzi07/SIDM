@@ -18,7 +18,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -40,8 +39,6 @@ type memStore struct {
 	profiles   map[string]importer.Profile
 	images     map[string]store.Image
 	history    []store.HistoryEntry
-	boxSets    map[string]store.BoxSet // chave: tarefa + "|" + sha1
-	tasks      map[string]store.Task
 	exportProf map[string]export.Profile
 	lastFilter store.ImageFilter
 
@@ -53,8 +50,6 @@ type memStore struct {
 
 func newMemStore() *memStore {
 	return &memStore{
-		boxSets:    map[string]store.BoxSet{},
-		tasks:      map[string]store.Task{},
 		exportProf: map[string]export.Profile{},
 		profiles:   map[string]importer.Profile{},
 		images:     map[string]store.Image{},
@@ -422,232 +417,30 @@ func (m *memStore) DeletePackageImages(ctx context.Context, name string) (int64,
 	return int64(len(deleted)), nil
 }
 
-// PackageRenamed / PackageDeleted: as caixas (catalog.PackageListener).
-func (m *memStore) PackageRenamed(ctx context.Context, oldName, newName string) error {
+// VerifiedIDs: quais destes sha1 estão verificados.
+func (m *memStore) VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for id, set := range m.boxSets {
-		if set.Package == oldName {
-			set.Package = newName
-			m.boxSets[id] = set
-		}
-	}
-	return nil
-}
-
-func (m *memStore) PackageDeleted(ctx context.Context, name string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for id, set := range m.boxSets {
-		if set.Package == name {
-			delete(m.boxSets, id)
-		}
-	}
-	return nil
-}
-
-func boxKey(task, sha1 string) string { return task + "|" + sha1 }
-
-func (m *memStore) ReplaceBoxSets(ctx context.Context, sets []store.BoxSet) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, set := range sets {
-		if set.Boxes == nil {
-			set.Boxes = []boxes.Box{}
-		}
-		m.boxSets[boxKey(set.Task, set.ImageID)] = set
-	}
-	return nil
-}
-
-func (m *memStore) FindImageBoxSets(ctx context.Context, sha1 string) ([]store.BoxSet, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := []store.BoxSet{}
-	for _, set := range m.boxSets {
-		if set.ImageID == sha1 {
-			out = append(out, set)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
-	return out, nil
-}
-
-func (m *memStore) FindBoxSets(ctx context.Context, task string, ids []string) (map[string]store.BoxSet, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := map[string]store.BoxSet{}
+	out := map[string]bool{}
 	for _, id := range ids {
-		if set, ok := m.boxSets[boxKey(task, id)]; ok {
-			out[id] = set
+		if m.images[id].Status == store.StatusVerified {
+			out[id] = true
 		}
 	}
 	return out, nil
 }
 
-func (m *memStore) DeleteImageBoxSets(ctx context.Context, sha1 string) error {
+// TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
+func (m *memStore) TaskRenamed(ctx context.Context, oldName, newName string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for k, set := range m.boxSets {
-		if set.ImageID == sha1 {
-			delete(m.boxSets, k)
+	for name, p := range m.exportProf {
+		if p.Task == oldName {
+			p.Task = newName
+			m.exportProf[name] = p
 		}
 	}
 	return nil
-}
-
-func (m *memStore) PackageBoxCounts(ctx context.Context, pkg string) ([]store.PackageTaskCount, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	by := map[string]*store.PackageTaskCount{}
-	for _, set := range m.boxSets {
-		if set.Package != pkg {
-			continue
-		}
-		c := by[set.Task]
-		if c == nil {
-			c = &store.PackageTaskCount{Task: set.Task}
-			by[set.Task] = c
-		}
-		c.Images++
-		c.Boxes += int64(len(set.Boxes))
-	}
-	out := []store.PackageTaskCount{}
-	for _, c := range by {
-		out = append(out, *c)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Task < out[j].Task })
-	return out, nil
-}
-
-func (m *memStore) CreateTask(ctx context.Context, t *store.Task) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.tasks[t.Name]; ok {
-		return store.ErrDuplicate
-	}
-	m.tasks[t.Name] = *t
-	return nil
-}
-
-func (m *memStore) FindTask(ctx context.Context, name string) (*store.Task, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	t, ok := m.tasks[name]
-	if !ok {
-		return nil, store.ErrNotFound
-	}
-	t.Labels = append([]string{}, t.Labels...)
-	return &t, nil
-}
-
-func (m *memStore) ListTasks(ctx context.Context) ([]store.Task, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := []store.Task{}
-	for _, t := range m.tasks {
-		out = append(out, t)
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
-	return out, nil
-}
-
-func (m *memStore) UpdateTask(ctx context.Context, oldName string, t *store.Task) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.tasks[oldName]; !ok {
-		return store.ErrNotFound
-	}
-	if oldName != t.Name {
-		if _, ok := m.tasks[t.Name]; ok {
-			return store.ErrDuplicate
-		}
-		for k, set := range m.boxSets {
-			if set.Task == oldName {
-				delete(m.boxSets, k)
-				set.Task = t.Name
-				m.boxSets[boxKey(t.Name, set.ImageID)] = set
-			}
-		}
-		for name, p := range m.exportProf {
-			if p.Task == oldName {
-				p.Task = t.Name
-				m.exportProf[name] = p
-			}
-		}
-		delete(m.tasks, oldName)
-	}
-	m.tasks[t.Name] = *t
-	return nil
-}
-
-func (m *memStore) AddTaskLabels(ctx context.Context, name string, labels []string, now time.Time) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	t, ok := m.tasks[name]
-	if !ok {
-		return store.ErrNotFound
-	}
-	for _, l := range labels {
-		if !slices.Contains(t.Labels, l) {
-			t.Labels = append(t.Labels, l)
-		}
-	}
-	t.UpdatedAt = now
-	m.tasks[name] = t
-	return nil
-}
-
-func (m *memStore) DeleteTask(ctx context.Context, name string) (int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.tasks[name]; !ok {
-		return 0, store.ErrNotFound
-	}
-	var n int64
-	for k, set := range m.boxSets {
-		if set.Task == name {
-			delete(m.boxSets, k)
-			n++
-		}
-	}
-	delete(m.tasks, name)
-	return n, nil
-}
-
-func (m *memStore) TaskStats(ctx context.Context, task string) (*store.TaskStats, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	st := &store.TaskStats{Labels: map[string]int64{}, Packages: []store.TaskPackage{}}
-	by := map[string]*store.TaskPackage{}
-	for _, set := range m.boxSets {
-		if set.Task != task {
-			continue
-		}
-		p := by[set.Package]
-		if p == nil {
-			p = &store.TaskPackage{Name: set.Package}
-			by[set.Package] = p
-		}
-		p.Images++
-		st.Images++
-		if m.images[set.ImageID].Status == store.StatusVerified {
-			p.Verified++
-			st.Verified++
-		}
-		if len(set.Boxes) == 0 {
-			st.Negatives++
-		}
-		for _, b := range set.Boxes {
-			st.Labels[b.Label]++
-			st.Boxes++
-		}
-	}
-	for _, p := range by {
-		st.Packages = append(st.Packages, *p)
-	}
-	sort.Slice(st.Packages, func(i, j int) bool { return st.Packages[i].Name < st.Packages[j].Name })
-	return st, nil
 }
 
 func (m *memStore) CreateExportProfile(ctx context.Context, p *export.Profile) error {
@@ -706,6 +499,7 @@ func (m *memStore) ListExportProfiles(ctx context.Context) ([]export.Profile, er
 type testEnv struct {
 	db      *memStore
 	cat     *catalog.Memory // pacotes, equipamentos e câmeras
+	box     *boxes.Memory   // tarefas e caixas
 	files   *files.Storage
 	root    string
 	handler http.Handler
@@ -723,8 +517,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	cat.Equipments["8003-MF4739"] = true
 	cat.Cameras["hikvision-233"] = true
 	cat.Packages[testPkg] = catalog.Package{Name: testPkg}
-	svc := catalog.New(cat, fs, NewLegacyImages(db, fs), db)
-	return &testEnv{db: db, cat: cat, files: fs, root: root, handler: New(db, fs, svc).Routes()}
+	images := NewLegacyImages(db, fs)
+	svc := catalog.New(cat, fs, images)
+	box := boxes.NewMemory()
+	bx := boxes.New(box, images, fs, svc, db)
+	svc.Listen(bx)
+	return &testEnv{db: db, cat: cat, box: box, files: fs, root: root, handler: New(db, fs, svc, bx).Routes()}
 }
 
 // do executa um request e devolve a resposta gravada.

@@ -19,7 +19,7 @@ var (
 )
 
 // Acesso ao MongoDB das partes que ainda não viraram módulo (imagens,
-// histórico, fila, caixas, tarefas, perfis de import e de export).
+// histórico, fila, perfis de import e de export).
 type Store struct {
 	client *mongo.Client
 	db     *mongo.Database
@@ -42,7 +42,7 @@ func New(ctx context.Context, uri, dbName string) (*Store, error) {
 		client: client,
 		db:     client.Database(dbName),
 	}
-	for _, ensure := range []func(context.Context) error{s.ensureTaskIndexes, s.ensureBoxIndexes, s.ensureExportIndexes} {
+	for _, ensure := range []func(context.Context) error{s.ensureExportIndexes} {
 		if err := ensure(ctx); err != nil {
 			_ = client.Disconnect(context.Background())
 			return nil, err

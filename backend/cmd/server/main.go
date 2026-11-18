@@ -11,6 +11,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"SIDM/internal/api"
+	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/files"
 	"SIDM/internal/store"
@@ -44,10 +45,17 @@ func main() {
 	}
 	log.Printf("imagens em %s", imagesDir)
 
-	// Os módulos. O catálogo já tem o seu repositório; o resto ainda usa o
-	// store, que também faz o lado das imagens e das caixas do catálogo.
-	cat := catalog.New(catalog.NewMongoRepo(s.DB()), fs, api.NewLegacyImages(s, fs), s)
-	srv := api.New(s, fs, cat)
+	// Os módulos. Catálogo e caixas já têm os seus repositórios; o resto
+	// ainda usa o store, que também faz o lado das imagens dos módulos.
+	images := api.NewLegacyImages(s, fs)
+	cat := catalog.New(catalog.NewMongoRepo(s.DB()), fs, images)
+	boxRepo := boxes.NewMongoRepo(s.DB())
+	if err := boxRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar as caixas no Mongo: %v", err)
+	}
+	bx := boxes.New(boxRepo, images, fs, cat, s) // s: os perfis de export guardam a tarefa
+	cat.Listen(bx)                               // as caixas guardam o pacote de cada imagem
+	srv := api.New(s, fs, cat, bx)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

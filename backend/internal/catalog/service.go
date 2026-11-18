@@ -25,6 +25,11 @@ func New(repo Repo, dirs Dirs, images Images, listeners ...PackageListener) *Ser
 	return &Service{repo: repo, dirs: dirs, images: images, listeners: listeners, now: func() time.Time { return time.Now().UTC() }}
 }
 
+// Listen acrescenta quem quer ser avisado das mudanças de pacote. Existe
+// porque o aviso às vezes vai para um módulo que depende do catálogo (as
+// caixas pedem o pacote da URL a ele): o main cria os dois e depois liga.
+func (s *Service) Listen(l PackageListener) { s.listeners = append(s.listeners, l) }
+
 // ---------- pacotes ----------
 
 // CreatePackage cadastra o pacote (nome já sanitizado) e cria a pasta: um

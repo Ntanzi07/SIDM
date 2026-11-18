@@ -2,19 +2,23 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/filename"
 	"SIDM/internal/files"
+	"SIDM/internal/importer"
 	"SIDM/internal/platform"
 	"SIDM/internal/store"
 )
 
-// LegacyImages é o lado das IMAGENS das operações do catálogo
-// (catalog.Images), enquanto as imagens não viram um módulo: usa o store e
-// os arquivos direto. Quando o módulo images existir, isto vai para lá.
+// LegacyImages é o lado das IMAGENS do que os módulos precisam
+// (catalog.Images e boxes.Images), enquanto as imagens não viram um módulo:
+// usa o store e os arquivos direto. Quando o módulo images existir, isto vai
+// para lá.
 type LegacyImages struct {
 	store Store
 	files *files.Storage
@@ -25,7 +29,50 @@ func NewLegacyImages(s Store, fs *files.Storage) *LegacyImages {
 	return &LegacyImages{store: s, files: fs, now: func() time.Time { return time.Now().UTC() }}
 }
 
-var _ catalog.Images = (*LegacyImages)(nil)
+var (
+	_ catalog.Images = (*LegacyImages)(nil)
+	_ boxes.Images   = (*LegacyImages)(nil)
+)
+
+// ---------- para o módulo boxes ----------
+
+func toRefs(imgs []store.Image) []boxes.ImageRef {
+	out := make([]boxes.ImageRef, len(imgs))
+	for i, img := range imgs {
+		out[i] = boxes.ImageRef{SHA1: img.SHA1, Package: img.Package, OriginalName: img.OriginalName, Path: img.Path}
+	}
+	return out
+}
+
+// BySHA1 e ByOriginalName: em todos os pacotes (pkg "").
+func (l *LegacyImages) BySHA1(ctx context.Context, shas []string) ([]boxes.ImageRef, error) {
+	imgs, err := l.store.FindImagesByKeys(ctx, "", importer.MatchBySHA1, shas)
+	return toRefs(imgs), err
+}
+
+func (l *LegacyImages) ByOriginalName(ctx context.Context, names []string) ([]boxes.ImageRef, error) {
+	imgs, err := l.store.FindImagesByKeys(ctx, "", importer.MatchByOriginalName, names)
+	return toRefs(imgs), err
+}
+
+func (l *LegacyImages) Exists(ctx context.Context, sha1 string) (bool, error) {
+	_, err := l.store.FindImage(ctx, sha1)
+	if errors.Is(err, platform.ErrNotFound) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (l *LegacyImages) InPackage(ctx context.Context, pkg string, limit, skip int64) ([]boxes.ImageRef, int64, error) {
+	imgs, total, err := l.store.ListImages(ctx, store.ImageFilter{Package: pkg, Limit: limit, Skip: skip})
+	return toRefs(imgs), total, err
+}
+
+func (l *LegacyImages) Verified(ctx context.Context, ids []string) (map[string]bool, error) {
+	return l.store.VerifiedIDs(ctx, ids)
+}
+
+// ---------- para o módulo catalog ----------
 
 func (l *LegacyImages) PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error) {
 	return l.store.PackageProgress(ctx, names)

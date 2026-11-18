@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"time"
 
+	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/export"
 	"SIDM/internal/filename"
@@ -35,26 +36,11 @@ type Store interface {
 	DeletePackageImages(ctx context.Context, name string) (int64, error)
 	CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error)
 	RenameOnPending(ctx context.Context, reg catalog.Registry, oldName, newName string, now time.Time) (int64, error)
-	PackageRenamed(ctx context.Context, oldName, newName string) error
-	PackageDeleted(ctx context.Context, name string) error
+	VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error)
 
 	InsertImage(ctx context.Context, img *store.Image) error
 	DeleteImage(ctx context.Context, sha1 string) error
 	DeleteImageHistory(ctx context.Context, sha1 string) error
-
-	// Tarefas de anotação e caixas (bounding boxes) do CVAT
-	CreateTask(ctx context.Context, t *store.Task) error
-	FindTask(ctx context.Context, name string) (*store.Task, error)
-	ListTasks(ctx context.Context) ([]store.Task, error)
-	UpdateTask(ctx context.Context, oldName string, t *store.Task) error
-	AddTaskLabels(ctx context.Context, name string, labels []string, now time.Time) error
-	DeleteTask(ctx context.Context, name string) (int64, error)
-	TaskStats(ctx context.Context, task string) (*store.TaskStats, error)
-	ReplaceBoxSets(ctx context.Context, sets []store.BoxSet) error
-	FindImageBoxSets(ctx context.Context, sha1 string) ([]store.BoxSet, error)
-	FindBoxSets(ctx context.Context, task string, ids []string) (map[string]store.BoxSet, error)
-	DeleteImageBoxSets(ctx context.Context, sha1 string) error
-	PackageBoxCounts(ctx context.Context, pkg string) ([]store.PackageTaskCount, error)
 
 	// Perfis de export
 	CreateExportProfile(ctx context.Context, p *export.Profile) error
@@ -83,12 +69,14 @@ type Server struct {
 	store   Store
 	files   *files.Storage
 	catalog *catalog.Service
+	boxes   *boxes.Service
 }
 
-// New monta a API. O catálogo (pacotes, equipamentos, câmeras) já é um
-// módulo: as rotas dele entram junto, e os outros handlers usam o Service.
-func New(s Store, fs *files.Storage, cat *catalog.Service) *Server {
-	return &Server{store: s, files: fs, catalog: cat}
+// New monta a API. O catálogo (pacotes, equipamentos, câmeras) e as caixas
+// (tarefas, CVAT) já são módulos: as rotas deles entram junto, e os outros
+// handlers usam os Services.
+func New(s Store, fs *files.Storage, cat *catalog.Service, bx *boxes.Service) *Server {
+	return &Server{store: s, files: fs, catalog: cat, boxes: bx}
 }
 
 // route é uma linha da tabela de rotas.
@@ -115,15 +103,6 @@ func (s *Server) routes() []route {
 		{"PUT", "/images/{sha1}", s.handleAnnotate},
 		{"DELETE", "/images/{sha1}", s.handleDeleteImage},
 		{"POST", "/images/{sha1}/reopen", s.handleReopen},
-		{"GET", "/images/{sha1}/boxes", s.handleImageBoxes},
-		{"GET", "/packages/{name}/boxes", s.handlePackageBoxes},
-		{"GET", "/packages/{name}/cvat.zip", s.handleCVATZip},
-		{"GET", "/tasks", s.handleListTasks},
-		{"POST", "/tasks", s.handleCreateTask},
-		{"GET", "/tasks/{name}", s.handleGetTask},
-		{"PUT", "/tasks/{name}", s.handleReplaceTask},
-		{"DELETE", "/tasks/{name}", s.handleDeleteTask},
-		{"POST", "/tasks/{name}/import", s.handleImportTask},
 		{"GET", "/export-folder-fields", s.handleExportFolderFields},
 		{"GET", "/export-profiles", s.handleListExportProfiles},
 		{"POST", "/export-profiles", s.handleCreateExportProfile},
@@ -144,7 +123,7 @@ func (s *Server) routes() []route {
 		{"DELETE", "/import-profiles/{name}", s.handleDeleteProfile},
 	}
 	// As rotas dos módulos.
-	for _, m := range []platform.Module{s.catalog} {
+	for _, m := range []platform.Module{s.catalog, s.boxes} {
 		for _, rt := range m.Routes() {
 			rts = append(rts, route{rt.Method, rt.Path, rt.Handler})
 		}

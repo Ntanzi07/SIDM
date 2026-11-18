@@ -1,12 +1,12 @@
 package api
 
 import (
+	"SIDM/internal/boxes"
 	"net/http"
 	"strings"
 	"testing"
 
 	"SIDM/internal/export"
-	"SIDM/internal/store"
 )
 
 func TestTarefasCRUD(t *testing.T) {
@@ -14,7 +14,7 @@ func TestTarefasCRUD(t *testing.T) {
 
 	rec := env.doJSON("POST", "/tasks", `{"name":"capacete","description":" motos ","labels":[" com_capacete ","sem_capacete","com_capacete",""]}`)
 	assertStatus(t, rec, http.StatusCreated)
-	task := env.db.tasks["capacete"]
+	task := env.box.Tasks["capacete"]
 	if task.Description != "motos" || strings.Join(task.Labels, ",") != "com_capacete,sem_capacete" || task.CreatedBy == "" {
 		t.Errorf("tarefa = %+v", task)
 	}
@@ -33,8 +33,8 @@ func TestTarefasCRUD(t *testing.T) {
 	putTask(env, "capacete", b)
 
 	var view struct {
-		store.Task
-		Stats store.TaskStats `json:"stats"`
+		boxes.Task
+		Stats boxes.Stats `json:"stats"`
 	}
 	decode(t, env.do("GET", "/tasks/capacete", nil, nil), &view)
 	st := view.Stats
@@ -44,7 +44,7 @@ func TestTarefasCRUD(t *testing.T) {
 	}
 	assertStatus(t, env.do("GET", "/tasks/nao-existe", nil, nil), http.StatusNotFound)
 
-	var list page[taskView]
+	var list page[boxes.TaskView]
 	decode(t, env.do("GET", "/tasks", nil, nil), &list)
 	if list.Total != 1 || list.Items[0].Stats.Images != 2 {
 		t.Errorf("lista = %+v", list)
@@ -61,14 +61,14 @@ func TestTarefasCRUD(t *testing.T) {
 	if env.db.exportProf["p"].Task != "moto-capacete" {
 		t.Error("o perfil de export deveria apontar para o nome novo")
 	}
-	if got := env.db.tasks["moto-capacete"]; got.CreatedBy != task.CreatedBy || len(got.Labels) != 1 {
+	if got := env.box.Tasks["moto-capacete"]; got.CreatedBy != task.CreatedBy || len(got.Labels) != 1 {
 		t.Errorf("tarefa renomeada = %+v", got)
 	}
 	assertStatus(t, env.doJSON("PUT", "/tasks/sumiu", `{"name":"x"}`), http.StatusNotFound)
 
 	rec = env.do("DELETE", "/tasks/moto-capacete", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
-	if len(env.db.boxSets) != 0 {
+	if len(env.box.Sets) != 0 {
 		t.Error("apagar a tarefa deveria apagar as caixas dela")
 	}
 	assertStatus(t, env.do("DELETE", "/tasks/moto-capacete", nil, nil), http.StatusNotFound)

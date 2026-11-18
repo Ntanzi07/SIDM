@@ -165,7 +165,7 @@ func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 		s.logError(err)
 		warnings = append(warnings, "a imagem foi apagada, mas o histórico dela não")
 	}
-	if err := s.store.DeleteImageBoxSets(ctx, img.SHA1); err != nil {
+	if err := s.boxes.DeleteImage(ctx, img.SHA1); err != nil {
 		s.logError(err)
 		warnings = append(warnings, "a imagem foi apagada, mas as caixas dela não")
 	}

@@ -75,9 +75,9 @@ SIDM/
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
-        ├── boxes/          leitura das caixas exportadas do CVAT (COCO 1.0)
+        ├── boxes/          MÓDULO: tarefas e caixas do CVAT (leitura do COCO, import, cvat.zip)
         ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC
-        ├── store/          Mongo do que ainda não é módulo: imagens, fila, caixas, perfis, histórico
+        ├── store/          Mongo do que ainda não é módulo: imagens, fila, perfis, histórico
         └── api/            handlers HTTP do que ainda não é módulo + openapi.yaml
 ```
 
@@ -135,8 +135,9 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 ### Organização do backend (monólito modular)
 
 O backend é **um binário só**, organizado por **assunto** (módulos), e não por
-camada. A reorganização está em andamento: o `catalog` já é um módulo; imagens,
-import, caixas e export ainda vivem em `api/` + `store/` e vão sair um por vez.
+camada. A reorganização está em andamento: `catalog` e `boxes` já são módulos;
+imagens, import e export ainda vivem em `api/` + `store/` e vão sair um por vez
+(o lado das imagens do que os módulos precisam está em `api/legacy_images.go`).
 
 Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 
@@ -153,7 +154,9 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 - o que ele precisa de outro, pede por uma interface pequena declarada nele
   (ex.: o catálogo declara `Images`, com o progresso dos pacotes e as cascatas);
 - as cascatas viram **avisos**: ao renomear ou apagar um pacote, o catálogo avisa
-  quem guarda o pacote (`PackageListener`), e cada um cuida das suas coleções;
+  quem guarda o pacote (`PackageListener`: as caixas); ao renomear uma tarefa, o
+  `boxes` avisa quem guarda a tarefa (`TaskListener`: os perfis de export). Cada
+  um cuida das suas coleções;
 - o `main.go` monta os módulos e liga as interfaces;
 - a API não muda com a reorganização: o frontend não percebe.
 

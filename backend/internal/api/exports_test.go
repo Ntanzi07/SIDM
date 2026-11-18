@@ -15,7 +15,6 @@ import (
 
 	"SIDM/internal/boxes"
 	"SIDM/internal/export"
-	"SIDM/internal/store"
 )
 
 const exportTask = "veiculos"
@@ -25,8 +24,8 @@ const exportTask = "veiculos"
 // 1 de outro pacote. Mais uma verificada só em OUTRA tarefa ("capacete").
 func seedExport(t *testing.T, env *testEnv) (night1, night2, day string) {
 	t.Helper()
-	env.db.tasks[exportTask] = store.Task{Name: exportTask}
-	env.db.tasks["capacete"] = store.Task{Name: "capacete"}
+	env.box.Tasks[exportTask] = boxes.Task{Name: exportTask}
+	env.box.Tasks["capacete"] = boxes.Task{Name: "capacete"}
 	verify := func(content, dayTime string) string {
 		sha := env.seedPending(t, content)
 		assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody(func(b map[string]any) { b["day_time"] = dayTime })), http.StatusOK)
@@ -53,11 +52,11 @@ func seedExport(t *testing.T, env *testEnv) (night1, night2, day string) {
 }
 
 func putTask(env *testEnv, task, sha string, labels ...string) {
-	set := store.BoxSet{Task: task, ImageID: sha, Package: env.db.images[sha].Package, Width: 100, Height: 50, Boxes: []boxes.Box{}}
+	set := boxes.Set{Task: task, ImageID: sha, Package: env.db.images[sha].Package, Width: 100, Height: 50, Boxes: []boxes.Box{}}
 	for _, l := range labels {
 		set.Boxes = append(set.Boxes, boxes.Box{Label: l, X: 10, Y: 10, W: 20, H: 10})
 	}
-	env.db.boxSets[boxKey(task, sha)] = set
+	env.box.Sets[boxes.Key(task, sha)] = set
 }
 
 func preview(t *testing.T, env *testEnv, body string) (exportPreview, int, string) {
@@ -150,7 +149,7 @@ func TestExportOutraTarefaENegativas(t *testing.T) {
 
 func TestExportErros(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.tasks["veiculos"] = store.Task{Name: "veiculos"}
+	env.box.Tasks["veiculos"] = boxes.Task{Name: "veiculos"}
 	cases := map[string]struct {
 		body string
 		code int

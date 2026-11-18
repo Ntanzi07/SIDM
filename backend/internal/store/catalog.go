@@ -12,9 +12,9 @@ import (
 	"SIDM/internal/catalog"
 )
 
-// O lado das IMAGENS e das CAIXAS das operações do catálogo (pacotes,
-// equipamentos e câmeras): o catálogo cuida das coleções dele e chama estas
-// funções (pelas interfaces catalog.Images e catalog.PackageListener).
+// O lado das IMAGENS das operações dos módulos (catálogo e caixas): cada
+// módulo cuida das coleções dele e chama estas funções pelas interfaces
+// (catalog.Images, boxes.Images), por meio do adaptador api.LegacyImages.
 
 // PackageProgress conta as imagens de cada pacote por status, numa
 // agregação só, sobre os pacotes pedidos:
@@ -150,19 +150,30 @@ func (s *Store) RenameOnPending(ctx context.Context, reg catalog.Registry, oldNa
 	return res.ModifiedCount, nil
 }
 
-// PackageRenamed: as caixas guardam o pacote de cada imagem.
-func (s *Store) PackageRenamed(ctx context.Context, oldName, newName string) error {
-	if _, err := s.boxes().UpdateMany(ctx, bson.D{{Key: "package", Value: oldName}},
-		bson.D{{Key: "$set", Value: bson.D{{Key: "package", Value: newName}}}}); err != nil {
-		return fmt.Errorf("renomear o pacote nas caixas: %w", err)
-	}
-	return nil
-}
+// ---------- o lado das imagens do módulo boxes ----------
 
-// PackageDeleted apaga as caixas das imagens do pacote.
-func (s *Store) PackageDeleted(ctx context.Context, name string) error {
-	if _, err := s.boxes().DeleteMany(ctx, bson.D{{Key: "package", Value: name}}); err != nil {
-		return fmt.Errorf("apagar caixas do pacote %s: %w", name, err)
+// VerifiedIDs: quais destes sha1 são de imagens verificadas.
+func (s *Store) VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error) {
+	out := make(map[string]bool, len(ids))
+	const batch = 1000
+	for start := 0; start < len(ids); start += batch {
+		end := min(start+batch, len(ids))
+		cur, err := s.db.Collection("images").Find(ctx, bson.D{
+			{Key: "_id", Value: bson.D{{Key: "$in", Value: ids[start:end]}}},
+			{Key: "status", Value: StatusVerified},
+		}, options.Find().SetProjection(bson.D{{Key: "_id", Value: 1}}))
+		if err != nil {
+			return nil, fmt.Errorf("imagens verificadas: %w", err)
+		}
+		var docs []struct {
+			ID string `bson:"_id"`
+		}
+		if err := cur.All(ctx, &docs); err != nil {
+			return nil, fmt.Errorf("ler imagens verificadas: %w", err)
+		}
+		for _, d := range docs {
+			out[d.ID] = true
+		}
 	}
-	return nil
+	return out, nil
 }

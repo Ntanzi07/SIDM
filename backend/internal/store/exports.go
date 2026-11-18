@@ -85,3 +85,12 @@ func (s *Store) ListExportProfiles(ctx context.Context) ([]export.Profile, error
 	}
 	return out, nil
 }
+
+// TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
+func (s *Store) TaskRenamed(ctx context.Context, oldName, newName string) error {
+	if _, err := s.exportProfiles().UpdateMany(ctx, bson.D{{Key: "task", Value: oldName}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "task", Value: newName}}}}); err != nil {
+		return fmt.Errorf("renomear a tarefa nos perfis de export: %w", err)
+	}
+	return nil
+}

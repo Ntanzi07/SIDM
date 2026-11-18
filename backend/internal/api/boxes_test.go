@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"archive/zip"
 	"bytes"
@@ -9,10 +10,9 @@ import (
 	"image/color"
 	"image/jpeg"
 	"net/http"
+	"regexp"
 	"strings"
 	"testing"
-
-	"SIDM/internal/store"
 )
 
 // realJPEG gera um JPEG de verdade (o import confere o tamanho da imagem).
@@ -67,23 +67,23 @@ func cocoJSON(imgs ...cocoImg) string {
 }
 
 type boxReport struct {
-	DryRun        bool           `json:"dry_run"`
-	Task          string         `json:"task"`
-	FileImages    int            `json:"file_images"`
-	FileBoxes     int            `json:"file_boxes"`
-	Labels        map[string]int `json:"labels"`
-	NewLabels     []string       `json:"new_labels"`
-	Matched       int            `json:"matched"`
-	Packages      map[string]int `json:"packages"`
-	NotFound      []string       `json:"not_found"`
-	NotFoundCount int            `json:"not_found_count"`
-	Ambiguous     []string       `json:"ambiguous"`
-	Empty         int            `json:"empty"`
-	SizeMismatch  []sizeMismatch `json:"size_mismatch"`
-	WillApply     int            `json:"will_apply"`
-	Replaced      int            `json:"replaced"`
-	Applied       int            `json:"applied"`
-	AppliedBoxes  int            `json:"applied_boxes"`
+	DryRun        bool                 `json:"dry_run"`
+	Task          string               `json:"task"`
+	FileImages    int                  `json:"file_images"`
+	FileBoxes     int                  `json:"file_boxes"`
+	Labels        map[string]int       `json:"labels"`
+	NewLabels     []string             `json:"new_labels"`
+	Matched       int                  `json:"matched"`
+	Packages      map[string]int       `json:"packages"`
+	NotFound      []string             `json:"not_found"`
+	NotFoundCount int                  `json:"not_found_count"`
+	Ambiguous     []string             `json:"ambiguous"`
+	Empty         int                  `json:"empty"`
+	SizeMismatch  []boxes.SizeMismatch `json:"size_mismatch"`
+	WillApply     int                  `json:"will_apply"`
+	Replaced      int                  `json:"replaced"`
+	Applied       int                  `json:"applied"`
+	AppliedBoxes  int                  `json:"applied_boxes"`
 }
 
 func (e *testEnv) importBoxes(t *testing.T, task, query, fileName, content string) (boxReport, int) {
@@ -96,11 +96,8 @@ func (e *testEnv) importBoxes(t *testing.T, task, query, fileName, content strin
 	return rep, rec.Code
 }
 
-func (e *testEnv) boxSet(task, sha string) (store.BoxSet, bool) {
-	e.db.mu.Lock()
-	defer e.db.mu.Unlock()
-	set, ok := e.db.boxSets[boxKey(task, sha)]
-	return set, ok
+func (e *testEnv) boxSet(task, sha string) (boxes.Set, bool) {
+	return e.box.Get(task, sha)
 }
 
 func TestImportarCaixasDoCVAT(t *testing.T) {
@@ -137,8 +134,8 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 
 	t.Run("ensaio não grava", func(t *testing.T) {
 		rep, code := env.importBoxes(t, "veiculos", "", "task.json", coco)
-		if code != http.StatusOK || !rep.DryRun || rep.Applied != 0 || len(env.db.boxSets) != 0 || rep.Task != "veiculos" {
-			t.Fatalf("code=%d rep=%+v boxSets=%d", code, rep, len(env.db.boxSets))
+		if code != http.StatusOK || !rep.DryRun || rep.Applied != 0 || len(env.box.Sets) != 0 || rep.Task != "veiculos" {
+			t.Fatalf("code=%d rep=%+v boxSets=%d", code, rep, len(env.box.Sets))
 		}
 		if rep.FileImages != 8 || rep.Matched != 6 || rep.NotFoundCount != 1 || len(rep.Ambiguous) != 1 || rep.Empty != 1 || rep.WillApply != 4 {
 			t.Errorf("casamento: %+v", rep)
@@ -156,7 +153,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 		if strings.Join(rep.NewLabels, ",") != "carro" {
 			t.Errorf("labels novas = %v", rep.NewLabels)
 		}
-		if task := env.db.tasks["veiculos"]; len(task.Labels) != 1 {
+		if task := env.box.Tasks["veiculos"]; len(task.Labels) != 1 {
 			t.Error("o ensaio não pode mexer nas labels da tarefa")
 		}
 	})
@@ -185,7 +182,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 				t.Errorf("%s NÃO deveria estar na tarefa", sha)
 			}
 		}
-		if labels := env.db.tasks["veiculos"].Labels; strings.Join(labels, ",") != "placa,carro" {
+		if labels := env.box.Tasks["veiculos"].Labels; strings.Join(labels, ",") != "placa,carro" {
 			t.Errorf("labels da tarefa = %v (a nova vai no fim)", labels)
 		}
 	})
@@ -220,7 +217,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 		rec := env.do("GET", "/images/"+a+"/boxes", nil, nil)
 		assertStatus(t, rec, http.StatusOK)
 		var resp struct {
-			Items []store.BoxSet `json:"items"`
+			Items []boxes.Set `json:"items"`
 		}
 		decode(t, rec, &resp)
 		if len(resp.Items) != 2 || resp.Items[0].Task != "capacete" || resp.Items[1].Task != "veiculos" {
@@ -234,7 +231,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 		rec = env.do("GET", "/packages/"+testPkg+"/boxes", nil, nil)
 		assertStatus(t, rec, http.StatusOK)
 		var sum struct {
-			Tasks []store.PackageTaskCount `json:"tasks"`
+			Tasks []boxes.PackageCount `json:"tasks"`
 		}
 		decode(t, rec, &sum)
 		if len(sum.Tasks) != 2 || sum.Tasks[0].Images != 2 || sum.Tasks[1].Task != "veiculos" || sum.Tasks[1].Images != 3 {
@@ -254,7 +251,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 
 func TestCaixasAcompanhamOPacote(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.tasks["t"] = store.Task{Name: "t"}
+	env.box.Tasks["t"] = boxes.Task{Name: "t"}
 	a := env.seedNamed(t, "a.jpg", realJPEG(t, 32, 32, 1))
 	env.importBoxes(t, "t", "?dry_run=false", "t.json", cocoJSON(cocoImg{a + ".jpg", 32, 32, [][4]float64{{1, 1, 2, 2}}}))
 
@@ -263,14 +260,14 @@ func TestCaixasAcompanhamOPacote(t *testing.T) {
 		t.Error("renomear o pacote deveria levar as caixas junto")
 	}
 	assertStatus(t, env.do("DELETE", "/packages/novo?confirm=novo", nil, nil), http.StatusOK)
-	if len(env.db.boxSets) != 0 {
+	if len(env.box.Sets) != 0 {
 		t.Error("apagar o pacote deveria apagar as caixas")
 	}
 }
 
 func TestImportarCaixasErros(t *testing.T) {
 	env := newTestEnv(t)
-	env.db.tasks["t"] = store.Task{Name: "t"}
+	env.box.Tasks["t"] = boxes.Task{Name: "t"}
 	if _, code := env.importBoxes(t, "nao-existe", "", "t.json", cocoJSON()); code != http.StatusNotFound {
 		t.Errorf("tarefa inexistente: %d", code)
 	}
@@ -283,24 +280,6 @@ func TestImportarCaixasErros(t *testing.T) {
 	}
 	assertStatus(t, env.postFiles(t, "/tasks/t/import"), http.StatusBadRequest)
 	assertStatus(t, env.do("GET", "/packages/nao-existe/boxes", nil, nil), http.StatusNotFound)
-}
-
-func TestLeadingSHA1(t *testing.T) {
-	sha := strings.Repeat("ab", 20)
-	cases := map[string]bool{
-		sha + ".jpg":                  true,
-		strings.ToUpper(sha) + ".jpg": true,
-		sha + "_v2_8003_x.jpg":        true,
-		sha:                           true,
-		sha + "c.jpg":                 false, // 41 hex: não é um sha1
-		"10_CHEVROLET_AGILE.jpg":      false,
-		"zz" + sha[2:] + ".jpg":       false,
-	}
-	for name, want := range cases {
-		if _, got := leadingSHA1(name); got != want {
-			t.Errorf("leadingSHA1(%q) = %v, want %v", name, got, want)
-		}
-	}
 }
 
 func TestZipParaOCVAT(t *testing.T) {
@@ -328,9 +307,9 @@ func TestZipParaOCVAT(t *testing.T) {
 	if !names[a+".jpg"] || !names[env.db.images[b].FileName] || len(names) != 2 {
 		t.Errorf("arquivos no zip = %v", names)
 	}
-	// o que sai no zip volta casando no import
+	// o que sai no zip volta casando no import (o nome começa pelo sha1)
 	for name := range names {
-		if _, ok := leadingSHA1(name); !ok {
+		if !regexp.MustCompile(`^[0-9a-f]{40}`).MatchString(name) {
 			t.Errorf("%s deveria começar pelo sha1", name)
 		}
 	}

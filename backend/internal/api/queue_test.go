@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"net/http"
 	"os"
@@ -278,7 +279,7 @@ func TestReabrirImagemVerificada(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedVerified(t, "verificada")
 	verifiedName := env.db.images[sha].FileName
-	env.db.boxSets[sha] = store.BoxSet{ImageID: sha, Package: testPkg}
+	env.box.Sets[sha] = boxes.Set{ImageID: sha, Package: testPkg}
 
 	// outra pessoa nem consegue editar uma verificada sem reabrir
 	rec := env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "maria"})
@@ -300,7 +301,7 @@ func TestReabrirImagemVerificada(t *testing.T) {
 	if _, err := os.Stat(env.pkgFile(verifiedName)); !os.IsNotExist(err) {
 		t.Error("o nome v2 deveria ter sumido")
 	}
-	if _, ok := env.db.boxSets[sha]; !ok {
+	if _, ok := env.box.Sets[sha]; !ok {
 		t.Error("as caixas não podem ser afetadas")
 	}
 	var logged bool

@@ -208,7 +208,7 @@ func (s *Server) profileFromRequest(w http.ResponseWriter, r *http.Request) (*ex
 		writeError(w, http.StatusBadRequest, "escolha a tarefa de anotação (as caixas de qual tarefa entram no dataset)")
 		return nil, false
 	}
-	if _, err := s.store.FindTask(r.Context(), p.Task); errors.Is(err, store.ErrNotFound) {
+	if _, err := s.boxes.FindTask(r.Context(), p.Task); errors.Is(err, store.ErrNotFound) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("a tarefa %q não existe (foi renomeada ou apagada?)", p.Task))
 		return nil, false
 	} else if err != nil {
@@ -332,7 +332,7 @@ func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export
 			for i, img := range imgs {
 				ids[i] = img.SHA1
 			}
-			sets, err := s.store.FindBoxSets(ctx, p.Task, ids)
+			sets, err := s.boxes.FindSets(ctx, p.Task, ids)
 			if err != nil {
 				return nil, nil, err
 			}
