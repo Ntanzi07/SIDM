@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
+import { boxPending, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { getAnnotationProfile, getImage, getPackage, listPackageImages, reopenImage } from '../../services/api'
 import type { AnnotationProfile, ImageDetail } from '../../types/annotation'
@@ -35,7 +37,10 @@ export function ImageViewerPage() {
   const [error, setError] = useState('')
   const [confirmEdit, setConfirmEdit] = useState(false)
   const [reopening, setReopening] = useState(false)
-  const boxSets = useImageBoxes(image?.sha1)
+  const { sets: boxSets } = useImageBoxes(image?.sha1)
+  const [picked, setPicked] = useState<{ sha1: string; box: BoxRef } | null>(null)
+  const selectedBox = picked && picked.sha1 === image?.sha1 ? picked.box : null
+  const selectBox = (box: BoxRef | null) => setPicked(box && image ? { sha1: image.sha1, box } : null)
 
   // O perfil do pacote: os nomes dos campos e das opções.
   useEffect(() => {
@@ -119,11 +124,20 @@ export function ImageViewerPage() {
       {image && (
         <div className="viewer-layout">
           <div className="viewer-image">
-            <ImageWithBoxes alt={image.original_name} sets={boxSets} sha1={image.sha1} show />
+            <ImageWithBoxes
+              alt={image.original_name}
+              onSelect={selectBox}
+              pending={boxPending(profile, boxSets)}
+              selected={selectedBox}
+              sets={boxSets}
+              sha1={image.sha1}
+              show
+            />
             <p className="viewer-image__meta">
               {image.original_name}
               {boxSets.length > 0 && ` · ${describeBoxSets(boxSets)}`}
             </p>
+            <BoxAttributes onSelect={selectBox} profile={profile} readOnly selected={selectedBox} sets={boxSets} />
           </div>
 
           <div className="viewer-card">

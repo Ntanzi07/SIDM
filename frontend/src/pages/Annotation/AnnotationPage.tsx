@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
+import { boxPending, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import { fieldLabel, listObjectTypes } from '../../utils/annotationForm'
@@ -21,7 +23,11 @@ export function AnnotationPage() {
 
   const [showDeleteModal, setShowDeleteModal] = useState(false)
   const [showBoxes, setShowBoxes] = useState(true)
-  const boxSets = useImageBoxes(annotator.image?.sha1)
+  const { sets: boxSets, reload: reloadBoxes } = useImageBoxes(annotator.image?.sha1)
+  // A caixa selecionada (para os atributos), por imagem: trocar de imagem limpa.
+  const [picked, setPicked] = useState<{ sha1: string; box: BoxRef } | null>(null)
+  const selectedBox = picked && picked.sha1 === annotator.image?.sha1 ? picked.box : null
+  const selectBox = (box: BoxRef | null) => setPicked(box && annotator.image ? { sha1: annotator.image.sha1, box } : null)
 
   // O erro do backend para um campo (pelo caminho: "fields.day_time", "objects[0].plate").
   const problemAt = (path: string) => annotator.problems.find((problem) => problem.path === path)?.msg
@@ -107,7 +113,15 @@ export function AnnotationPage() {
               <div className="annotation-preview-column">
                 <div className="annotation-preview-card">
                   <div className="annotation-preview">
-                    <ImageWithBoxes alt={image.original_name} sets={boxSets} sha1={image.sha1} show={showBoxes} />
+                    <ImageWithBoxes
+                      alt={image.original_name}
+                      onSelect={(box) => { setShowBoxes(true); selectBox(box) }}
+                      pending={boxPending(profile, boxSets)}
+                      selected={selectedBox}
+                      sets={boxSets}
+                      sha1={image.sha1}
+                      show={showBoxes}
+                    />
                   </div>
                   <div className="annotation-image-meta">
                     <div>
@@ -132,6 +146,7 @@ export function AnnotationPage() {
                     </button>
                   </div>
                 </div>
+                <BoxAttributes onSaved={reloadBoxes} onSelect={selectBox} profile={profile} selected={selectedBox} sets={boxSets} />
               </div>
 
               <div className="annotation-form-card">
@@ -227,7 +242,7 @@ export function AnnotationPage() {
 
                 {boxTypes.length > 0 && (
                   <p className="annotation-hint">
-                    {boxTypes.map((type) => fieldLabel(type)).join(', ')}: anotado(s) com caixas, no CVAT (tarefas).
+                    {boxTypes.map((type) => fieldLabel(type)).join(', ')}: anotado(s) com caixas, no CVAT (tarefas); os atributos ficam em "Caixas do CVAT", abaixo da imagem.
                   </p>
                 )}
 

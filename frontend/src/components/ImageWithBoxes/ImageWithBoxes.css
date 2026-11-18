@@ -15,6 +15,16 @@
   pointer-events: auto;
 }
 
+.annotation-box--clickable {
+  cursor: pointer;
+}
+
+.annotation-box--selected {
+  border-width: 3px;
+  box-shadow: 0 0 0 2px #fff, 0 0 0 4px rgba(15, 23, 42, 0.55);
+  z-index: 1;
+}
+
 .annotation-box span {
   position: absolute;
   bottom: 100%;

@@ -452,6 +452,29 @@ function TaskImport({ task, onApplied }: { task: string; onApplied: () => Promis
               {fmt(report.replaced)} imagem(ns) já estão nesta tarefa: as caixas delas serão substituídas.
             </p>
           )}
+          {report.edited_replaced > 0 && (
+            <p className="import-report__detail import-report__detail--warning">
+              {fmt(report.edited_replaced)} imagem(ns) têm atributos editados no SIDM: o import do CVAT vai sobrescrever.
+            </p>
+          )}
+          {report.attribute_problem_count > 0 && (
+            <div className="import-report__detail import-report__detail--warning">
+              <strong>{fmt(report.attribute_problem_count)} atributo(s) fora do perfil</strong> (ficam de fora):
+              <ul>
+                {report.attribute_problems.slice(0, 10).map((problem) => <li key={problem}>{problem}</li>)}
+              </ul>
+            </div>
+          )}
+          {report.missing_required > 0 && (
+            <p className="import-report__detail import-report__detail--warning">
+              {fmt(report.missing_required)} caixa(s) sem atributo obrigatório: dá para completar na tela de anotação.
+            </p>
+          )}
+          {report.untyped_labels.length > 0 && (
+            <p className="import-report__detail">
+              Labels sem tipo de objeto com caixa no perfil do pacote (atributos guardados como vieram): {report.untyped_labels.join(', ')}
+            </p>
+          )}
           {report.empty > 0 && (
             <p className="import-report__detail">
               {fmt(report.empty)} imagem(ns) sem nenhuma caixa no arquivo: {report.negatives ? 'entram como "sem objetos".' : 'ignoradas.'}

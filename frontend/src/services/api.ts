@@ -152,9 +152,11 @@ export type Problem = { path: string; msg: string }
 // só traz o primeiro).
 export class RequestError extends Error {
   problems: Problem[]
-  constructor(message: string, problems: Problem[]) {
+  status: number // o código HTTP (ex.: 409 = mudou desde a leitura)
+  constructor(message: string, problems: Problem[], status = 0) {
     super(message)
     this.problems = problems
+    this.status = status
   }
 }
 
@@ -170,7 +172,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string; problems?: Problem[] } | null
-    throw new RequestError(body?.error ?? `Não foi possível concluir a operação (${response.status}).`, body?.problems ?? [])
+    throw new RequestError(body?.error ?? `Não foi possível concluir a operação (${response.status}).`, body?.problems ?? [], response.status)
   }
 
   if (response.status === 204) return undefined as T
@@ -582,7 +584,12 @@ export type BoxSet = {
   source: { tool: string; format: string; file: string; file_name: string }
   imported_by: string
   imported_at: string
+  updated_by?: string // quem editou os atributos no SIDM (o reimport zera)
+  updated_at?: string
 }
+
+// A versão das caixas para a edição: a última edição ou, sem edição, o import.
+export const boxSetVersion = (set: BoxSet) => set.updated_at ?? set.imported_at
 
 export type BoxImportReport = {
   dry_run: boolean
@@ -605,6 +612,12 @@ export type BoxImportReport = {
   applied: number
   applied_boxes: number
   warnings: string[]
+  // atributos das caixas, conferidos pelo tipo de objeto com caixa do perfil
+  attribute_problems: string[]
+  attribute_problem_count: number
+  missing_required: number
+  untyped_labels: string[]
+  edited_replaced: number
 }
 
 // Por tarefa, quantas imagens do pacote estão anotadas nela.
@@ -627,6 +640,16 @@ export async function getPackageBoxes(packageName: string): Promise<PackageBoxes
 export async function getImageBoxes(sha1: string): Promise<BoxSet[]> {
   const response = await request<{ items: BoxSet[] }>(`/images/${encodeURIComponent(sha1)}/boxes`)
   return response.items
+}
+
+// Edita os atributos das caixas de uma imagem numa tarefa (uma entrada por
+// caixa, na ordem do GET). 400 com problems ("boxes[i].attributes.<campo>");
+// 409 se as caixas mudaram desde a leitura.
+export async function updateBoxAttributes(set: BoxSet, attributes: Array<Record<string, unknown>>): Promise<BoxSet> {
+  return request<BoxSet>(`/images/${encodeURIComponent(set.sha1)}/boxes/${encodeURIComponent(set.task)}`, {
+    method: 'PUT',
+    body: JSON.stringify({ version: boxSetVersion(set), boxes: attributes.map((a) => ({ attributes: a })) }),
+  })
 }
 
 // ---------- tarefas de anotação de caixas ----------

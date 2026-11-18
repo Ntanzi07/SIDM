@@ -69,8 +69,9 @@ argumento do `api.New`.
 | `hooks/` | estado e regras das telas (`useAnnotator`, `useImageBoxes`) |
 | `types/` | os tipos da API (`annotation.ts` espelha o módulo `annotation`) |
 | `utils/annotationForm.ts` | conversão API ↔ formulário dos campos do perfil |
+| `utils/boxes.ts` | caixas do CVAT: cor por label, tipo de objeto com caixa de uma label, pendência de atributo obrigatório |
 | `utils/importProfiles.ts` | ordem e rótulo dos perfis de import nas telas de pacote (os do perfil do pacote primeiro) |
 | `pages/<Tela>/` | uma pasta por tela, com o `.tsx` e o `.css` |
-| `components/` | o que é usado por mais de uma tela |
+| `components/` | o que é usado por mais de uma tela (`ImageWithBoxes`: as caixas por cima da imagem; `BoxAttributes`: ver e editar os atributos das caixas) |
 
 O proxy do Vite manda `/api` para `http://localhost:8080`.
