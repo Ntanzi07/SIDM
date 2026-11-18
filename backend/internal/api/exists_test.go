@@ -1,6 +1,7 @@
 package api
 
 import (
+	"SIDM/internal/images"
 	"fmt"
 	"net/http"
 	"strings"
@@ -16,7 +17,7 @@ func TestExists(t *testing.T) {
 	rec := env.doJSON("POST", "/images/exists", body)
 	assertStatus(t, rec, http.StatusOK)
 
-	var resp existsResponse
+	var resp images.ExistsResponse
 	decode(t, rec, &resp)
 	if len(resp.Existing) != 1 || resp.Existing[0].SHA1 != known || resp.Existing[0].Status != "pending" || resp.Existing[0].Package != testPkg {
 		t.Errorf("existing = %+v", resp.Existing)
@@ -27,7 +28,7 @@ func TestExists(t *testing.T) {
 }
 
 func TestExistsInvalido(t *testing.T) {
-	tooMany := make([]string, maxExistsBatch+1)
+	tooMany := make([]string, images.MaxExistsBatch+1)
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("%q", sha1Of(fmt.Sprint(i)))
 	}

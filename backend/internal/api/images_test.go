@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"SIDM/internal/filename"
-	"SIDM/internal/store"
+	"SIDM/internal/images"
 )
 
 // completeBody gera uma anotação completa e válida; mods altera campos.
@@ -46,13 +46,13 @@ func TestListImages(t *testing.T) {
 
 	rec := env.do("GET", "/images?package="+testPkg+"&status=pending&equipment=8003-MF4739&plate=abc1d23&limit=9999&skip=-5", nil, nil)
 	assertStatus(t, rec, http.StatusOK)
-	full := env.db.lastFilter
+	full := env.img.LastFilter
 
 	// Aqui só interessa que os filtros CHEGAM no banco (ver lastFilter abaixo).
 	// A contagem é conferida num pedido só com pacote e status:
 	var resp struct {
-		Total int64         `json:"total"`
-		Items []store.Image `json:"items"`
+		Total int64          `json:"total"`
+		Items []images.Image `json:"items"`
 	}
 	decode(t, env.do("GET", "/images?package="+testPkg+"&status=pending", nil, nil), &resp)
 	if resp.Total != 2 || len(resp.Items) != 2 {
@@ -75,8 +75,8 @@ func TestListImages(t *testing.T) {
 func TestListImagesPadroes(t *testing.T) {
 	env := newTestEnv(t)
 	assertStatus(t, env.do("GET", "/images", nil, nil), http.StatusOK)
-	if env.db.lastFilter.Limit != 50 {
-		t.Errorf("limit padrão = %d, want 50", env.db.lastFilter.Limit)
+	if env.img.LastFilter.Limit != 50 {
+		t.Errorf("limit padrão = %d, want 50", env.img.LastFilter.Limit)
 	}
 }
 
@@ -110,7 +110,7 @@ func TestGetImage(t *testing.T) {
 	t.Run("existe", func(t *testing.T) {
 		rec := env.do("GET", "/images/"+sha, nil, nil)
 		assertStatus(t, rec, http.StatusOK)
-		var img store.Image
+		var img images.Image
 		decode(t, rec, &img)
 		if img.SHA1 != sha {
 			t.Errorf("sha1 = %q", img.SHA1)
@@ -145,8 +145,8 @@ func TestAnnotateRascunho(t *testing.T) {
 	rec := env.doJSON("PUT", "/images/"+sha, `{"equipment":"8003-MF4739","day_time":"night"}`)
 	assertStatus(t, rec, http.StatusOK)
 
-	img := env.db.images[sha]
-	if img.Status != store.StatusPending || img.DayTime != "night" {
+	img := env.img.Images[sha]
+	if img.Status != images.StatusPending || img.DayTime != "night" {
 		t.Errorf("rascunho não salvo como pending: %+v", img)
 	}
 	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
@@ -162,14 +162,14 @@ func TestAnnotateCompleto(t *testing.T) {
 		map[string]string{"Content-Type": "application/json", "X-User": "nathan"})
 	assertStatus(t, rec, http.StatusOK)
 
-	var img store.Image
+	var img images.Image
 	decode(t, rec, &img)
 
 	wantName := sha + "_v2_8003-MF4739_hikvision-233_F-08-L-N-E-C_05.07_20260903T112523Z_ABC1D23-M-8-T-WHT.jpg"
 	if img.FileName != wantName {
 		t.Errorf("file_name:\ngot:  %s\nwant: %s", img.FileName, wantName)
 	}
-	if img.Status != store.StatusVerified || img.PatternVersion != "v2" {
+	if img.Status != images.StatusVerified || img.PatternVersion != "v2" {
 		t.Errorf("status=%q version=%q", img.Status, img.PatternVersion)
 	}
 	if img.Path != "dataset/"+testPkg+"/"+wantName {
@@ -190,10 +190,10 @@ func TestAnnotateCompleto(t *testing.T) {
 	}
 
 	// histórico
-	var statusEntry *store.HistoryEntry
-	for i, h := range env.db.history {
+	var statusEntry *images.HistoryEntry
+	for i, h := range env.img.History {
 		if h.Field == "status" {
-			statusEntry = &env.db.history[i]
+			statusEntry = &env.img.History[i]
 		}
 	}
 	if statusEntry == nil {
@@ -214,11 +214,11 @@ func TestAnnotateEditarVerificada(t *testing.T) {
 	})
 
 	t.Run("completo renomeia de novo na pasta do pacote", func(t *testing.T) {
-		before := env.db.images[sha].FileName
+		before := env.img.Images[sha].FileName
 		rec := env.doJSON("PUT", "/images/"+sha, completeBody(func(b map[string]any) { b["day_time"] = "day" }))
 		assertStatus(t, rec, http.StatusOK)
 
-		after := env.db.images[sha].FileName
+		after := env.img.Images[sha].FileName
 		if after == before || !strings.Contains(after, "-D-") {
 			t.Errorf("nome não atualizado: %s", after)
 		}
@@ -257,7 +257,7 @@ func TestAnnotateInvalido(t *testing.T) {
 			if msg := errorMsg(t, rec); !strings.Contains(msg, tc.wantMsg) {
 				t.Errorf("mensagem %q não contém %q", msg, tc.wantMsg)
 			}
-			if env.db.images[sha].Status != store.StatusPending {
+			if env.img.Images[sha].Status != images.StatusPending {
 				t.Error("anotação inválida não pode mudar o status")
 			}
 			if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
@@ -270,7 +270,7 @@ func TestAnnotateInvalido(t *testing.T) {
 func TestAnnotateDesfazRenameSeBancoFalhar(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedPending(t, "conteudo")
-	env.db.replaceErr = errBoom
+	env.img.ReplaceErr = errBoom
 
 	assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody()), http.StatusInternalServerError)
 
@@ -289,10 +289,10 @@ func TestAnnotateImagemInexistente(t *testing.T) {
 }
 
 func TestDiffHistory(t *testing.T) {
-	before := &store.Image{SHA1: "x", Status: "pending", DayTime: "day", Conditions: []string{"glare"}}
-	after := &store.Image{SHA1: "x", Status: "pending", DayTime: "night", Conditions: []string{"glare"}}
+	before := &images.Image{SHA1: "x", Status: "pending", DayTime: "day", Conditions: []string{"glare"}}
+	after := &images.Image{SHA1: "x", Status: "pending", DayTime: "night", Conditions: []string{"glare"}}
 
-	entries := diffHistory(before, after, "nathan")
+	entries := images.DiffHistory(before, after, "nathan")
 	if len(entries) != 1 {
 		t.Fatalf("esperava 1 mudança, veio %d: %+v", len(entries), entries)
 	}
@@ -301,7 +301,7 @@ func TestDiffHistory(t *testing.T) {
 		t.Errorf("entrada errada: %+v", e)
 	}
 
-	if got := diffHistory(after, after, "nathan"); len(got) != 0 {
+	if got := images.DiffHistory(after, after, "nathan"); len(got) != 0 {
 		t.Errorf("sem mudanças deveria gerar 0 entradas, gerou %d", len(got))
 	}
 }
@@ -310,23 +310,23 @@ func TestExcluirImagem(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedVerified(t, "verificada") // tem arquivo v2 e histórico
 	other := env.seedPending(t, "outra")
-	file := env.pkgFile(env.db.images[sha].FileName)
+	file := env.pkgFile(env.img.Images[sha].FileName)
 
 	rec := env.do("DELETE", "/images/"+sha, nil, nil)
 	assertStatus(t, rec, http.StatusOK)
 
-	if _, ok := env.db.images[sha]; ok {
+	if _, ok := env.img.Images[sha]; ok {
 		t.Error("o registro deveria ter sumido")
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
 		t.Error("o arquivo deveria ter sido apagado")
 	}
-	for _, h := range env.db.history {
+	for _, h := range env.img.History {
 		if h.ImageID == sha {
 			t.Fatal("o histórico da imagem deveria ter sumido")
 		}
 	}
-	if _, ok := env.db.images[other]; !ok {
+	if _, ok := env.img.Images[other]; !ok {
 		t.Error("a outra imagem não pode ser afetada")
 	}
 
@@ -372,8 +372,8 @@ func TestVerificarComCamposDesconhecidos(t *testing.T) {
 
 			rec := env.doJSON("PUT", "/images/"+sha, tc.body)
 			assertStatus(t, rec, http.StatusOK)
-			img := env.db.images[sha]
-			if img.Status != store.StatusVerified || !strings.Contains(img.FileName, tc.inName) {
+			img := env.img.Images[sha]
+			if img.Status != images.StatusVerified || !strings.Contains(img.FileName, tc.inName) {
 				t.Errorf("status=%s nome=%q (esperava conter %q)", img.Status, img.FileName, tc.inName)
 			}
 			if _, err := os.Stat(env.pkgFile(img.FileName)); err != nil {

@@ -1,6 +1,11 @@
-package api
+package images
 
 import (
+	"SIDM/internal/crypt"
+	"SIDM/internal/filename"
+	"SIDM/internal/files"
+	"SIDM/internal/importer"
+	"SIDM/internal/platform"
 	"bytes"
 	"context"
 	"errors"
@@ -11,20 +16,19 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
-
-	"SIDM/internal/crypt"
-	"SIDM/internal/filename"
-	"SIDM/internal/files"
-	"SIDM/internal/importer"
-	"SIDM/internal/store"
 )
 
-// Limite de um request de upload (várias imagens juntas).
-const maxUploadBytes = 5 << 30 // 5 GB
+// INIKeyColumn é a coluna-chave da tabela montada a partir do INI de uma
+// imagem (o sha1), para os perfis jpeg-ini casarem pelo sha1.
+const INIKeyColumn = "_sidm_sha1"
 
-type uploadResult struct {
+// MaxINIScanBytes: até onde o arquivo é lido procurando o INI.
+const MaxINIScanBytes = 64 << 20
+
+type UploadResult struct {
 	File            string   `json:"file"`
 	SHA1            string   `json:"sha1,omitempty"`
 	Status          string   `json:"status"`                     // created | duplicate | error
@@ -46,29 +50,34 @@ type uploadResult struct {
 // nada de carregar GBs na memória como faria o r.ParseMultipartForm.
 // Responde 200 com o resultado de CADA arquivo: uma imagem repetida (que já
 // está em outro pacote) é PULADA e o resto do lote segue normalmente.
-func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 	pkg := r.URL.Query().Get("package")
 	if pkg == "" {
-		writeError(w, http.StatusBadRequest, "informe o pacote: POST /images?package=<nome>")
+		platform.WriteError(w, http.StatusBadRequest, "informe o pacote: POST /images?package=<nome>")
 		return
 	}
 	if _, err := s.catalog.FindPackage(r.Context(), pkg); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			writeError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe: crie antes com POST /packages", pkg))
+		if errors.Is(err, platform.ErrNotFound) {
+			platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe: crie antes com POST /packages", pkg))
 			return
 		}
-		s.serverError(w, err)
+		platform.ServerError(w, err)
 		return
 	}
 
 	var profile *importer.Profile
 	if name := r.URL.Query().Get("profile"); name != "" {
-		p, ok := s.profileByName(w, r, name)
-		if !ok {
+		p, err := s.profiles.FindProfile(r.Context(), name)
+		if errors.Is(err, platform.ErrNotFound) {
+			platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
+			return
+		}
+		if err != nil {
+			platform.ServerError(w, err)
 			return
 		}
 		if p.Reader.Type != importer.ReaderJPEGINI {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+			platform.WriteError(w, http.StatusBadRequest, fmt.Sprintf(
 				"o perfil %q é do tipo %q: no upload só vale perfil %q (CSV é com POST /packages/%s/import)",
 				p.Name, p.Reader.Type, importer.ReaderJPEGINI, pkg))
 			return
@@ -80,18 +89,18 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	mr, err := r.MultipartReader()
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "esperado multipart/form-data com campo \"files\"")
+		platform.WriteError(w, http.StatusBadRequest, "esperado multipart/form-data com campo \"files\"")
 		return
 	}
 
-	results := []uploadResult{}
+	results := []UploadResult{}
 	for {
 		part, err := mr.NextPart()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			writeError(w, http.StatusBadRequest, "erro lendo o upload: "+err.Error())
+			platform.WriteError(w, http.StatusBadRequest, "erro lendo o upload: "+err.Error())
 			return
 		}
 		if part.FormName() != "files" || part.FileName() == "" {
@@ -102,12 +111,12 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		part.Close()
 	}
 
-	writeJSON(w, http.StatusOK, results)
+	platform.WriteJSON(w, http.StatusOK, results)
 }
 
-func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Profile, part *multipart.Part) uploadResult {
+func (s *Service) ingestOne(ctx context.Context, pkg string, profile *importer.Profile, part *multipart.Part) UploadResult {
 	name := filepath.Base(part.FileName()) // nunca confie no caminho que vem do cliente
-	res := uploadResult{File: name}
+	res := UploadResult{File: name}
 
 	ext := strings.ToLower(filepath.Ext(name))
 
@@ -129,10 +138,10 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 	res.SHA1 = sum
 
 	now := time.Now().UTC()
-	img := &store.Image{
+	img := &Image{
 		SHA1:         sum,
 		Package:      pkg,
-		Status:       store.StatusPending,
+		Status:       StatusPending,
 		OriginalName: name,
 		Path:         files.PendingPath(pkg, sum, ext),
 		Ext:          ext,
@@ -151,14 +160,14 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 	}
 
 	// INI embutido: lido do temporário (o arquivo em si nunca é alterado).
-	if entries := readEmbeddedINI(tmp, size); len(entries) > 0 {
+	if entries := ReadEmbeddedINI(tmp, size); len(entries) > 0 {
 		img.INI = entries
 		res.INI = true
 		if profile != nil {
-			ann, rep := annotationFromINI(profile, sum, entries)
-			ann.Equipment, ann.Camera, res.Warnings = s.sanitizeAndRegister(ctx, ann.Equipment, ann.Camera)
-			res.Warnings = append(res.Warnings, reportWarnings(rep)...)
-			if mergeAnnotation(img, ann, false) {
+			ann, rep := AnnotationFromINI(profile, sum, entries)
+			ann.Equipment, ann.Camera, res.Warnings = s.SanitizeAndRegister(ctx, ann.Equipment, ann.Camera)
+			res.Warnings = append(res.Warnings, ReportWarnings(rep)...)
+			if MergeAnnotation(img, ann, false) {
 				res.Prefilled = true
 			}
 		}
@@ -166,11 +175,11 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 
 	// Banco primeiro, disco depois: se o sha1 já existe, o Mongo recusa
 	// e o temporário é descartado sem nunca tocar na pasta do pacote.
-	if err := s.store.InsertImage(ctx, img); err != nil {
+	if err := s.repo.InsertImage(ctx, img); err != nil {
 		s.files.Discard(tmp)
-		if errors.Is(err, store.ErrDuplicate) {
+		if errors.Is(err, platform.ErrDuplicate) {
 			res.Status = "duplicate"
-			if existing, err := s.store.FindImage(ctx, sum); err == nil {
+			if existing, err := s.repo.FindImage(ctx, sum); err == nil {
 				res.ExistingPackage = existing.Package
 			}
 			return res
@@ -182,7 +191,7 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 
 	if err := s.files.Store(tmp, img.Path); err != nil {
 		// desfaz o registro para banco e disco não divergirem
-		_ = s.store.DeleteImage(context.Background(), sum)
+		_ = s.repo.DeleteImage(context.Background(), sum)
 		s.files.Discard(tmp)
 		log.Printf("upload %s: %v", name, err)
 		res.Status, res.Error = "error", "falha ao mover o arquivo"
@@ -191,31 +200,6 @@ func (s *Server) ingestOne(ctx context.Context, pkg string, profile *importer.Pr
 
 	res.Status = "created"
 	return res
-}
-
-func applyMeta(img *store.Image, m filename.ImageMeta) {
-	img.PatternVersion = m.Version
-	img.Equipment = m.Equipment
-	img.Camera = m.Camera
-	img.Direction = m.Direction
-	img.Resolution = m.Resolution
-	img.CaptureAngle = m.CaptureAngle
-	img.DayTime = m.DayTime
-	img.ImageRange = m.ImageRange
-	img.Weather = m.Weather
-	img.Conditions = m.Conditions
-	img.CapturedAt = nil
-	if !m.CapturedAt.IsZero() { // posição vazia no nome = data desconhecida
-		t := m.CapturedAt
-		img.CapturedAt = &t
-	}
-	img.Vehicles = make([]store.Vehicle, 0, len(m.Vehicles))
-	for _, v := range m.Vehicles {
-		img.Vehicles = append(img.Vehicles, store.Vehicle{
-			Plate: v.Plate, PlateType: v.PlateType, PlateCategory: v.PlateCategory,
-			Type: v.Type, Color: v.Color,
-		})
-	}
 }
 
 // openIfEncrypted confere se o arquivo recebido é criptografado e, se for,
@@ -227,7 +211,7 @@ func applyMeta(img *store.Image, m filename.ImageMeta) {
 //     (os equipamentos usam extensões próprias para o arquivo criptografado).
 //   - PGP: recusa, com uma mensagem clara (ainda não suportado).
 //   - qualquer outro conteúdo: segue as regras de antes (só a extensão importa).
-func (s *Server) openIfEncrypted(tmp, sum string, size int64, ext string, res *uploadResult) (string, string, int64, string, error) {
+func (s *Service) openIfEncrypted(tmp, sum string, size int64, ext string, res *UploadResult) (string, string, int64, string, error) {
 	head, err := readHead(tmp, 3)
 	if err == nil && crypt.IsJPEG(head) {
 		if !filename.IsAllowedExt(ext) {
@@ -235,8 +219,8 @@ func (s *Server) openIfEncrypted(tmp, sum string, size int64, ext string, res *u
 		}
 		return tmp, sum, size, ext, nil
 	}
-	if size > maxINIScanBytes {
-		return tmp, sum, size, ext, fmt.Errorf("arquivo grande demais para verificar a criptografia (máx. %d MB)", maxINIScanBytes>>20)
+	if size > MaxINIScanBytes {
+		return tmp, sum, size, ext, fmt.Errorf("arquivo grande demais para verificar a criptografia (máx. %d MB)", MaxINIScanBytes>>20)
 	}
 
 	data, err := os.ReadFile(tmp)
@@ -282,4 +266,79 @@ func readHead(path string, n int) ([]byte, error) {
 		return nil, err
 	}
 	return buf[:k], nil
+}
+
+// ReadEmbeddedINI lê o INI gravado depois do fim do JPEG, ou nil.
+func ReadEmbeddedINI(path string, size int64) []importer.INIEntry {
+	if size > MaxINIScanBytes {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return importer.ParseINI(importer.ExtractJPEGTrailer(data))
+}
+
+// AnnotationFromINI aplica um perfil jpeg-ini nas entradas de UMA imagem,
+// passando pelo mesmo Transform do CSV (mesmas regras de map, data, template).
+func AnnotationFromINI(p *importer.Profile, sha string, entries []importer.INIEntry) (importer.Annotation, importer.Report) {
+	run := *p
+	run.Match = importer.MatchConfig{Column: INIKeyColumn, By: importer.MatchBySHA1}
+	records, rep := importer.Transform(&run, importer.INITable(INIKeyColumn, sha, entries))
+	if len(records) == 0 {
+		return importer.Annotation{}, rep
+	}
+	return records[0].Annotation, rep
+}
+
+// SanitizeAndRegister: equipamento e câmera vindos do INI passam pela mesma
+// sanitização do cadastro e são cadastrados se ainda não existirem (igual ao
+// import de CSV). Nome impossível de sanitizar vira aviso e fica vazio.
+func (s *Service) SanitizeAndRegister(ctx context.Context, equipment, camera string) (string, string, []string) {
+	var warnings []string
+	clean := func(value, what string,
+		sanitize func(string) (string, error),
+		exists func(context.Context, string) (bool, error),
+		create func(context.Context, string) error,
+	) string {
+		if value == "" {
+			return ""
+		}
+		name, err := sanitize(value)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("%s %q ignorado: %v", what, value, err))
+			return ""
+		}
+		if ok, err := exists(ctx, name); err == nil && !ok {
+			if err := create(ctx, name); err != nil && !errors.Is(err, platform.ErrDuplicate) {
+				warnings = append(warnings, fmt.Sprintf("não foi possível cadastrar %s %q", what, name))
+				platform.LogError(err)
+			}
+		}
+		return name
+	}
+
+	equipment = clean(equipment, "equipamento", filename.SanitizeEquipment, s.catalog.EquipmentExists, s.catalog.CreateEquipment)
+	camera = clean(camera, "câmera", filename.SanitizeCamera, s.catalog.CameraExists, s.catalog.CreateCamera)
+	return equipment, camera, warnings
+}
+
+// ReportWarnings resume o relatório de uma imagem em avisos legíveis.
+func ReportWarnings(rep importer.Report) []string {
+	var out []string
+	for _, e := range rep.Errors {
+		out = append(out, fmt.Sprintf("%s: %s", e.Field, e.Error))
+	}
+	fields := make([]string, 0, len(rep.Unmapped))
+	for f := range rep.Unmapped {
+		fields = append(fields, f)
+	}
+	sort.Strings(fields)
+	for _, f := range fields {
+		for v := range rep.Unmapped[f] {
+			out = append(out, fmt.Sprintf("%s: valor %q sem tradução no perfil", f, v))
+		}
+	}
+	return out
 }

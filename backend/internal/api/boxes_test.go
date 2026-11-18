@@ -123,7 +123,7 @@ func TestImportarCaixasDoCVAT(t *testing.T) {
 
 	coco := cocoJSON(
 		cocoImg{a + ".jpg", 64, 48, [][4]float64{{10, 10, 20, 8}, {0, 0, 64, 40}}},
-		cocoImg{env.db.images[b].FileName, 64, 48, [][4]float64{{5, 5, 10, 5}}},
+		cocoImg{env.img.Images[b].FileName, 64, 48, [][4]float64{{5, 5, 10, 5}}},
 		cocoImg{"pasta/foto-c.jpg", 64, 48, [][4]float64{{1, 1, 5, 5}}},
 		cocoImg{"dup.jpg", 64, 48, [][4]float64{{1, 1, 5, 5}}},
 		cocoImg{e + ".jpg", 1280, 720, [][4]float64{{1, 1, 5, 5}}},
@@ -304,7 +304,7 @@ func TestZipParaOCVAT(t *testing.T) {
 			t.Errorf("%s: JPEG não precisa de compressão", f.Name)
 		}
 	}
-	if !names[a+".jpg"] || !names[env.db.images[b].FileName] || len(names) != 2 {
+	if !names[a+".jpg"] || !names[env.img.Images[b].FileName] || len(names) != 2 {
 		t.Errorf("arquivos no zip = %v", names)
 	}
 	// o que sai no zip volta casando no import (o nome começa pelo sha1)

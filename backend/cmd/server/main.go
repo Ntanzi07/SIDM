@@ -14,6 +14,7 @@ import (
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/files"
+	"SIDM/internal/images"
 	"SIDM/internal/store"
 )
 
@@ -45,17 +46,20 @@ func main() {
 	}
 	log.Printf("imagens em %s", imagesDir)
 
-	// Os módulos. Catálogo e caixas já têm os seus repositórios; o resto
-	// ainda usa o store, que também faz o lado das imagens dos módulos.
-	images := api.NewLegacyImages(s, fs)
-	cat := catalog.New(catalog.NewMongoRepo(s.DB()), fs, images)
-	boxRepo := boxes.NewMongoRepo(s.DB())
+	// Os módulos. Cada um tem o seu repositório; o store ainda guarda os
+	// perfis de import e de export (que viram módulos nos próximos passos).
+	db := s.DB()
+	img := images.New(images.NewMongoRepo(db), fs, nil, s) // s: o perfil jpeg-ini do upload
+	cat := catalog.New(catalog.NewMongoRepo(db), fs, img)
+	img.SetCatalog(cat)
+	boxRepo := boxes.NewMongoRepo(db)
 	if err := boxRepo.EnsureIndexes(ctx); err != nil {
 		log.Fatalf("falha ao preparar as caixas no Mongo: %v", err)
 	}
-	bx := boxes.New(boxRepo, images, fs, cat, s) // s: os perfis de export guardam a tarefa
-	cat.Listen(bx)                               // as caixas guardam o pacote de cada imagem
-	srv := api.New(s, fs, cat, bx)
+	bx := boxes.New(boxRepo, img, fs, cat, s) // s: os perfis de export guardam a tarefa
+	cat.Listen(bx)                            // as caixas guardam o pacote de cada imagem
+	img.Listen(bx)                            // e são apagadas junto com a imagem
+	srv := api.New(s, fs, cat, bx, img)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

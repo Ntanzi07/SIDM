@@ -13,8 +13,9 @@ import (
 
 	"SIDM/internal/crypt"
 	"SIDM/internal/filename"
+	"SIDM/internal/images"
 	"SIDM/internal/importer"
-	"SIDM/internal/store"
+	"SIDM/internal/platform"
 )
 
 // Limites de tamanho dos arquivos de import.
@@ -36,7 +37,7 @@ func (s *Server) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 	p.UpdatedAt = time.Now().UTC()
 
 	if err := s.store.CreateProfile(r.Context(), p); err != nil {
-		if errors.Is(err, store.ErrDuplicate) {
+		if errors.Is(err, platform.ErrDuplicate) {
 			writeError(w, http.StatusConflict, fmt.Sprintf("perfil %q já existe: para alterar, use PUT /import-profiles/%s", p.Name, p.Name))
 			return
 		}
@@ -62,7 +63,7 @@ func (s *Server) handleReplaceProfile(w http.ResponseWriter, r *http.Request) {
 	p.UpdatedAt = time.Now().UTC()
 
 	if err := s.store.ReplaceProfile(r.Context(), p); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, platform.ErrNotFound) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe: crie com POST /import-profiles", name))
 			return
 		}
@@ -98,10 +99,10 @@ func (s *Server) handleRenameProfile(w http.ResponseWriter, r *http.Request) {
 
 	err := s.store.RenameProfile(r.Context(), name, newName, time.Now().UTC())
 	switch {
-	case errors.Is(err, store.ErrNotFound):
+	case errors.Is(err, platform.ErrNotFound):
 		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
 		return
-	case errors.Is(err, store.ErrDuplicate):
+	case errors.Is(err, platform.ErrDuplicate):
 		writeError(w, http.StatusConflict, fmt.Sprintf("já existe um perfil %q", newName))
 		return
 	case err != nil:
@@ -120,7 +121,7 @@ func (s *Server) handleRenameProfile(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	err := s.store.DeleteProfile(r.Context(), name)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, platform.ErrNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
 		return
 	}
@@ -173,7 +174,7 @@ func (s *Server) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) profileByName(w http.ResponseWriter, r *http.Request, name string) (*importer.Profile, bool) {
 	p, err := s.store.FindProfile(r.Context(), name)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, platform.ErrNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
 		return nil, false
 	}
@@ -328,7 +329,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := s.catalog.FindPackage(r.Context(), pkg); err != nil {
-		if errors.Is(err, store.ErrNotFound) {
+		if errors.Is(err, platform.ErrNotFound) {
 			writeError(w, http.StatusNotFound, fmt.Sprintf("pacote %q não existe", pkg))
 			return
 		}
@@ -348,7 +349,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var records []importer.Record
-	var byKey map[string][]store.Image
+	var byKey map[string][]images.Image
 
 	if profile.Reader.Type == importer.ReaderJPEGINI {
 		// Perfil de INI: sem arquivo; usa o INI já guardado de cada imagem pendente.
@@ -374,12 +375,12 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		for i, rec := range records {
 			keys[i] = rec.Key
 		}
-		imgs, err := s.store.FindImagesByKeys(r.Context(), pkg, profile.Match.By, keys)
+		imgs, err := s.images.FindByKeys(r.Context(), pkg, profile.Match.By, keys)
 		if err != nil {
 			s.serverError(w, err)
 			return
 		}
-		byKey = map[string][]store.Image{}
+		byKey = map[string][]images.Image{}
 		for _, img := range imgs {
 			k := img.OriginalName
 			if profile.Match.By == importer.MatchBySHA1 {
@@ -395,7 +396,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	equipments, cameras := map[string]bool{}, map[string]bool{}
 
 	// 1ª passada: decide o que muda em cada imagem, SEM gravar nada.
-	type write struct{ before, after store.Image }
+	type write struct{ before, after images.Image }
 	var writes []write
 
 	for _, rec := range records {
@@ -414,7 +415,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		rep.Matched++
 		img := found[0]
 
-		if img.Status == store.StatusVerified {
+		if img.Status == images.StatusVerified {
 			rep.SkippedVerified++
 			continue
 		}
@@ -428,7 +429,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		ann.Camera = rep.sanitizeName(rec.Line, "camera", ann.Camera, filename.SanitizeCamera)
 
 		before := img
-		if !mergeAnnotation(&img, ann, overwrite) {
+		if !images.MergeAnnotation(&img, ann, overwrite) {
 			rep.Unchanged++
 			continue
 		}
@@ -464,8 +465,8 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 	for _, wr := range writes {
 		img := wr.after
 		img.UpdatedAt = now
-		if err := s.store.ReplaceImage(r.Context(), &img, wr.before.UpdatedAt); err != nil {
-			if errors.Is(err, store.ErrConflict) {
+		if err := s.images.Replace(r.Context(), &img, wr.before.UpdatedAt); err != nil {
+			if errors.Is(err, images.ErrConflict) {
 				rep.Conflicts++
 				continue
 			}
@@ -474,7 +475,7 @@ func (s *Server) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 		rep.Applied++
 		before := wr.before
-		if err := s.store.InsertHistory(r.Context(), diffHistory(&before, &img, changedBy)); err != nil {
+		if err := s.images.InsertHistory(r.Context(), images.DiffHistory(&before, &img, changedBy)); err != nil {
 			s.logError(err)
 		}
 	}
@@ -521,7 +522,7 @@ func (s *Server) registerMissing(
 		if dryRun {
 			continue
 		}
-		if err := create(r.Context(), name); err != nil && !errors.Is(err, store.ErrDuplicate) {
+		if err := create(r.Context(), name); err != nil && !errors.Is(err, platform.ErrDuplicate) {
 			s.serverError(w, err)
 			return nil, false
 		}
@@ -547,76 +548,7 @@ func sortedSet(m map[string]bool) []string {
 	return out
 }
 
-// mergeAnnotation aplica o que o import descobriu no rascunho da imagem.
-// overwrite=false: só preenche o que está vazio (respeita quem já anotou).
-// Devolve true se algo mudou.
-func mergeAnnotation(img *store.Image, a importer.Annotation, overwrite bool) bool {
-	changed := false
-	set := func(dst *string, v string) {
-		if v != "" && *dst != v && (overwrite || *dst == "") {
-			*dst = v
-			changed = true
-		}
-	}
-	set(&img.Equipment, a.Equipment)
-	set(&img.Camera, a.Camera)
-	set(&img.Direction, a.Direction)
-	set(&img.Resolution, a.Resolution)
-	set(&img.CaptureAngle, a.CaptureAngle)
-	set(&img.DayTime, a.DayTime)
-	set(&img.ImageRange, a.ImageRange)
-	set(&img.Weather, a.Weather)
-
-	if len(a.Conditions) > 0 && (overwrite || len(img.Conditions) == 0) && !equalStrings(img.Conditions, a.Conditions) {
-		img.Conditions = append([]string(nil), a.Conditions...)
-		changed = true
-	}
-	if a.CapturedAt != nil && (overwrite || img.CapturedAt == nil) &&
-		(img.CapturedAt == nil || !img.CapturedAt.Equal(*a.CapturedAt)) {
-		t := *a.CapturedAt
-		img.CapturedAt = &t
-		changed = true
-	}
-	if len(a.Vehicles) > 0 && (overwrite || len(img.Vehicles) == 0) {
-		vehicles := make([]store.Vehicle, len(a.Vehicles))
-		for i, v := range a.Vehicles {
-			vehicles[i] = store.Vehicle{
-				Plate: v.Plate, PlateType: v.PlateType, PlateCategory: v.PlateCategory,
-				Type: v.Type, Color: v.Color,
-			}
-		}
-		if !equalVehicles(img.Vehicles, vehicles) {
-			img.Vehicles = vehicles
-			changed = true
-		}
-	}
-	return changed
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
-func equalVehicles(a, b []store.Vehicle) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
+// Limites do "raio-x" de INI (POST /imports/inspect com JPEGs).
 const (
 	maxInspectINIFiles = 20
 	maxInspectINIBytes = 200 << 20
@@ -657,15 +589,15 @@ func (s *Server) inspectINI(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("mande no máximo %d imagens de exemplo", maxInspectINIFiles))
 			return
 		}
-		data, err := io.ReadAll(io.LimitReader(part, maxINIScanBytes+1))
+		data, err := io.ReadAll(io.LimitReader(part, images.MaxINIScanBytes+1))
 		name := part.FileName()
 		part.Close()
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "erro lendo "+name+": "+err.Error())
 			return
 		}
-		if len(data) > maxINIScanBytes {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("%s: imagem maior que %d MB", name, maxINIScanBytes>>20))
+		if len(data) > images.MaxINIScanBytes {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("%s: imagem maior que %d MB", name, images.MaxINIScanBytes>>20))
 			return
 		}
 		if !crypt.IsJPEG(data) {

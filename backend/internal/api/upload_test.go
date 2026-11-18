@@ -2,13 +2,12 @@ package api
 
 import (
 	"SIDM/internal/catalog"
+	"SIDM/internal/images"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"SIDM/internal/store"
 )
 
 func TestUploadResultados(t *testing.T) {
@@ -47,8 +46,8 @@ func TestUploadGravaDocumentoPending(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedPending(t, "conteudo")
 
-	img := env.db.images[sha]
-	if img.Status != store.StatusPending {
+	img := env.img.Images[sha]
+	if img.Status != images.StatusPending {
 		t.Errorf("status = %q", img.Status)
 	}
 	if img.OriginalName != "original.jpg" || img.Ext != ".jpg" || img.Size != int64(len("conteudo")) {
@@ -76,11 +75,11 @@ func TestUploadPrefill(t *testing.T) {
 		if !res[0].Prefilled {
 			t.Fatal("esperava prefilled")
 		}
-		img := env.db.images[sha]
+		img := env.img.Images[sha]
 		if img.Equipment != "8003-MF4739" || img.DayTime != "day" || len(img.Vehicles) != 1 {
 			t.Errorf("metadados não pré-preenchidos: %+v", img)
 		}
-		if img.Status != store.StatusPending {
+		if img.Status != images.StatusPending {
 			t.Error("pré-preenchida deve continuar pending até alguém conferir")
 		}
 	})
@@ -128,7 +127,7 @@ func TestUploadRepetidaEmOutroPacoteEPulada(t *testing.T) {
 		t.Errorf("o resto do lote deveria seguir: %+v", res[1])
 	}
 
-	if env.db.images[shaA].Package != testPkg {
+	if env.img.Images[shaA].Package != testPkg {
 		t.Error("a repetida não pode mudar de pacote")
 	}
 	novo, _ := os.ReadDir(filepath.Join(env.root, "dataset", "pacote-novo"))

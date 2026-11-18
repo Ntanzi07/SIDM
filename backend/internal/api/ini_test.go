@@ -10,8 +10,8 @@ import (
 	"time"
 
 	"SIDM/internal/crypt"
+	"SIDM/internal/images"
 	"SIDM/internal/importer"
-	"SIDM/internal/store"
 )
 
 // jpegWithINI monta um "JPEG" mínimo com um INI depois do fim da imagem,
@@ -66,7 +66,7 @@ func TestUploadGuardaINI(t *testing.T) {
 		t.Error("sem ?profile=, o INI é só guardado: nada é pré-preenchido")
 	}
 
-	img := env.db.images[res[0].SHA1]
+	img := env.img.Images[res[0].SHA1]
 	got := map[string]string{}
 	for _, e := range img.INI {
 		got[e.Section+"."+e.Key] = e.Value
@@ -92,8 +92,8 @@ func TestUploadComPerfilDeINI(t *testing.T) {
 		t.Fatalf("resultado = %+v", res[0])
 	}
 
-	img := env.db.images[res[0].SHA1]
-	if img.Status != store.StatusPending {
+	img := env.img.Images[res[0].SHA1]
+	if img.Status != images.StatusPending {
 		t.Error("o perfil pré-preenche, mas a imagem continua pending")
 	}
 	if img.Equipment != "MFR1-0001" {
@@ -164,7 +164,7 @@ func TestImportComPerfilDeINISemArquivo(t *testing.T) {
 	if len(rep.NewEquipments) != 1 || rep.NewEquipments[0] != "MFR1-0001" {
 		t.Errorf("new_equipments = %v", rep.NewEquipments)
 	}
-	if env.db.images[res[0].SHA1].Equipment != "" {
+	if env.img.Images[res[0].SHA1].Equipment != "" {
 		t.Fatal("o ensaio gravou!")
 	}
 
@@ -172,7 +172,7 @@ func TestImportComPerfilDeINISemArquivo(t *testing.T) {
 	if rep.Applied != 2 {
 		t.Fatalf("applied = %d", rep.Applied)
 	}
-	a := env.db.images[res[0].SHA1]
+	a := env.img.Images[res[0].SHA1]
 	if a.Equipment != "MFR1-0001" || len(a.Vehicles) != 1 || a.Vehicles[0].Plate != "AAA1111" {
 		t.Errorf("imagem a = %+v", a)
 	}

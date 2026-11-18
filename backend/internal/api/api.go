@@ -9,11 +9,10 @@ import (
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/export"
-	"SIDM/internal/filename"
 	"SIDM/internal/files"
+	"SIDM/internal/images"
 	"SIDM/internal/importer"
 	"SIDM/internal/platform"
-	"SIDM/internal/store"
 )
 
 // A lista de rotas é a tabela de routes() (as daqui e as dos módulos), e
@@ -29,18 +28,13 @@ import (
 type Store interface {
 	Ping(ctx context.Context) error
 
-	// O lado das imagens e das caixas das operações do catálogo (ver
-	// legacy_images.go e store/catalog.go).
-	PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error)
-	RenamePackageImages(ctx context.Context, oldName, newName string) (int64, error)
-	DeletePackageImages(ctx context.Context, name string) (int64, error)
-	CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error)
-	RenameOnPending(ctx context.Context, reg catalog.Registry, oldName, newName string, now time.Time) (int64, error)
-	VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error)
-
-	InsertImage(ctx context.Context, img *store.Image) error
-	DeleteImage(ctx context.Context, sha1 string) error
-	DeleteImageHistory(ctx context.Context, sha1 string) error
+	// Perfis de import
+	CreateProfile(ctx context.Context, p *importer.Profile) error
+	FindProfile(ctx context.Context, name string) (*importer.Profile, error)
+	ReplaceProfile(ctx context.Context, p *importer.Profile) error
+	RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error
+	DeleteProfile(ctx context.Context, name string) error
+	ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error)
 
 	// Perfis de export
 	CreateExportProfile(ctx context.Context, p *export.Profile) error
@@ -48,21 +42,6 @@ type Store interface {
 	ReplaceExportProfile(ctx context.Context, p *export.Profile) error
 	DeleteExportProfile(ctx context.Context, name string) error
 	ListExportProfiles(ctx context.Context) ([]export.Profile, error)
-	FindImage(ctx context.Context, sha1 string) (*store.Image, error)
-	ReplaceImage(ctx context.Context, img *store.Image, prevUpdatedAt time.Time) error
-	ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*store.Image, error)
-	ReleaseClaim(ctx context.Context, sha1, user string) error
-	ListImages(ctx context.Context, f store.ImageFilter) ([]store.Image, int64, error)
-	ExistingImages(ctx context.Context, ids []string) (map[string]store.ExistingImage, error)
-	InsertHistory(ctx context.Context, entries []store.HistoryEntry) error
-
-	CreateProfile(ctx context.Context, p *importer.Profile) error
-	FindProfile(ctx context.Context, name string) (*importer.Profile, error)
-	ReplaceProfile(ctx context.Context, p *importer.Profile) error
-	RenameProfile(ctx context.Context, oldName, newName string, now time.Time) error
-	DeleteProfile(ctx context.Context, name string) error
-	ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error)
-	FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]store.Image, error)
 }
 
 type Server struct {
@@ -70,13 +49,14 @@ type Server struct {
 	files   *files.Storage
 	catalog *catalog.Service
 	boxes   *boxes.Service
+	images  *images.Service
 }
 
-// New monta a API. O catálogo (pacotes, equipamentos, câmeras) e as caixas
-// (tarefas, CVAT) já são módulos: as rotas deles entram junto, e os outros
-// handlers usam os Services.
-func New(s Store, fs *files.Storage, cat *catalog.Service, bx *boxes.Service) *Server {
-	return &Server{store: s, files: fs, catalog: cat, boxes: bx}
+// New monta a API. Catálogo, caixas e imagens já são módulos: as rotas
+// deles entram junto, e os handlers daqui (import de CSV, export) usam os
+// Services.
+func New(s Store, fs *files.Storage, cat *catalog.Service, bx *boxes.Service, img *images.Service) *Server {
+	return &Server{store: s, files: fs, catalog: cat, boxes: bx, images: img}
 }
 
 // route é uma linha da tabela de rotas.
@@ -91,18 +71,9 @@ type route struct {
 func (s *Server) routes() []route {
 	rts := []route{
 		{"GET", "/health", s.handleHealth},
-		{"GET", "/codes", s.handleCodes},
 
-		{"POST", "/packages/{name}/next", s.handleNext},
 		{"POST", "/packages/{name}/import", s.handleImport},
 
-		{"GET", "/images", s.handleListImages},
-		{"POST", "/images", s.handleUpload},
-		{"POST", "/images/exists", s.handleExists},
-		{"GET", "/images/{sha1}", s.handleGetImage},
-		{"PUT", "/images/{sha1}", s.handleAnnotate},
-		{"DELETE", "/images/{sha1}", s.handleDeleteImage},
-		{"POST", "/images/{sha1}/reopen", s.handleReopen},
 		{"GET", "/export-folder-fields", s.handleExportFolderFields},
 		{"GET", "/export-profiles", s.handleListExportProfiles},
 		{"POST", "/export-profiles", s.handleCreateExportProfile},
@@ -111,8 +82,6 @@ func (s *Server) routes() []route {
 		{"DELETE", "/export-profiles/{name}", s.handleDeleteExportProfile},
 		{"POST", "/exports/preview", s.handleExportPreview},
 		{"POST", "/exports/download", s.handleExportDownload},
-		{"GET", "/images/{sha1}/file", s.handleImageFile},
-		{"POST", "/images/{sha1}/release", s.handleRelease},
 
 		{"POST", "/imports/inspect", s.handleInspect},
 		{"GET", "/import-profiles", s.handleListProfiles},
@@ -123,7 +92,7 @@ func (s *Server) routes() []route {
 		{"DELETE", "/import-profiles/{name}", s.handleDeleteProfile},
 	}
 	// As rotas dos módulos.
-	for _, m := range []platform.Module{s.catalog, s.boxes} {
+	for _, m := range []platform.Module{s.catalog, s.boxes, s.images} {
 		for _, rt := range m.Routes() {
 			rts = append(rts, route{rt.Method, rt.Path, rt.Handler})
 		}
@@ -150,13 +119,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write([]byte("ok"))
-}
-
-// handleCodes devolve as tabelas fixas do padrão v2 (direção, clima, cor...).
-// Equipamentos e câmeras NÃO vêm aqui: podem ser milhares, então têm busca
-// própria e paginada (GET /equipments e GET /cameras).
-func (s *Server) handleCodes(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, filename.Codes())
 }
 
 // page é o formato padrão de toda listagem.

@@ -3,17 +3,16 @@ package api
 import (
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
+	"SIDM/internal/images"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 	"time"
-
-	"SIDM/internal/store"
 )
 
 // next pede a próxima imagem do pacote de teste como `user`.
-func (e *testEnv) next(t *testing.T, user, body string) (*store.Image, int) {
+func (e *testEnv) next(t *testing.T, user, body string) (*images.Image, int) {
 	t.Helper()
 	headers := map[string]string{"Content-Type": "application/json"}
 	if user != "" {
@@ -23,7 +22,7 @@ func (e *testEnv) next(t *testing.T, user, body string) (*store.Image, int) {
 	if rec.Code != http.StatusOK {
 		return nil, rec.Code
 	}
-	var img store.Image
+	var img images.Image
 	decode(t, rec, &img)
 	return &img, rec.Code
 }
@@ -34,9 +33,9 @@ func (e *testEnv) seedQueue(t *testing.T, contents ...string) []string {
 	shas := make([]string, len(contents))
 	for i, c := range contents {
 		shas[i] = e.seedPending(t, c)
-		img := e.db.images[shas[i]]
+		img := e.img.Images[shas[i]]
 		img.QueuedAt = time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC) // ordem determinística
-		e.db.images[shas[i]] = img
+		e.img.Images[shas[i]] = img
 	}
 	return shas
 }
@@ -92,9 +91,9 @@ func TestNextPularComRelogioEmpatado(t *testing.T) {
 	shas := env.seedQueue(t, "a", "b")
 	same := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for _, sha := range shas {
-		img := env.db.images[sha]
+		img := env.img.Images[sha]
 		img.QueuedAt = same
-		env.db.images[sha] = img
+		env.img.Images[sha] = img
 	}
 
 	first, _ := env.next(t, "nathan", "")
@@ -141,10 +140,10 @@ func TestNextPrazoVencidoLiberaAImagem(t *testing.T) {
 	env.next(t, "nathan", "")
 
 	// Nathan sumiu: o prazo dele venceu.
-	img := env.db.images[shas[0]]
+	img := env.img.Images[shas[0]]
 	past := time.Now().Add(-time.Minute)
 	img.ClaimedUntil = &past
-	env.db.images[shas[0]] = img
+	env.img.Images[shas[0]] = img
 
 	maria, code := env.next(t, "maria", "")
 	if code != http.StatusOK || maria.SHA1 != shas[0] || maria.ClaimedBy != "maria" {
@@ -187,15 +186,15 @@ func TestAnnotateRascunhoRenovaOPrazo(t *testing.T) {
 	env.next(t, "nathan", "")
 
 	soon := time.Now().Add(time.Minute) // quase vencendo
-	img := env.db.images[shas[0]]
+	img := env.img.Images[shas[0]]
 	img.ClaimedUntil = &soon
-	env.db.images[shas[0]] = img
+	env.img.Images[shas[0]] = img
 
 	rec := env.do("PUT", "/images/"+shas[0], strings.NewReader(`{"day_time":"night"}`),
 		map[string]string{"Content-Type": "application/json", "X-User": "nathan"})
 	assertStatus(t, rec, http.StatusOK)
 
-	got := env.db.images[shas[0]]
+	got := env.img.Images[shas[0]]
 	if got.ClaimedBy != "nathan" || !got.ClaimedUntil.After(time.Now().Add(10*time.Minute)) {
 		t.Errorf("rascunho deveria renovar o prazo: %+v", got)
 	}
@@ -210,7 +209,7 @@ func TestAnnotateVerificarTiraDaFila(t *testing.T) {
 		map[string]string{"Content-Type": "application/json", "X-User": "nathan"})
 	assertStatus(t, rec, http.StatusOK)
 
-	got := env.db.images[shas[0]]
+	got := env.img.Images[shas[0]]
 	if got.ClaimedBy != "" || got.ClaimedUntil != nil {
 		t.Errorf("verificada deveria sair da fila: %+v", got)
 	}
@@ -221,12 +220,8 @@ func TestAnnotateConflitoOptimisticLocking(t *testing.T) {
 	sha := env.seedPending(t, "a")
 
 	// Entre o nosso "ler" e o nosso "gravar", outra pessoa grava.
-	env.db.beforeReplace = func() {
-		env.db.mu.Lock()
-		img := env.db.images[sha]
-		img.UpdatedAt = time.Now().Add(time.Second)
-		env.db.images[sha] = img
-		env.db.mu.Unlock()
+	env.img.BeforeReplace = func() {
+		env.img.Update(sha, func(img *images.Image) { img.UpdatedAt = time.Now().Add(time.Second) })
 	}
 
 	rec := env.doJSON("PUT", "/images/"+sha, completeBody())
@@ -244,13 +239,13 @@ func TestRelease(t *testing.T) {
 
 	// Só o dono libera.
 	env.do("POST", "/images/"+shas[0]+"/release", nil, map[string]string{"X-User": "maria"})
-	if env.db.images[shas[0]].ClaimedBy != "nathan" {
+	if env.img.Images[shas[0]].ClaimedBy != "nathan" {
 		t.Fatal("maria não pode liberar a imagem do nathan")
 	}
 
 	rec := env.do("POST", "/images/"+shas[0]+"/release", nil, map[string]string{"X-User": "nathan"})
 	assertStatus(t, rec, http.StatusNoContent)
-	if env.db.images[shas[0]].ClaimedBy != "" {
+	if env.img.Images[shas[0]].ClaimedBy != "" {
 		t.Error("release não liberou")
 	}
 
@@ -278,15 +273,15 @@ func TestPackagesContaQuemEstaAnotando(t *testing.T) {
 func TestReabrirImagemVerificada(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedVerified(t, "verificada")
-	verifiedName := env.db.images[sha].FileName
+	verifiedName := env.img.Images[sha].FileName
 	env.box.Sets[sha] = boxes.Set{ImageID: sha, Package: testPkg}
 
 	// outra pessoa nem consegue editar uma verificada sem reabrir
 	rec := env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "maria"})
 	assertStatus(t, rec, http.StatusOK)
 
-	img := env.db.images[sha]
-	if img.Status != store.StatusPending || img.FileName != "" || img.Path != "dataset/"+testPkg+"/"+sha+".jpg" {
+	img := env.img.Images[sha]
+	if img.Status != images.StatusPending || img.FileName != "" || img.Path != "dataset/"+testPkg+"/"+sha+".jpg" {
 		t.Errorf("status=%s file=%q path=%q", img.Status, img.FileName, img.Path)
 	}
 	if img.ClaimedBy != "maria" || img.ClaimedUntil == nil {
@@ -305,8 +300,8 @@ func TestReabrirImagemVerificada(t *testing.T) {
 		t.Error("as caixas não podem ser afetadas")
 	}
 	var logged bool
-	for _, h := range env.db.history {
-		if h.ImageID == sha && h.Field == "status" && h.Old == store.StatusVerified && h.New == store.StatusPending && h.ChangedBy == "maria" {
+	for _, h := range env.img.History {
+		if h.ImageID == sha && h.Field == "status" && h.Old == images.StatusVerified && h.New == images.StatusPending && h.ChangedBy == "maria" {
 			logged = true
 		}
 	}
@@ -323,7 +318,7 @@ func TestReabrirImagemVerificada(t *testing.T) {
 	// maria salva rascunho e verifica de novo
 	rec = env.do("PUT", "/images/"+sha, strings.NewReader(completeBody()), map[string]string{"Content-Type": "application/json", "X-User": "maria"})
 	assertStatus(t, rec, http.StatusOK)
-	if img := env.db.images[sha]; img.Status != store.StatusVerified || img.FileName != verifiedName {
+	if img := env.img.Images[sha]; img.Status != images.StatusVerified || img.FileName != verifiedName {
 		t.Errorf("verificando de novo: status=%s file=%q", img.Status, img.FileName)
 	}
 }
@@ -333,7 +328,7 @@ func TestReabrirPendenteSoReserva(t *testing.T) {
 	sha := env.seedPending(t, "pendente")
 	rec := env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "maria"})
 	assertStatus(t, rec, http.StatusOK)
-	if img := env.db.images[sha]; img.Status != store.StatusPending || img.ClaimedBy != "maria" {
+	if img := env.img.Images[sha]; img.Status != images.StatusPending || img.ClaimedBy != "maria" {
 		t.Errorf("status=%s claimed=%q", img.Status, img.ClaimedBy)
 	}
 	// a mesma pessoa pode reabrir de novo (renova a reserva)

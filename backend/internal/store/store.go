@@ -18,8 +18,8 @@ var (
 	ErrDuplicate = platform.ErrDuplicate
 )
 
-// Acesso ao MongoDB das partes que ainda não viraram módulo (imagens,
-// histórico, fila, perfis de import e de export).
+// Acesso ao MongoDB das partes que ainda não viraram módulo: os perfis de
+// import e de export. Também abre a conexão (DB()) que os módulos usam.
 type Store struct {
 	client *mongo.Client
 	db     *mongo.Database

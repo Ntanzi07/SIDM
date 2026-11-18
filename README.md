@@ -71,14 +71,15 @@ SIDM/
     └── internal/
         ├── platform/       o que todos usam: erros, respostas HTTP, usuário, Mongo de teste
         ├── catalog/        MÓDULO: pacotes, equipamentos e câmeras (regras, Mongo, HTTP)
+        ├── images/         MÓDULO: upload, INI, fila, anotação, verificação (nome v2), histórico
         ├── filename/       padrão v2: Parse, Format, tabelas de códigos, sanitização
         ├── files/          disco: hash durante a gravação, pasta por pacote, rename
         ├── importer/       leitura de CSV e de INI, perfis de import (sem banco, sem HTTP)
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── boxes/          MÓDULO: tarefas e caixas do CVAT (leitura do COCO, import, cvat.zip)
         ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC
-        ├── store/          Mongo do que ainda não é módulo: imagens, fila, perfis, histórico
-        └── api/            handlers HTTP do que ainda não é módulo + openapi.yaml
+        ├── store/          Mongo do que ainda não é módulo: perfis de import e de export
+        └── api/            handlers HTTP do que ainda não é módulo (import de CSV, export) + openapi.yaml
 ```
 
 ---
@@ -135,9 +136,9 @@ A especificação fica em `backend/internal/api/openapi.yaml` e vai embutida no 
 ### Organização do backend (monólito modular)
 
 O backend é **um binário só**, organizado por **assunto** (módulos), e não por
-camada. A reorganização está em andamento: `catalog` e `boxes` já são módulos;
-imagens, import e export ainda vivem em `api/` + `store/` e vão sair um por vez
-(o lado das imagens do que os módulos precisam está em `api/legacy_images.go`).
+camada. A reorganização está em andamento: `catalog`, `boxes` e `images` já são
+módulos; o import de CSV e o export ainda vivem em `api/` + `store/` e vão sair um
+por vez.
 
 Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 
@@ -154,9 +155,10 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 - o que ele precisa de outro, pede por uma interface pequena declarada nele
   (ex.: o catálogo declara `Images`, com o progresso dos pacotes e as cascatas);
 - as cascatas viram **avisos**: ao renomear ou apagar um pacote, o catálogo avisa
-  quem guarda o pacote (`PackageListener`: as caixas); ao renomear uma tarefa, o
-  `boxes` avisa quem guarda a tarefa (`TaskListener`: os perfis de export). Cada
-  um cuida das suas coleções;
+  quem guarda o pacote (`PackageListener`: as caixas); ao apagar uma imagem, o
+  `images` avisa as caixas (`Listener`); ao renomear uma tarefa, o `boxes` avisa
+  quem guarda a tarefa (`TaskListener`: os perfis de export). Cada um cuida das
+  suas coleções;
 - o `main.go` monta os módulos e liga as interfaces;
 - a API não muda com a reorganização: o frontend não percebe.
 

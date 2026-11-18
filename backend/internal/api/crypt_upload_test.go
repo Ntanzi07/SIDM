@@ -27,7 +27,7 @@ func TestUploadDescriptografaRC4Legado(t *testing.T) {
 		t.Error("o INI do arquivo aberto deveria ter sido lido")
 	}
 
-	img := env.db.images[r.SHA1]
+	img := env.img.Images[r.SHA1]
 	if img.Ext != ".jpg" || img.Encryption != crypt.FormatRC4Legacy {
 		t.Errorf("ext=%q encryption=%q", img.Ext, img.Encryption)
 	}
@@ -64,7 +64,7 @@ func TestUploadComPerfilDeINIEmArquivoCriptografado(t *testing.T) {
 	encrypted := string(crypt.EncryptRC4Legacy([]byte(jpegWithINI("a", "GGB5H24"))))
 
 	res := env.uploadToWithQuery(t, testPkg, "&profile=ini-mfr1", upFile{"foto.enc", encrypted})
-	img := env.db.images[res[0].SHA1]
+	img := env.img.Images[res[0].SHA1]
 	if !res[0].Prefilled || len(img.Vehicles) != 1 || img.Vehicles[0].Plate != "GGB5H24" {
 		t.Errorf("o perfil de INI deveria funcionar no arquivo descriptografado: %+v", res[0])
 	}

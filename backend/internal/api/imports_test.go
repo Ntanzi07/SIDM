@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"SIDM/internal/images"
 	"SIDM/internal/importer"
-	"SIDM/internal/store"
 )
 
 const testProfileJSON = `{
@@ -296,10 +296,10 @@ func TestImportEnsaioNaoGrava(t *testing.T) {
 	if rep.Unmapped["weather"]["Garoa"] != 1 {
 		t.Errorf("Garoa deveria aparecer sem tradução: %v", rep.Unmapped)
 	}
-	if env.db.images[shaA].DayTime != "" {
+	if env.img.Images[shaA].DayTime != "" {
 		t.Error("o ensaio gravou no rascunho!")
 	}
-	if len(env.db.history) != 0 {
+	if len(env.img.History) != 0 {
 		t.Error("o ensaio gravou histórico!")
 	}
 }
@@ -315,8 +315,8 @@ func TestImportAplica(t *testing.T) {
 		t.Fatalf("dry_run=%v applied=%d", rep.DryRun, rep.Applied)
 	}
 
-	a := env.db.images[shaA]
-	if a.Status != store.StatusPending {
+	a := env.img.Images[shaA]
+	if a.Status != images.StatusPending {
 		t.Error("o import NUNCA verifica: a imagem tem que continuar pending")
 	}
 	if a.Equipment != "8003-MF4739" || a.DayTime != "night" || a.Weather != "rain" {
@@ -329,13 +329,13 @@ func TestImportAplica(t *testing.T) {
 		t.Errorf("captured_at = %v (08:25 em São Paulo = 11:25 UTC)", a.CapturedAt)
 	}
 
-	b := env.db.images[shaB]
+	b := env.img.Images[shaB]
 	if b.Weather != "" || b.DayTime != "day" {
 		t.Errorf("b: Garoa (sem tradução) deveria ficar vazio: %+v", b)
 	}
 
 	var byImport bool
-	for _, h := range env.db.history {
+	for _, h := range env.img.History {
 		if h.ChangedBy == "nathan via import:csv-teste" {
 			byImport = true
 		}
@@ -360,7 +360,7 @@ func TestImportRespeitaQuemJaAnotou(t *testing.T) {
 	assertStatus(t, env.doJSON("PUT", "/images/"+sha, `{"weather":"fog"}`), http.StatusOK)
 
 	decodeImport(t, env.postFile(t, "/packages/"+testPkg+"/import?profile=csv-teste&dry_run=false", "file", importCSV))
-	img := env.db.images[sha]
+	img := env.img.Images[sha]
 	if img.Weather != "fog" {
 		t.Errorf("overwrite=false: o clima anotado deveria ser mantido, virou %q", img.Weather)
 	}
@@ -369,7 +369,7 @@ func TestImportRespeitaQuemJaAnotou(t *testing.T) {
 	}
 
 	decodeImport(t, env.postFile(t, "/packages/"+testPkg+"/import?profile=csv-teste&dry_run=false&overwrite=true", "file", importCSV))
-	if env.db.images[sha].Weather != "rain" {
+	if env.img.Images[sha].Weather != "rain" {
 		t.Error("overwrite=true: o valor do CSV deveria substituir")
 	}
 }
@@ -382,16 +382,16 @@ func TestImportPulaVerificadasEReservadas(t *testing.T) {
 
 	// a: verificada. b: com a maria na fila.
 	assertStatus(t, env.doJSON("PUT", "/images/"+shaA, completeBody()), http.StatusOK)
-	img := env.db.images[shaB]
+	img := env.img.Images[shaB]
 	until := time.Now().Add(time.Hour)
 	img.ClaimedBy, img.ClaimedUntil = "maria", &until
-	env.db.images[shaB] = img
+	env.img.Images[shaB] = img
 
 	rep := decodeImport(t, env.postFile(t, "/packages/"+testPkg+"/import?profile=csv-teste&dry_run=false", "file", importCSV))
 	if rep.SkippedVerified != 1 || rep.SkippedClaimed != 1 || rep.Applied != 0 {
 		t.Errorf("verified=%d claimed=%d applied=%d; want 1, 1, 0", rep.SkippedVerified, rep.SkippedClaimed, rep.Applied)
 	}
-	if env.db.images[shaB].DayTime != "" {
+	if env.img.Images[shaB].DayTime != "" {
 		t.Error("o import não pode mexer na imagem que a maria está anotando")
 	}
 }
@@ -425,7 +425,7 @@ func TestImportCadastraEquipamentoECameraNovos(t *testing.T) {
 	if !env.cat.Equipments["9999-NOVO"] || !env.cat.Cameras["Intelbras-VIP-3230"] {
 		t.Errorf("deveria ter cadastrado: equipments=%v cameras=%v", env.cat.Equipments, env.cat.Cameras)
 	}
-	img := env.db.images[sha]
+	img := env.img.Images[sha]
 	if img.Equipment != "9999-NOVO" || img.Camera != "Intelbras-VIP-3230" {
 		t.Errorf("a imagem deveria usar o nome sanitizado: equipment=%q camera=%q", img.Equipment, img.Camera)
 	}
@@ -453,7 +453,7 @@ func TestImportNomeImpossivelDeSanitizar(t *testing.T) {
 	if len(rep.NewEquipments) != 0 || len(env.cat.Equipments) != 1 {
 		t.Error("nome inválido não pode ser cadastrado")
 	}
-	img := env.db.images[sha]
+	img := env.img.Images[sha]
 	if img.Equipment != "" || img.DayTime != "night" {
 		t.Errorf("equipamento vazio e o resto aplicado: %+v", img)
 	}
@@ -469,7 +469,7 @@ func TestImportNomeOriginalRepetido(t *testing.T) {
 	if len(rep.Ambiguous) != 1 || rep.Ambiguous[0] != "a.jpg" {
 		t.Errorf("ambiguous = %v", rep.Ambiguous)
 	}
-	for _, img := range env.db.images {
+	for _, img := range env.img.Images {
 		if img.OriginalName == "a.jpg" && img.DayTime != "" {
 			t.Error("com nome repetido, não dá para saber qual é: nenhuma pode ser alterada")
 		}
@@ -486,8 +486,8 @@ func TestImportPorSHA1(t *testing.T) {
 
 	csv := "hash,clima\n" + strings.ToUpper(sha) + ",chuva\n"
 	rep := decodeImport(t, env.postFile(t, "/packages/"+testPkg+"/import?profile=por-hash&dry_run=false", "file", csv))
-	if rep.Applied != 1 || env.db.images[sha].Weather != "rain" {
-		t.Errorf("applied=%d weather=%q", rep.Applied, env.db.images[sha].Weather)
+	if rep.Applied != 1 || env.img.Images[sha].Weather != "rain" {
+		t.Errorf("applied=%d weather=%q", rep.Applied, env.img.Images[sha].Weather)
 	}
 }
 
@@ -522,14 +522,14 @@ func TestMergeAnnotation(t *testing.T) {
 	when := time.Date(2026, 9, 3, 11, 0, 0, 0, time.UTC)
 	a := importer.Annotation{DayTime: "night", Weather: "rain", CapturedAt: &when, Conditions: []string{"glare"}}
 
-	img := store.Image{Weather: "fog"}
-	if !mergeAnnotation(&img, a, false) {
+	img := images.Image{Weather: "fog"}
+	if !images.MergeAnnotation(&img, a, false) {
 		t.Fatal("deveria ter mudado")
 	}
 	if img.Weather != "fog" || img.DayTime != "night" || !img.CapturedAt.Equal(when) {
 		t.Errorf("sem overwrite = %+v", img)
 	}
-	if mergeAnnotation(&img, a, false) {
+	if images.MergeAnnotation(&img, a, false) {
 		t.Error("aplicar a mesma coisa de novo não deveria mudar nada")
 	}
 

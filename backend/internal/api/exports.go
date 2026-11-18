@@ -15,7 +15,8 @@ import (
 	"time"
 
 	"SIDM/internal/export"
-	"SIDM/internal/store"
+	"SIDM/internal/images"
+	"SIDM/internal/platform"
 )
 
 // Export de datasets de treino (RF-DETR / YOLO / Pascal VOC).
@@ -83,7 +84,7 @@ func (s *Server) exportProfileByName(w http.ResponseWriter, r *http.Request, nam
 		return &p, true
 	}
 	p, err := s.store.FindExportProfile(r.Context(), name)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, platform.ErrNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil de export %q não existe", name))
 		return nil, false
 	}
@@ -102,7 +103,7 @@ func (s *Server) handleCreateExportProfile(w http.ResponseWriter, r *http.Reques
 	}
 	p.CreatedBy, p.UpdatedAt = userFrom(r), time.Now().UTC()
 	if err := s.store.CreateExportProfile(r.Context(), p); err != nil {
-		if errors.Is(err, store.ErrDuplicate) {
+		if errors.Is(err, platform.ErrDuplicate) {
 			writeError(w, http.StatusConflict, fmt.Sprintf("já existe um perfil de export %q", p.Name))
 			return
 		}
@@ -128,7 +129,7 @@ func (s *Server) handleReplaceExportProfile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	old, err := s.store.FindExportProfile(r.Context(), name)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, platform.ErrNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil de export %q não existe", name))
 		return
 	}
@@ -152,7 +153,7 @@ func (s *Server) handleDeleteExportProfile(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	err := s.store.DeleteExportProfile(r.Context(), name)
-	if errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, platform.ErrNotFound) {
 		writeError(w, http.StatusNotFound, fmt.Sprintf("perfil de export %q não existe", name))
 		return
 	}
@@ -208,7 +209,7 @@ func (s *Server) profileFromRequest(w http.ResponseWriter, r *http.Request) (*ex
 		writeError(w, http.StatusBadRequest, "escolha a tarefa de anotação (as caixas de qual tarefa entram no dataset)")
 		return nil, false
 	}
-	if _, err := s.boxes.FindTask(r.Context(), p.Task); errors.Is(err, store.ErrNotFound) {
+	if _, err := s.boxes.FindTask(r.Context(), p.Task); errors.Is(err, platform.ErrNotFound) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("a tarefa %q não existe (foi renomeada ou apagada?)", p.Task))
 		return nil, false
 	} else if err != nil {
@@ -319,8 +320,8 @@ func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export
 	const pageSize = 500
 	for _, pkg := range pkgs {
 		for skip := int64(0); ; skip += pageSize {
-			imgs, _, err := s.store.ListImages(ctx, store.ImageFilter{
-				Package: pkg, Status: store.StatusVerified,
+			imgs, _, err := s.images.List(ctx, images.ImageFilter{
+				Package: pkg, Status: images.StatusVerified,
 				Equipment: f.Equipment, Camera: f.Camera, Direction: f.Direction, DayTime: f.DayTime,
 				Weather: f.Weather, VehicleType: f.VehicleType, VehicleColor: f.VehicleColor,
 				Limit: pageSize, Skip: skip,
@@ -391,7 +392,7 @@ func (s *Server) collectExport(ctx context.Context, p *export.Profile) ([]export
 
 // imageMeta: os metadados da imagem que viram pasta ou parte do nome de
 // saída (os do veículo vêm do primeiro veículo; a condição é a primeira).
-func imageMeta(img *store.Image) export.Meta {
+func imageMeta(img *images.Image) export.Meta {
 	m := export.Meta{
 		"resolution": img.Resolution, "direction": img.Direction, "day_time": img.DayTime,
 		"weather": img.Weather, "capture_angle": img.CaptureAngle, "image_range": img.ImageRange,
@@ -420,7 +421,7 @@ func (s *Server) opener(rel string) func() (io.ReadCloser, error) {
 // foi renomeado ou apagado).
 func (s *Server) checkPackages(w http.ResponseWriter, r *http.Request, p *export.Profile) bool {
 	for _, name := range p.Packages {
-		if _, err := s.catalog.FindPackage(r.Context(), name); errors.Is(err, store.ErrNotFound) {
+		if _, err := s.catalog.FindPackage(r.Context(), name); errors.Is(err, platform.ErrNotFound) {
 			writeError(w, http.StatusBadRequest, fmt.Sprintf("o pacote %q do perfil não existe (foi renomeado ou apagado?)", name))
 			return false
 		} else if err != nil {

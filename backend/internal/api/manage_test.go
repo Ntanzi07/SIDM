@@ -48,18 +48,18 @@ func TestRenomearEquipamentoEmCascata(t *testing.T) {
 	pending := env.seedPending(t, "pendente")
 	assertStatus(t, env.doJSON("PUT", "/images/"+pending, `{"equipment":"8003-MF4739","day_time":"night"}`), http.StatusOK)
 	verified := env.seedVerified(t, "verificada")
-	oldFile := env.db.images[verified].FileName
+	oldFile := env.img.Images[verified].FileName
 
 	rep, code := decodeRegistry(t, env, "PATCH", "/equipments/8003-MF4739", `{"name":"9000-XYZ"}`)
 	if code != http.StatusOK || rep.PendingUpdated != 1 || rep.VerifiedRenamed != 1 || !rep.Complete {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
 
-	if env.db.images[pending].Equipment != "9000-XYZ" {
+	if env.img.Images[pending].Equipment != "9000-XYZ" {
 		t.Error("a pendente deveria usar o nome novo")
 	}
 
-	v := env.db.images[verified]
+	v := env.img.Images[verified]
 	if v.Equipment != "9000-XYZ" || !strings.Contains(v.FileName, "_9000-XYZ_") {
 		t.Errorf("verificada: equipment=%q file=%q", v.Equipment, v.FileName)
 	}
@@ -71,7 +71,7 @@ func TestRenomearEquipamentoEmCascata(t *testing.T) {
 	}
 
 	var logged bool
-	for _, h := range env.db.history {
+	for _, h := range env.img.History {
 		if h.ImageID == verified && h.Field == "equipment" && h.New == "9000-XYZ" && strings.Contains(h.ChangedBy, "renomear") {
 			logged = true
 		}
@@ -102,7 +102,7 @@ func TestRenomearCamera(t *testing.T) {
 	if code != http.StatusOK || rep.VerifiedRenamed != 1 {
 		t.Fatalf("code=%d rep=%+v", code, rep)
 	}
-	v := env.db.images[verified]
+	v := env.img.Images[verified]
 	if v.Camera != "Intelbras-3230" || !strings.Contains(v.FileName, "_Intelbras-3230_") {
 		t.Errorf("camera=%q file=%q", v.Camera, v.FileName)
 	}
@@ -114,9 +114,9 @@ func TestRenomearCamera(t *testing.T) {
 func TestRenomearComFalhaPodeSerRepetido(t *testing.T) {
 	env := newTestEnv(t)
 	verified := env.seedVerified(t, "verificada")
-	oldFile := env.db.images[verified].FileName
+	oldFile := env.img.Images[verified].FileName
 
-	env.db.replaceErr = errBoom
+	env.img.ReplaceErr = errBoom
 	rep, code := decodeRegistry(t, env, "PATCH", "/equipments/8003-MF4739", `{"name":"9000-XYZ"}`)
 	if code != http.StatusOK || rep.Complete || len(rep.Failed) != 1 || rep.Failed[0] != verified {
 		t.Fatalf("code=%d rep=%+v", code, rep)
@@ -129,7 +129,7 @@ func TestRenomearComFalhaPodeSerRepetido(t *testing.T) {
 	}
 
 	// O banco voltou: o MESMO pedido termina o serviço.
-	env.db.replaceErr = nil
+	env.img.ReplaceErr = nil
 	rep, _ = decodeRegistry(t, env, "PATCH", "/equipments/8003-MF4739", `{"name":"9000-XYZ"}`)
 	if !rep.Complete || rep.VerifiedRenamed != 1 {
 		t.Errorf("repetindo: %+v", rep)
@@ -216,7 +216,7 @@ func TestExcluirCadastroEmUsoDesativa(t *testing.T) {
 	if !exists || active {
 		t.Errorf("deveria continuar cadastrada, mas desativada: exists=%v active=%v", exists, active)
 	}
-	if env.db.images[sha].Camera != "hikvision-233" {
+	if env.img.Images[sha].Camera != "hikvision-233" {
 		t.Error("as imagens que usam não podem ser alteradas")
 	}
 
@@ -239,7 +239,7 @@ func TestRenomearPacote(t *testing.T) {
 	}
 
 	for _, sha := range []string{pending, verified} {
-		img := env.db.images[sha]
+		img := env.img.Images[sha]
 		if img.Package != "Pacote-Renomeado" || !strings.HasPrefix(img.Path, "dataset/Pacote-Renomeado/") {
 			t.Errorf("%s: package=%q path=%q", sha, img.Package, img.Path)
 		}
@@ -279,7 +279,7 @@ func TestExcluirPacoteApagaTudo(t *testing.T) {
 				t.Errorf("a mensagem deveria dizer como confirmar: %q", errorMsg(t, rec))
 			}
 		}
-		if len(env.db.images) != 3 {
+		if len(env.img.Images) != 3 {
 			t.Fatal("apagou sem confirmação!")
 		}
 	})
@@ -293,10 +293,10 @@ func TestExcluirPacoteApagaTudo(t *testing.T) {
 			t.Errorf("resp = %v", resp)
 		}
 
-		if _, ok := env.db.images[sha]; ok {
+		if _, ok := env.img.Images[sha]; ok {
 			t.Error("as imagens do pacote deveriam ter sumido")
 		}
-		for _, h := range env.db.history {
+		for _, h := range env.img.History {
 			if h.ImageID == sha {
 				t.Error("o histórico das imagens apagadas deveria ter sumido")
 			}
@@ -305,7 +305,7 @@ func TestExcluirPacoteApagaTudo(t *testing.T) {
 			t.Error("a pasta do pacote deveria ter sido apagada")
 		}
 
-		if _, ok := env.db.images[other]; !ok {
+		if _, ok := env.img.Images[other]; !ok {
 			t.Error("a imagem de OUTRO pacote não pode ser afetada")
 		}
 		if _, err := os.Stat(filepath.Join(env.root, "dataset", "manter")); err != nil {

@@ -1,9 +1,5 @@
 package api
 
-// Infra comum dos testes da API: um banco em memória (memStore) que implementa
-// a interface Store, e helpers para fazer requests sem subir servidor de verdade
-// (httptest.NewRecorder captura a resposta do handler).
-
 import (
 	"bytes"
 	"context"
@@ -28,8 +24,9 @@ import (
 	"SIDM/internal/catalog"
 	"SIDM/internal/export"
 	"SIDM/internal/files"
+	"SIDM/internal/images"
 	"SIDM/internal/importer"
-	"SIDM/internal/store"
+	"SIDM/internal/platform"
 )
 
 // memStore guarda tudo em maps. Os campos *Err permitem simular falhas do banco.
@@ -37,22 +34,15 @@ type memStore struct {
 	mu sync.Mutex
 
 	profiles   map[string]importer.Profile
-	images     map[string]store.Image
-	history    []store.HistoryEntry
 	exportProf map[string]export.Profile
-	lastFilter store.ImageFilter
 
-	pingErr       error
-	listErr       error
-	replaceErr    error
-	beforeReplace func()
+	pingErr error
 }
 
 func newMemStore() *memStore {
 	return &memStore{
 		exportProf: map[string]export.Profile{},
 		profiles:   map[string]importer.Profile{},
-		images:     map[string]store.Image{},
 	}
 }
 
@@ -69,200 +59,11 @@ func paginate[T any](all []T, limit, skip int64) []T {
 	return all[skip:end]
 }
 
-// PackageProgress: as imagens de cada pacote pedido, por status.
-func (m *memStore) PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	want := map[string]bool{}
-	for _, n := range names {
-		want[n] = true
-	}
-	out := map[string]catalog.Progress{}
-	for _, img := range m.images {
-		if !want[img.Package] {
-			continue
-		}
-		p := out[img.Package]
-		p.Total++
-		if img.Status == store.StatusVerified {
-			p.Verified++
-		} else {
-			p.Pending++
-			if img.ClaimedUntil != nil && img.ClaimedUntil.After(time.Now()) {
-				p.InProgress++
-			}
-		}
-		out[img.Package] = p
-	}
-	return out, nil
-}
-
-func (m *memStore) InsertImage(ctx context.Context, img *store.Image) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if _, ok := m.images[img.SHA1]; ok {
-		return store.ErrDuplicate
-	}
-	m.images[img.SHA1] = *img
-	return nil
-}
-
-func (m *memStore) DeleteImage(ctx context.Context, sha1 string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	delete(m.images, sha1)
-	return nil
-}
-
-func (m *memStore) DeleteImageHistory(ctx context.Context, sha1 string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	kept := m.history[:0]
-	for _, h := range m.history {
-		if h.ImageID != sha1 {
-			kept = append(kept, h)
-		}
-	}
-	m.history = kept
-	return nil
-}
-
-func (m *memStore) FindImage(ctx context.Context, sha1 string) (*store.Image, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	img, ok := m.images[sha1]
-	if !ok {
-		return nil, store.ErrNotFound
-	}
-	return &img, nil
-}
-
-func (m *memStore) ReplaceImage(ctx context.Context, img *store.Image, prevUpdatedAt time.Time) error {
-	if m.beforeReplace != nil {
-		m.beforeReplace() // simula outra pessoa gravando no meio
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.replaceErr != nil {
-		return m.replaceErr
-	}
-	cur, ok := m.images[img.SHA1]
-	if !ok {
-		return store.ErrNotFound
-	}
-	if !cur.UpdatedAt.Equal(prevUpdatedAt) {
-		return store.ErrConflict
-	}
-	m.images[img.SHA1] = *img
-	return nil
-}
-
-// ClaimNext segue as mesmas regras do store de verdade (ver store/queue.go).
-func (m *memStore) ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*store.Image, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	if img, ok := m.images[skip]; ok && img.Package == pkg && img.ClaimedBy == user {
-		img.QueuedAt, img.ClaimedBy, img.ClaimedUntil = now, "", nil
-		m.images[skip] = img
-	}
-	for id, img := range m.images {
-		if img.Package == pkg && img.Status == store.StatusPending && img.ClaimedBy == user {
-			img.ClaimedBy, img.ClaimedUntil = "", nil
-			m.images[id] = img
-		}
-	}
-
-	best := m.oldestFree(pkg, now, skip)
-	if best == nil && skip != "" {
-		best = m.oldestFree(pkg, now, "") // a pulada era a única: ela volta
-	}
-	if best == nil {
-		return nil, store.ErrNotFound
-	}
-	until := now.Add(lease)
-	best.ClaimedBy, best.ClaimedUntil = user, &until
-	m.images[best.SHA1] = *best
-	out := *best
-	return &out, nil
-}
-
-// oldestFree: a pendente livre mais antiga da fila, ignorando `except`.
-func (m *memStore) oldestFree(pkg string, now time.Time, except string) *store.Image {
-	var best *store.Image
-	for _, img := range m.images {
-		img := img
-		free := img.ClaimedUntil == nil || !img.ClaimedUntil.After(now)
-		if img.Package != pkg || img.Status != store.StatusPending || !free || img.SHA1 == except {
-			continue
-		}
-		if best == nil || img.QueuedAt.Before(best.QueuedAt) ||
-			(img.QueuedAt.Equal(best.QueuedAt) && img.SHA1 < best.SHA1) {
-			best = &img
-		}
-	}
-	return best
-}
-
-func (m *memStore) ReleaseClaim(ctx context.Context, sha1, user string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if img, ok := m.images[sha1]; ok && img.ClaimedBy == user {
-		img.ClaimedBy, img.ClaimedUntil = "", nil
-		m.images[sha1] = img
-	}
-	return nil
-}
-
-// ListImages filtra por status, pacote, equipamento e câmera (o suficiente para os testes da API;
-// os filtros de verdade são testados contra o Mongo no pacote store).
-func (m *memStore) ListImages(ctx context.Context, f store.ImageFilter) ([]store.Image, int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.lastFilter = f
-	if m.listErr != nil {
-		return nil, 0, m.listErr
-	}
-	out := []store.Image{}
-	for _, img := range m.images {
-		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
-			(f.Equipment == "" || img.Equipment == f.Equipment) && (f.Camera == "" || img.Camera == f.Camera) &&
-			(f.DayTime == "" || img.DayTime == f.DayTime) && (f.Weather == "" || img.Weather == f.Weather) &&
-			(f.Direction == "" || img.Direction == f.Direction) {
-			out = append(out, img)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].SHA1 < out[j].SHA1 })
-	if f.Limit > 0 {
-		return paginate(out, f.Limit, f.Skip), int64(len(out)), nil
-	}
-	return out, int64(len(out)), nil
-}
-
-func (m *memStore) ExistingImages(ctx context.Context, ids []string) (map[string]store.ExistingImage, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := map[string]store.ExistingImage{}
-	for _, id := range ids {
-		if img, ok := m.images[id]; ok {
-			out[id] = store.ExistingImage{Package: img.Package, Status: img.Status}
-		}
-	}
-	return out, nil
-}
-
-func (m *memStore) InsertHistory(ctx context.Context, entries []store.HistoryEntry) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.history = append(m.history, entries...)
-	return nil
-}
-
 func (m *memStore) CreateProfile(ctx context.Context, p *importer.Profile) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.profiles[p.Name]; ok {
-		return store.ErrDuplicate
+		return platform.ErrDuplicate
 	}
 	m.profiles[p.Name] = *p
 	return nil
@@ -273,7 +74,7 @@ func (m *memStore) FindProfile(ctx context.Context, name string) (*importer.Prof
 	defer m.mu.Unlock()
 	p, ok := m.profiles[name]
 	if !ok {
-		return nil, store.ErrNotFound
+		return nil, platform.ErrNotFound
 	}
 	return &p, nil
 }
@@ -283,7 +84,7 @@ func (m *memStore) ReplaceProfile(ctx context.Context, p *importer.Profile) erro
 	defer m.mu.Unlock()
 	old, ok := m.profiles[p.Name]
 	if !ok {
-		return store.ErrNotFound
+		return platform.ErrNotFound
 	}
 	p.CreatedBy = old.CreatedBy
 	m.profiles[p.Name] = *p
@@ -295,10 +96,10 @@ func (m *memStore) RenameProfile(ctx context.Context, oldName, newName string, n
 	defer m.mu.Unlock()
 	p, ok := m.profiles[oldName]
 	if !ok {
-		return store.ErrNotFound
+		return platform.ErrNotFound
 	}
 	if _, taken := m.profiles[newName]; taken {
-		return store.ErrDuplicate
+		return platform.ErrDuplicate
 	}
 	delete(m.profiles, oldName)
 	p.Name, p.UpdatedAt = newName, now
@@ -310,7 +111,7 @@ func (m *memStore) DeleteProfile(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.profiles[name]; !ok {
-		return store.ErrNotFound
+		return platform.ErrNotFound
 	}
 	delete(m.profiles, name)
 	return nil
@@ -327,107 +128,6 @@ func (m *memStore) ListProfiles(ctx context.Context, q string, limit, skip int64
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return paginate(out, limit, skip), int64(len(out)), nil
-}
-
-func (m *memStore) FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]store.Image, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	want := map[string]bool{}
-	for _, k := range keys {
-		want[k] = true
-	}
-	out := []store.Image{}
-	for _, img := range m.images {
-		k := img.OriginalName
-		if by == importer.MatchBySHA1 {
-			k = img.SHA1
-		}
-		if (pkg == "" || img.Package == pkg) && want[k] {
-			out = append(out, img)
-		}
-	}
-	return out, nil
-}
-
-func imageField(img *store.Image, reg catalog.Registry) *string {
-	if reg == catalog.Cameras {
-		return &img.Camera
-	}
-	return &img.Equipment
-}
-
-func (m *memStore) CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var n int64
-	for _, img := range m.images {
-		if *imageField(&img, reg) == name {
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (m *memStore) RenameOnPending(ctx context.Context, reg catalog.Registry, oldName, newName string, now time.Time) (int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var n int64
-	for id, img := range m.images {
-		if f := imageField(&img, reg); *f == oldName && img.Status == store.StatusPending {
-			*f, img.UpdatedAt = newName, now
-			m.images[id] = img
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (m *memStore) RenamePackageImages(ctx context.Context, oldName, newName string) (int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	var n int64
-	for id, img := range m.images {
-		if img.Package == oldName {
-			img.Package = newName
-			img.Path = "dataset/" + newName + "/" + strings.TrimPrefix(img.Path, "dataset/"+oldName+"/")
-			m.images[id] = img
-			n++
-		}
-	}
-	return n, nil
-}
-
-func (m *memStore) DeletePackageImages(ctx context.Context, name string) (int64, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	deleted := map[string]bool{}
-	for id, img := range m.images {
-		if img.Package == name {
-			deleted[id] = true
-			delete(m.images, id)
-		}
-	}
-	kept := m.history[:0]
-	for _, h := range m.history {
-		if !deleted[h.ImageID] {
-			kept = append(kept, h)
-		}
-	}
-	m.history = kept
-	return int64(len(deleted)), nil
-}
-
-// VerifiedIDs: quais destes sha1 estão verificados.
-func (m *memStore) VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	out := map[string]bool{}
-	for _, id := range ids {
-		if m.images[id].Status == store.StatusVerified {
-			out[id] = true
-		}
-	}
-	return out, nil
 }
 
 // TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
@@ -447,7 +147,7 @@ func (m *memStore) CreateExportProfile(ctx context.Context, p *export.Profile) e
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.exportProf[p.Name]; ok {
-		return store.ErrDuplicate
+		return platform.ErrDuplicate
 	}
 	m.exportProf[p.Name] = *p
 	return nil
@@ -458,7 +158,7 @@ func (m *memStore) FindExportProfile(ctx context.Context, name string) (*export.
 	defer m.mu.Unlock()
 	p, ok := m.exportProf[name]
 	if !ok {
-		return nil, store.ErrNotFound
+		return nil, platform.ErrNotFound
 	}
 	return &p, nil
 }
@@ -467,7 +167,7 @@ func (m *memStore) ReplaceExportProfile(ctx context.Context, p *export.Profile) 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.exportProf[p.Name]; !ok {
-		return store.ErrNotFound
+		return platform.ErrNotFound
 	}
 	m.exportProf[p.Name] = *p
 	return nil
@@ -477,7 +177,7 @@ func (m *memStore) DeleteExportProfile(ctx context.Context, name string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if _, ok := m.exportProf[name]; !ok {
-		return store.ErrNotFound
+		return platform.ErrNotFound
 	}
 	delete(m.exportProf, name)
 	return nil
@@ -494,12 +194,12 @@ func (m *memStore) ListExportProfiles(ctx context.Context) ([]export.Profile, er
 	return out, nil
 }
 
-// ---------- helpers ----------
-
 type testEnv struct {
 	db      *memStore
 	cat     *catalog.Memory // pacotes, equipamentos e câmeras
 	box     *boxes.Memory   // tarefas e caixas
+	img     *images.Memory  // imagens e histórico
+	srv     *Server
 	files   *files.Storage
 	root    string
 	handler http.Handler
@@ -517,12 +217,16 @@ func newTestEnv(t *testing.T) *testEnv {
 	cat.Equipments["8003-MF4739"] = true
 	cat.Cameras["hikvision-233"] = true
 	cat.Packages[testPkg] = catalog.Package{Name: testPkg}
-	images := NewLegacyImages(db, fs)
-	svc := catalog.New(cat, fs, images)
+	img := images.NewMemory()
+	imgSvc := images.New(img, fs, nil, db)
+	svc := catalog.New(cat, fs, imgSvc)
+	imgSvc.SetCatalog(svc)
 	box := boxes.NewMemory()
-	bx := boxes.New(box, images, fs, svc, db)
+	bx := boxes.New(box, imgSvc, fs, svc, db)
 	svc.Listen(bx)
-	return &testEnv{db: db, cat: cat, box: box, files: fs, root: root, handler: New(db, fs, svc, bx).Routes()}
+	imgSvc.Listen(bx)
+	srv := New(db, fs, svc, bx, imgSvc)
+	return &testEnv{db: db, cat: cat, box: box, img: img, srv: srv, files: fs, root: root, handler: srv.Routes()}
 }
 
 // do executa um request e devolve a resposta gravada.
@@ -546,19 +250,19 @@ const testPkg = "pacote-teste"
 type upFile struct{ name, content string }
 
 // upload manda arquivos para o pacote de teste.
-func (e *testEnv) upload(t *testing.T, fs ...upFile) []uploadResult {
+func (e *testEnv) upload(t *testing.T, fs ...upFile) []images.UploadResult {
 	t.Helper()
 	return e.uploadTo(t, testPkg, fs...)
 }
 
 // uploadTo manda arquivos como multipart no campo "files" para um pacote.
-func (e *testEnv) uploadTo(t *testing.T, pkg string, fs ...upFile) []uploadResult {
+func (e *testEnv) uploadTo(t *testing.T, pkg string, fs ...upFile) []images.UploadResult {
 	t.Helper()
 	return e.uploadToWithQuery(t, pkg, "", fs...)
 }
 
 // uploadToWithQuery é o uploadTo com parâmetros extras na URL (ex: "&profile=x").
-func (e *testEnv) uploadToWithQuery(t *testing.T, pkg, extra string, fs ...upFile) []uploadResult {
+func (e *testEnv) uploadToWithQuery(t *testing.T, pkg, extra string, fs ...upFile) []images.UploadResult {
 	t.Helper()
 	var body bytes.Buffer
 	mw := multipart.NewWriter(&body)
@@ -575,7 +279,7 @@ func (e *testEnv) uploadToWithQuery(t *testing.T, pkg, extra string, fs ...upFil
 	if rec.Code != http.StatusOK {
 		t.Fatalf("upload: status %d: %s", rec.Code, rec.Body.String())
 	}
-	var res []uploadResult
+	var res []images.UploadResult
 	decode(t, rec, &res)
 	return res
 }
@@ -625,8 +329,6 @@ func assertStatus(t *testing.T, rec *httptest.ResponseRecorder, want int) {
 
 var errBoom = errors.New("banco caiu")
 
-// ---------- /health e /codes ----------
-
 func TestHealth(t *testing.T) {
 	env := newTestEnv(t)
 	rec := env.do("GET", "/health", nil, nil)
@@ -662,8 +364,6 @@ func TestCodes(t *testing.T) {
 		t.Error("equipamentos não devem vir no /codes: têm busca própria e paginada")
 	}
 }
-
-// ---------- busca de equipamentos e câmeras (autocomplete) ----------
 
 type namePage struct {
 	Total int64 `json:"total"`
@@ -747,8 +447,6 @@ func TestSearchBancoFora(t *testing.T) {
 	}
 }
 
-// ---------- cadastro ----------
-
 func TestCreateEquipmentAndCamera(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -787,8 +485,6 @@ func TestCreateCorpoGrandeDemais(t *testing.T) {
 	big := `{"name":"` + strings.Repeat("a", 2000) + `"}`
 	assertStatus(t, env.doJSON("POST", "/equipments", big), http.StatusBadRequest)
 }
-
-// ---------- pacotes ----------
 
 func TestCreatePackage(t *testing.T) {
 	env := newTestEnv(t)

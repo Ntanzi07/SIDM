@@ -52,7 +52,7 @@ func seedExport(t *testing.T, env *testEnv) (night1, night2, day string) {
 }
 
 func putTask(env *testEnv, task, sha string, labels ...string) {
-	set := boxes.Set{Task: task, ImageID: sha, Package: env.db.images[sha].Package, Width: 100, Height: 50, Boxes: []boxes.Box{}}
+	set := boxes.Set{Task: task, ImageID: sha, Package: env.img.Images[sha].Package, Width: 100, Height: 50, Boxes: []boxes.Box{}}
 	for _, l := range labels {
 		set.Boxes = append(set.Boxes, boxes.Box{Label: l, X: 10, Y: 10, W: 20, H: 10})
 	}
@@ -201,7 +201,7 @@ func TestExportDownloadYOLOPorFormulario(t *testing.T) {
 		if split == "valid" {
 			split = "val"
 		}
-		img := env.db.images[sha]
+		img := env.img.Images[sha]
 		if _, ok := files["images/"+split+"/"+img.FileName]; !ok {
 			t.Errorf("%s deveria estar em images/%s/ (arquivos: %d)", img.FileName, split, len(files))
 		}
