@@ -48,7 +48,6 @@ func TestRenomearEquipamentoEmCascata(t *testing.T) {
 	pending := env.seedPending(t, "pendente")
 	assertStatus(t, env.doJSON("PUT", "/images/"+pending, `{"fields": {"equipment":"8003-MF4739","day_time":"night"}}`), http.StatusOK)
 	verified := env.seedVerified(t, "verificada")
-	oldFile := env.img.Images[verified].FileName
 
 	rep, code := decodeRegistry(t, env, "PATCH", "/equipments/8003-MF4739", `{"name":"9000-XYZ"}`)
 	if code != http.StatusOK || rep.PendingUpdated != 1 || rep.VerifiedRenamed != 1 || !rep.Complete {
@@ -63,11 +62,8 @@ func TestRenomearEquipamentoEmCascata(t *testing.T) {
 	if v.Fields["equipment"] != "9000-XYZ" || !strings.Contains(v.FileName, "_9000-XYZ_") {
 		t.Errorf("verificada: equipment=%v file=%q", v.Fields["equipment"], v.FileName)
 	}
-	if _, err := os.Stat(env.pkgFile(v.FileName)); err != nil {
-		t.Error("o arquivo com o nome novo deveria existir")
-	}
-	if _, err := os.Stat(env.pkgFile(oldFile)); !os.IsNotExist(err) {
-		t.Error("o arquivo com o nome antigo deveria ter sumido")
+	if _, err := os.Stat(env.pkgFile(verified + ".jpg")); err != nil {
+		t.Error("o arquivo continua <sha1>.jpg (só o nome no banco muda)")
 	}
 
 	var logged bool
@@ -124,8 +120,8 @@ func TestRenomearComFalhaPodeSerRepetido(t *testing.T) {
 	if _, ok := env.cat.Equipments["8003-MF4739"]; !ok {
 		t.Error("com falha, o nome antigo tem que ficar (para dar para repetir)")
 	}
-	if _, err := os.Stat(env.pkgFile(oldFile)); err != nil {
-		t.Error("o rename do arquivo deveria ter sido desfeito")
+	if env.img.Images[verified].FileName != oldFile {
+		t.Error("com falha, o nome no banco tem que ficar o antigo")
 	}
 
 	// O banco voltou: o MESMO pedido termina o serviço.

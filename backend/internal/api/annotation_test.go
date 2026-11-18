@@ -84,6 +84,13 @@ func TestPacoteComPerfilProprio(t *testing.T) {
 		t.Errorf("mensagem = %q", errorMsg(t, rec))
 	}
 
+	// em uso por um pacote: o perfil não pode ser apagado
+	rec = env.do("DELETE", "/annotation-profiles/capacete-moto", nil, nil)
+	assertStatus(t, rec, http.StatusBadRequest)
+	if !strings.Contains(errorMsg(t, rec), "motos") {
+		t.Errorf("a mensagem deveria dizer qual pacote usa: %q", errorMsg(t, rec))
+	}
+
 	// reabrir: volta a pendente sem mover o arquivo (o nome já é o sha1)
 	assertStatus(t, env.do("POST", "/images/"+sha+"/reopen", nil, map[string]string{"X-User": "nathan"}), http.StatusOK)
 	img = env.img.Images[sha]

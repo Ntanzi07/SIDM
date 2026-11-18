@@ -225,6 +225,19 @@ export async function getAnnotationProfile(name: string): Promise<AnnotationProf
   return request<AnnotationProfile>(`/annotation-profiles/${encodeURIComponent(name)}`)
 }
 
+// Os erros de validação voltam todos juntos (RequestError.problems).
+export async function createAnnotationProfile(profile: AnnotationProfile): Promise<AnnotationProfile> {
+  return request<AnnotationProfile>('/annotation-profiles', { method: 'POST', body: JSON.stringify(profile) })
+}
+
+export async function updateAnnotationProfile(profile: AnnotationProfile): Promise<AnnotationProfile> {
+  return request<AnnotationProfile>(`/annotation-profiles/${encodeURIComponent(profile.name)}`, { method: 'PUT', body: JSON.stringify(profile) })
+}
+
+export async function deleteAnnotationProfile(name: string): Promise<void> {
+  await request(`/annotation-profiles/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
 export async function deletePackage(name: string): Promise<void> {
   await request(`/packages/${encodeURIComponent(name)}?confirm=${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
@@ -242,7 +255,7 @@ export async function nextImage(packageName: string, skip?: string): Promise<Ima
 }
 
 // Abre uma imagem específica para edição e reserva para o usuário. Uma
-// VERIFICADA volta para pendente (o arquivo perde o nome v2 até ser
+// VERIFICADA volta para pendente (o nome v2 sai do banco até ser
 // verificada de novo); numa pendente, só reserva.
 export async function reopenImage(sha1: string): Promise<ImageDetail> {
   return request<ImageDetail>(`/images/${encodeURIComponent(sha1)}/reopen`, { method: 'POST' })

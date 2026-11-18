@@ -1,3 +1,4 @@
+
 # Go
 *.exe
 *.test
@@ -23,3 +24,5 @@ frontend/dist/
 # SO
 .DS_Store
 Thumbs.db
+
+backend/backup-antes-perfis/

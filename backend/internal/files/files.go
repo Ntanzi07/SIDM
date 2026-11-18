@@ -69,15 +69,11 @@ func PackageDir(pkg string) string {
 	return path.Join("dataset", pkg)
 }
 
-// PendingPath é onde fica uma imagem ainda não verificada (nome = só o hash).
-// Caminhos relativos usam "/" em qualquer sistema: é assim que vão para o banco.
+// PendingPath é onde fica uma imagem: <sha1>.ext na pasta do pacote, ANTES E
+// DEPOIS de verificada (o nome de saída é escolhido no export). Caminhos
+// relativos usam "/" em qualquer sistema: é assim que vão para o banco.
 func PendingPath(pkg, sum, ext string) string {
 	return path.Join(PackageDir(pkg), sum+ext)
-}
-
-// VerifiedPath é onde fica uma imagem verificada (nome v2 completo).
-func VerifiedPath(pkg, fileName string) string {
-	return path.Join(PackageDir(pkg), fileName)
 }
 
 // EnsurePackageDir cria a pasta do pacote, se ainda não existir.

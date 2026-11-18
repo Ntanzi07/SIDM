@@ -84,9 +84,16 @@ func (p *Package) normalize() {
 	}
 }
 
+// PackagesWithProfile: os pacotes que usam o perfil de anotação (o módulo
+// annotation pergunta antes de apagar um perfil). Os pacotes de antes dos
+// perfis (sem o campo) usam o padrão, que não pode ser apagado.
+func (s *Service) PackagesWithProfile(ctx context.Context, profile string) ([]string, error) {
+	return s.repo.PackagesWithProfile(ctx, profile)
+}
+
 // SetPackageProfile troca o perfil de anotação do pacote. Só enquanto não
-// há imagem verificada: o nome do arquivo de uma verificada saiu dos campos
-// do perfil antigo. (As pendentes ficam com o rascunho; o que o perfil novo
+// há imagem verificada: a anotação de uma verificada foi conferida nos
+// campos do perfil atual (e o export conta com eles). (As pendentes ficam com o rascunho; o que o perfil novo
 // não tiver é recusado ao salvar, e a pessoa corrige.)
 func (s *Service) SetPackageProfile(ctx context.Context, name, profile string) error {
 	if _, err := s.repo.FindPackage(ctx, name); err != nil {

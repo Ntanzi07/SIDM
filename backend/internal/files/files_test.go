@@ -107,7 +107,7 @@ func TestMoveRenomeiaNaPastaDoPacote(t *testing.T) {
 	from := PendingPath("pacote-1", sum, ".jpg")
 	st.Store(tmp, from)
 
-	to := VerifiedPath("pacote-1", "nome-v2.jpg")
+	to := "dataset/pacote-1/nome-v2.jpg"
 	if err := st.Move(from, to); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,6 @@ func TestCaminhosRelativos(t *testing.T) {
 	cases := map[string]string{
 		PackageDir("p1"):                 "dataset/p1",
 		PendingPath("p1", "abc", ".jpg"): "dataset/p1/abc.jpg",
-		VerifiedPath("p1", "x.png"):      "dataset/p1/x.png",
 	}
 	for got, want := range cases {
 		if got != want {

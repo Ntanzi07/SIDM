@@ -26,11 +26,12 @@ type annotationRequest struct {
 }
 
 // finalName confere o que o perfil não confere sozinho (o cadastro de
-// equipamento e câmera) e devolve o nome do arquivo verificado e a versão do
-// padrão. Se algo estiver errado, devolve a mensagem para o usuário.
+// equipamento e câmera) e devolve o nome da imagem verificada (file_name) e
+// a versão do padrão. Se algo estiver errado, devolve a mensagem.
 //
-// O perfil padrão (veiculos) usa o nome v2. Os outros perfis ainda não têm
-// modelo de nome: o arquivo continua <sha1>.ext, na pasta do pacote.
+// O nome é só um DADO: o arquivo no disco é sempre <sha1>.ext. No perfil
+// padrão (veiculos) é o nome v2, que o export usa no modo "nome v2"; nos
+// outros perfis é o próprio <sha1>.ext.
 func (s *Service) finalName(ctx context.Context, img *Image, p *annotation.Profile) (name, version, msg string) {
 	for _, ref := range []struct{ key, msg string }{
 		{annotation.RefEquipment, "equipamento %q não cadastrado"}, {annotation.RefCamera, "câmera %q não cadastrada"},

@@ -166,7 +166,7 @@ export function ImageViewerPage() {
             })}
 
             {image.file_name && (
-              <p className="viewer-filename" title={image.pattern_version ? 'Nome do arquivo no padrão v2' : 'Nome do arquivo'}>{image.file_name}</p>
+              <p className="viewer-filename" title={image.pattern_version ? 'Nome v2 (usado no export; no disco o arquivo é o sha1)' : 'Nome do arquivo'}>{image.file_name}</p>
             )}
           </div>
         </div>
@@ -181,7 +181,7 @@ export function ImageViewerPage() {
             <div className="modal-body">
               <p>
                 A imagem volta para <strong>pendente</strong> e abre na tela de anotação, reservada para você.
-                O arquivo perde o nome final até ser verificada de novo. A anotação atual fica como rascunho e as
+                A anotação atual fica como rascunho até ser verificada de novo, e as
                 caixas do CVAT não mudam.
               </p>
             </div>

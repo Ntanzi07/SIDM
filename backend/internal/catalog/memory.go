@@ -99,6 +99,19 @@ func (m *Memory) RenamePackage(ctx context.Context, oldName, newName string) err
 	return nil
 }
 
+func (m *Memory) PackagesWithProfile(ctx context.Context, profile string) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []string{}
+	for _, p := range m.Packages {
+		if p.Profile == profile {
+			out = append(out, p.Name)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
 func (m *Memory) SetPackageProfile(ctx context.Context, name, profile string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

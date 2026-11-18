@@ -304,7 +304,8 @@ func TestZipParaOCVAT(t *testing.T) {
 			t.Errorf("%s: JPEG não precisa de compressão", f.Name)
 		}
 	}
-	if !names[a+".jpg"] || !names[env.img.Images[b].FileName] || len(names) != 2 {
+	// no disco (e no zip) toda imagem é <sha1>.jpg, verificada ou não
+	if !names[a+".jpg"] || !names[b+".jpg"] || len(names) != 2 {
 		t.Errorf("arquivos no zip = %v", names)
 	}
 	// o que sai no zip volta casando no import (o nome começa pelo sha1)

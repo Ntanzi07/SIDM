@@ -204,7 +204,8 @@ func TestAnnotateCompleto(t *testing.T) {
 	if img.Status != images.StatusVerified || img.PatternVersion != "v2" {
 		t.Errorf("status=%q version=%q", img.Status, img.PatternVersion)
 	}
-	if img.Path != "dataset/"+testPkg+"/"+wantName {
+	// O nome v2 é só um dado: o arquivo continua <sha1>.jpg.
+	if img.Path != "dataset/"+testPkg+"/"+sha+".jpg" {
 		t.Errorf("path = %q", img.Path)
 	}
 	if img.Objects[0].Fields["plate"] != "ABC1D23" {
@@ -215,11 +216,11 @@ func TestAnnotateCompleto(t *testing.T) {
 		t.Errorf("captured_at não convertido para UTC: %v", stored)
 	}
 
-	if _, err := os.Stat(env.pkgFile(wantName)); err != nil {
-		t.Error("arquivo não foi renomeado na pasta do pacote:", err)
+	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+		t.Error("o arquivo tem que continuar <sha1>.jpg:", err)
 	}
-	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); !os.IsNotExist(err) {
-		t.Error("o arquivo com nome de hash continuou existindo")
+	if _, err := os.Stat(env.pkgFile(wantName)); !os.IsNotExist(err) {
+		t.Error("nenhum arquivo com o nome v2 deveria existir no disco")
 	}
 
 	// histórico
@@ -246,7 +247,7 @@ func TestAnnotateEditarVerificada(t *testing.T) {
 		assertStatus(t, env.doJSON("PUT", "/images/"+sha, `{"fields": {"day_time":"day"}}`), http.StatusConflict)
 	})
 
-	t.Run("completo renomeia de novo na pasta do pacote", func(t *testing.T) {
+	t.Run("completo recalcula o nome (o arquivo fica)", func(t *testing.T) {
 		before := env.img.Images[sha].FileName
 		rec := env.doJSON("PUT", "/images/"+sha, completeBody(func(b map[string]any) { b["day_time"] = "day" }))
 		assertStatus(t, rec, http.StatusOK)
@@ -255,11 +256,8 @@ func TestAnnotateEditarVerificada(t *testing.T) {
 		if after == before || !strings.Contains(after, "-D-") {
 			t.Errorf("nome não atualizado: %s", after)
 		}
-		if _, err := os.Stat(env.pkgFile(before)); !os.IsNotExist(err) {
-			t.Error("nome antigo continuou existindo")
-		}
-		if _, err := os.Stat(env.pkgFile(after)); err != nil {
-			t.Error("arquivo com nome novo não existe")
+		if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+			t.Error("o arquivo tem que continuar <sha1>.jpg")
 		}
 	})
 }
@@ -310,7 +308,7 @@ func TestAnnotateDesfazRenameSeBancoFalhar(t *testing.T) {
 	assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody()), http.StatusInternalServerError)
 
 	if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
-		t.Error("o rename deveria ter sido desfeito: arquivo com nome de hash sumiu")
+		t.Error("o arquivo com nome de hash sumiu")
 	}
 	entries, _ := os.ReadDir(filepath.Join(env.root, "dataset", testPkg))
 	if len(entries) != 1 {
@@ -343,9 +341,9 @@ func TestDiffHistory(t *testing.T) {
 
 func TestExcluirImagem(t *testing.T) {
 	env := newTestEnv(t)
-	sha := env.seedVerified(t, "verificada") // tem arquivo v2 e histórico
+	sha := env.seedVerified(t, "verificada") // tem histórico
 	other := env.seedPending(t, "outra")
-	file := env.pkgFile(env.img.Images[sha].FileName)
+	file := env.pkgFile(sha + ".jpg")
 
 	rec := env.do("DELETE", "/images/"+sha, nil, nil)
 	assertStatus(t, rec, http.StatusOK)
@@ -411,8 +409,8 @@ func TestVerificarComCamposDesconhecidos(t *testing.T) {
 			if img.Status != images.StatusVerified || !strings.Contains(img.FileName, tc.inName) {
 				t.Errorf("status=%s nome=%q (esperava conter %q)", img.Status, img.FileName, tc.inName)
 			}
-			if _, err := os.Stat(env.pkgFile(img.FileName)); err != nil {
-				t.Error("o arquivo deveria ter o nome novo")
+			if _, err := os.Stat(env.pkgFile(sha + ".jpg")); err != nil {
+				t.Error("o arquivo tem que continuar <sha1>.jpg")
 			}
 			// o nome volta a ser lido certinho (ex.: num upload em outro SIDM)
 			if _, err := filename.Parse(img.FileName); err != nil {

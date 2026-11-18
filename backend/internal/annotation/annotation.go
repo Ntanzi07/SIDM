@@ -138,6 +138,12 @@ type Repo interface {
 	ListProfiles(ctx context.Context) ([]Profile, error)
 }
 
+// Packages diz quais pacotes usam um perfil (o catálogo). Um perfil em uso
+// não pode ser apagado: a anotação desses pacotes ficaria sem perfil.
+type Packages interface {
+	PackagesWithProfile(ctx context.Context, profile string) ([]string, error)
+}
+
 // InvalidError é um pedido que não dá para atender como veio (vira 400).
 // Problems tem cada erro com o caminho do campo, para a tela marcar.
 type InvalidError struct {

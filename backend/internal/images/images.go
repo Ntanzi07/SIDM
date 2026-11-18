@@ -38,16 +38,18 @@ type Image struct {
 	Package      string `bson:"package" json:"package"` // cada imagem pertence a UM pacote
 	Status       string `bson:"status" json:"status"`
 	OriginalName string `bson:"original_name" json:"original_name"`
-	FileName     string `bson:"file_name,omitempty" json:"file_name,omitempty"` // nome v2, quando verified
-	Path         string `bson:"path" json:"path"`                               // relativo a IMAGES_DIR
-	Ext          string `bson:"ext" json:"ext"`
-	Size         int64  `bson:"size" json:"size"`
+	// FileName: o nome da imagem verificada (o nome v2, no perfil veiculos).
+	// É só um dado, para o export: no disco o arquivo é sempre <sha1>.ext.
+	FileName string `bson:"file_name,omitempty" json:"file_name,omitempty"`
+	Path     string `bson:"path" json:"path"` // relativo a IMAGES_DIR: dataset/<pacote>/<sha1>.ext
+	Ext      string `bson:"ext" json:"ext"`
+	Size     int64  `bson:"size" json:"size"`
 	// Encryption: se o arquivo chegou criptografado, qual formato foi aberto
 	// (ex: "rc4-legacy"). O que fica no disco é sempre o original aberto.
 	Encryption string `bson:"encryption,omitempty" json:"encryption,omitempty"`
 
-	// PatternVersion: "v2" quando o arquivo tem o nome v2 (perfil veiculos);
-	// vazio quando o nome é o sha1 (pendente, ou perfil sem modelo de nome).
+	// PatternVersion: "v2" quando o file_name é o nome v2 (verificada no
+	// perfil veiculos); vazio nas pendentes e nos outros perfis.
 	PatternVersion string `bson:"pattern_version,omitempty" json:"pattern_version,omitempty"`
 
 	// A anotação, nos campos do perfil do pacote (ver o módulo annotation):

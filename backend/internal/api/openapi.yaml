@@ -128,7 +128,7 @@ paths:
       summary: Renomear ou ativar/desativar equipamento
       description: |
         - `name`: renomeia **em cascata**. As pendentes trocam de nome no banco; nas
-          verificadas, o **arquivo é renomeado** para o novo nome v2. Se o nome novo
+          verificadas, o nome v2 (no banco) é calculado de novo. Nenhum arquivo muda. Se o nome novo
           já existir, os dois são **fundidos** (útil para limpar duplicatas do import).
           Se alguma imagem falhar, o nome antigo é mantido e o mesmo pedido pode ser
           repetido para terminar (`complete: false`).
@@ -182,7 +182,7 @@ paths:
       summary: Renomear ou ativar/desativar câmera
       description: |
         - `name`: renomeia **em cascata**. As pendentes trocam de nome no banco; nas
-          verificadas, o **arquivo é renomeado** para o novo nome v2. Se o nome novo
+          verificadas, o nome v2 (no banco) é calculado de novo. Nenhum arquivo muda. Se o nome novo
           já existir, os dois são **fundidos** (útil para limpar duplicatas do import).
           Se alguma imagem falhar, o nome antigo é mantido e o mesmo pedido pode ser
           repetido para terminar (`complete: false`).
@@ -765,6 +765,7 @@ paths:
     delete:
       tags: [perfis de anotação]
       summary: Apagar perfil de anotação
+      description: O padrão não pode ser apagado, nem um perfil em uso por algum pacote (a mensagem diz quais).
       responses:
         "200":
           description: Apagado.
@@ -1037,17 +1038,17 @@ paths:
         Substitui **toda** a anotação: os campos (`fields`) e os objetos sem
         caixa (`objects`), pelo **perfil de anotação do pacote**.
 
-        - `complete: false`: salva o rascunho (continua pending, não renomeia).
+        - `complete: false`: salva o rascunho (continua pending).
         - `complete: true`: valida tudo (inclusive os campos obrigatórios do
-          perfil), renomeia o arquivo e marca verified.
+          perfil), calcula o nome (`file_name`) e marca verified.
 
         O que vem preenchido tem que ser válido no perfil; os erros voltam todos
         juntos em `problems`, cada um com o caminho (ex.: `fields.day_time`,
         `objects[0].plate`). Equipamento e câmera precisam estar cadastrados.
 
-        **Nome do arquivo:** no perfil `veiculos`, o padrão v2 (o que não se sabe
-        vira uma posição vazia). Nos outros perfis o arquivo continua
-        `<sha1>.ext` (o modelo de nome por perfil ainda vai entrar).
+        **O arquivo não muda de nome:** no disco toda imagem é `<sha1>.ext`. No
+        perfil `veiculos`, o `file_name` guarda o nome v2 (o que não se sabe vira
+        uma posição vazia), que o export usa; nos outros perfis, `<sha1>.ext`.
 
         Usa optimistic locking: se alguém gravou no meio, responde 409.
       parameters:
@@ -1096,8 +1097,8 @@ paths:
       tags: [fila]
       summary: Reabrir para edição
       description: |
-        Uma imagem **verificada** volta para **pendente**: o arquivo perde o nome v2
-        (volta a ser `<sha1>.ext`) e os metadados ficam como rascunho. Já fica
+        Uma imagem **verificada** volta para **pendente**: o nome v2 (`file_name`)
+        sai do banco e os metadados ficam como rascunho. O arquivo não muda. Já fica
         **reservada** para quem pediu (15 min, como na fila), para ninguém pegar
         no meio. Numa pendente, só reserva. As caixas do CVAT não mudam.
       parameters:
@@ -1795,7 +1796,7 @@ components:
         ext: { type: string }
         size: { type: integer }
         encryption: { type: string, description: "Se o arquivo chegou criptografado, o formato aberto (ex. rc4-legacy)." }
-        pattern_version: { type: string, description: '"v2" quando o arquivo tem o nome v2 (perfil veiculos).' }
+        pattern_version: { type: string, description: '"v2" quando o file_name é o nome v2 (verificada no perfil veiculos).' }
         fields:
           type: object
           additionalProperties: true
@@ -1833,7 +1834,7 @@ components:
           properties:
             complete:
               type: boolean
-              description: "false: rascunho. true: verifica (cobra os obrigatórios) e renomeia o arquivo."
+              description: "false: rascunho. true: verifica (cobra os obrigatórios) e calcula o nome (file_name)."
       example:
         fields:
           equipment: 8003-MF4739

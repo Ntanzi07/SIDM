@@ -1,6 +1,7 @@
 package images
 
 import (
+	"SIDM/internal/files"
 	"context"
 	"fmt"
 
@@ -79,4 +80,42 @@ func (m *MongoRepo) EnsureIndexes(ctx context.Context) error {
 		return fmt.Errorf("índices de images: %w", err)
 	}
 	return nil
+}
+
+// MigrateFiles leva para <sha1>.ext os arquivos das verificadas que ainda
+// têm o nome v2 no disco (de antes de o nome ficar só no banco). Uma a uma:
+// move o arquivo e grava o caminho novo; se o banco falhar, o arquivo volta.
+// Idempotente: quem já está no lugar não casa com a busca. Devolve quantas
+// moveu e as que falharam (essas ficam como estão e são tentadas na próxima
+// subida).
+func (s *Service) MigrateFiles(ctx context.Context) (moved int, failed []string, err error) {
+	const pageSize = 200
+	for skip := int64(0); ; skip += pageSize {
+		page, _, err := s.repo.ListImages(ctx, ImageFilter{Status: StatusVerified, Limit: pageSize, Skip: skip})
+		if err != nil {
+			return moved, failed, err
+		}
+		for i := range page {
+			img := &page[i]
+			want := files.PendingPath(img.Package, img.SHA1, img.Ext)
+			if img.Path == want {
+				continue
+			}
+			before := *img
+			if err := s.files.Move(img.Path, want); err != nil {
+				failed = append(failed, fmt.Sprintf("%s (%v)", img.SHA1, err))
+				continue
+			}
+			img.Path, img.UpdatedAt = want, s.now()
+			if err := s.repo.ReplaceImage(ctx, img, before.UpdatedAt); err != nil {
+				_ = s.files.Move(want, before.Path) // banco e disco nunca divergem
+				failed = append(failed, fmt.Sprintf("%s (%v)", img.SHA1, err))
+				continue
+			}
+			moved++
+		}
+		if len(page) < pageSize {
+			return moved, failed, nil
+		}
+	}
 }

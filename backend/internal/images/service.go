@@ -140,9 +140,9 @@ func (s *Service) CountUsing(ctx context.Context, reg catalog.Registry, name str
 	return s.repo.CountUsing(ctx, reg, name)
 }
 
-// RenameRegistry troca o equipamento/câmera nas imagens: nas pendentes só no
-// banco (uma operação); nas verificadas, uma a uma, renomeando também o
-// arquivo para o novo nome v2 (desfazendo o arquivo se o banco falhar).
+// RenameRegistry troca o equipamento/câmera nas imagens: nas pendentes numa
+// operação só; nas verificadas, uma a uma, porque o nome v2 (file_name) tem o
+// equipamento e é calculado de novo. Nenhum arquivo muda no disco.
 func (s *Service) RenameRegistry(ctx context.Context, reg catalog.Registry, oldName, newName, user string) (catalog.RenameResult, error) {
 	now := s.now()
 	res := catalog.RenameResult{Failed: []string{}}
@@ -181,32 +181,22 @@ func (s *Service) RenameRegistry(ctx context.Context, reg catalog.Registry, oldN
 }
 
 // renameVerified troca o equipamento/câmera de UMA imagem verificada e, se
-// ela tem o nome v2, renomeia o arquivo também.
+// ela tem o nome v2, calcula o nome de novo.
 func (s *Service) renameVerified(ctx context.Context, img *Image, reg catalog.Registry, newName, changedBy string, now time.Time) error {
 	before := *img
 	img.Fields = maps.Clone(img.Fields) // o before continua com o mapa antigo
 	img.Fields[reg.ImageField()] = newName
 
-	newPath, fileName := img.Path, img.FileName
 	if img.PatternVersion == filename.CurrentVersion {
 		base, err := filename.Format(MetaFromImage(img))
 		if err != nil {
 			return err
 		}
-		fileName = base + img.Ext
-		newPath = files.VerifiedPath(img.Package, fileName)
-		if newPath != img.Path {
-			if err := s.files.Move(img.Path, newPath); err != nil {
-				return err
-			}
-		}
+		img.FileName = base + img.Ext
 	}
-	img.Path, img.FileName, img.UpdatedAt = newPath, fileName, now
+	img.UpdatedAt = now
 
 	if err := s.repo.ReplaceImage(ctx, img, before.UpdatedAt); err != nil {
-		if newPath != before.Path {
-			_ = s.files.Move(newPath, before.Path) // banco e disco nunca divergem
-		}
 		return err
 	}
 	if err := s.repo.InsertHistory(ctx, DiffHistory(&before, img, changedBy)); err != nil {

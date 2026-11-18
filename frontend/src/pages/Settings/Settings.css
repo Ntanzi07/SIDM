@@ -472,3 +472,158 @@
   letter-spacing: 0.04em;
   vertical-align: middle;
 }
+
+/* ---- editor de perfis de anotação (ap-) ---- */
+
+.ap-editor {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e5e8ef;
+}
+
+.ap-editor h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.ap-editor h4 {
+  margin: 8px 0 0;
+  color: #384257;
+  font-size: 13px;
+}
+
+.ap-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.ap-inline {
+  display: grid;
+  gap: 4px;
+  min-width: 150px;
+  color: #566177;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ap-grow {
+  flex: 1;
+}
+
+.ap-num {
+  min-width: 90px;
+  max-width: 140px;
+}
+
+.ap-inline input,
+.ap-inline select,
+.ap-option input {
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid #dfe3eb;
+  border-radius: 6px;
+  color: #384257;
+  background: #fff;
+  font: inherit;
+  font-size: 12px;
+}
+
+.ap-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  color: #566177;
+  font-size: 12px;
+}
+
+.ap-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ap-row-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.ap-fields {
+  display: grid;
+  gap: 8px;
+}
+
+.ap-field,
+.ap-object {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid #e5e8ef;
+  border-radius: 8px;
+  background: #fafbfd;
+}
+
+.ap-object {
+  background: #f5f6fb;
+}
+
+.ap-object .ap-field {
+  background: #fff;
+}
+
+.ap-field--error {
+  border-color: #e11d48;
+}
+
+.ap-options {
+  display: grid;
+  gap: 6px;
+}
+
+.ap-option {
+  display: flex;
+  gap: 6px;
+}
+
+.ap-option input {
+  flex: 1;
+}
+
+.ap-option .ap-code {
+  flex: 0 0 90px;
+}
+
+.ap-small {
+  margin: 0;
+  color: #7d8798;
+  font-size: 11px;
+}
+
+.ap-error {
+  color: #be123c;
+  font-size: 11px;
+}
+
+.ap-input--error {
+  border-color: #e11d48 !important;
+}
+
+.ap-problems {
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: #9f1239;
+  background: #fff1f2;
+  font-size: 12px;
+}
+
+.ap-problems ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}

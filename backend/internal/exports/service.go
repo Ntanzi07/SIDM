@@ -178,7 +178,12 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 					prev.Skipped.NotAnnotated++
 					continue
 				}
-				stored := path.Base(img.Path)
+				// O "nome" da imagem: o v2 (file_name) se ela tem, senão o do
+				// disco (<sha1>.ext). É o que o modo de nome padrão usa.
+				stored := img.FileName
+				if stored == "" {
+					stored = path.Base(img.Path)
+				}
 				meta := imageMeta(&img)
 				item := export.Item{
 					SHA1: img.SHA1, Width: set.Width, Height: set.Height,

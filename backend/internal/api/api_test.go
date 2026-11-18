@@ -28,10 +28,11 @@ import (
 )
 
 type testEnv struct {
-	pingErr error              // o /health falha com este erro
-	cat     *catalog.Memory    // pacotes, equipamentos e câmeras
-	box     *boxes.Memory      // tarefas e caixas
-	img     *images.Memory     // imagens e histórico
+	pingErr error           // o /health falha com este erro
+	cat     *catalog.Memory // pacotes, equipamentos e câmeras
+	box     *boxes.Memory   // tarefas e caixas
+	img     *images.Memory  // imagens e histórico
+	imgSvc  *images.Service
 	imp     *imports.Memory    // perfis de import
 	exp     *exports.Memory    // perfis de export
 	ann     *annotation.Memory // perfis de anotação
@@ -59,6 +60,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	imgSvc := images.New(img, fs, nil, imp, annSvc)
 	svc := catalog.New(cat, fs, imgSvc, annSvc)
 	imgSvc.SetCatalog(svc)
+	annSvc.SetPackages(svc)
 	box := boxes.NewMemory()
 	bx := boxes.New(box, imgSvc, fs, svc)
 	svc.Listen(bx)
@@ -67,7 +69,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	exp := exports.NewMemory()
 	expSvc := exports.New(exp, imgSvc, bx, svc, fs)
 	bx.Listen(expSvc)
-	env := &testEnv{cat: cat, box: box, img: img, imp: imp, exp: exp, ann: ann, files: fs, root: root}
+	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, files: fs, root: root}
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
 		annSvc)
 	env.handler = env.srv.Routes()

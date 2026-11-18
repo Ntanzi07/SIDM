@@ -3,17 +3,23 @@ package annotation
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 )
 
 type Service struct {
-	repo Repo
-	now  func() time.Time
+	repo     Repo
+	packages Packages
+	now      func() time.Time
 }
 
 func New(repo Repo) *Service {
 	return &Service{repo: repo, now: func() time.Time { return time.Now().UTC() }}
 }
+
+// SetPackages liga o catálogo depois de criado (o catálogo também depende
+// deste módulo: o main cria os dois e depois liga).
+func (s *Service) SetPackages(p Packages) { s.packages = p }
 
 // ListProfiles: os padrões e depois os salvos, por nome.
 func (s *Service) ListProfiles(ctx context.Context) ([]Profile, error) {
@@ -60,10 +66,24 @@ func (s *Service) ReplaceProfile(ctx context.Context, p *Profile) error {
 	return s.repo.ReplaceProfile(ctx, p)
 }
 
-// DeleteProfile apaga um perfil salvo.
+// DeleteProfile apaga um perfil salvo que nenhum pacote usa.
 func (s *Service) DeleteProfile(ctx context.Context, name string) error {
 	if err := editable(name); err != nil {
 		return err
+	}
+	if s.packages != nil {
+		using, err := s.packages.PackagesWithProfile(ctx, name)
+		if err != nil {
+			return err
+		}
+		if len(using) > 0 {
+			shown := using
+			if len(shown) > 5 {
+				shown = append(shown[:5:5], "...")
+			}
+			return &InvalidError{Msg: fmt.Sprintf("o perfil %q está em uso por %d pacote(s) (%s): troque o perfil deles antes de apagar",
+				name, len(using), strings.Join(shown, ", "))}
+		}
 	}
 	return s.repo.DeleteProfile(ctx, name)
 }

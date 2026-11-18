@@ -85,6 +85,25 @@ func (m *MongoRepo) RenamePackage(ctx context.Context, oldName, newName string) 
 	return nil
 }
 
+func (m *MongoRepo) PackagesWithProfile(ctx context.Context, profile string) ([]string, error) {
+	cur, err := m.packages().Find(ctx, bson.D{{Key: "profile", Value: profile}},
+		options.Find().SetProjection(bson.D{{Key: "name", Value: 1}}).SetSort(bson.D{{Key: "name", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("pacotes com o perfil %s: %w", profile, err)
+	}
+	var docs []struct {
+		Name string `bson:"name"`
+	}
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, fmt.Errorf("ler pacotes com o perfil %s: %w", profile, err)
+	}
+	out := make([]string, len(docs))
+	for i, d := range docs {
+		out[i] = d.Name
+	}
+	return out, nil
+}
+
 func (m *MongoRepo) SetPackageProfile(ctx context.Context, name, profile string) error {
 	res, err := m.packages().UpdateOne(ctx,
 		bson.D{{Key: "name", Value: name}},

@@ -79,6 +79,8 @@ type Repo interface {
 	RenamePackage(ctx context.Context, oldName, newName string) error
 	DeletePackage(ctx context.Context, name string) error
 	SetPackageProfile(ctx context.Context, name, profile string) error
+	// PackagesWithProfile: os nomes dos pacotes que usam o perfil.
+	PackagesWithProfile(ctx context.Context, profile string) ([]string, error)
 
 	// Search: os ATIVOS cujo nome contém q, em ordem alfabética.
 	Search(ctx context.Context, reg Registry, q string, limit, skip int64) ([]string, int64, error)

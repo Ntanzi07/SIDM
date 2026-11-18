@@ -22,6 +22,7 @@ import {
   type FieldRule,
   type ImportProfile,
 } from '../../services/api'
+import { AnnotationProfilesSection } from './AnnotationProfilesSection'
 import './Settings.css'
 
 const profileFields = [
@@ -124,7 +125,7 @@ export function SettingsPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState<'equipment' | 'camera' | 'inspect' | 'profile' | 'registry' | ''>('')
-  const [activeTab, setActiveTab] = useState<'equipments' | 'cameras' | 'profiles_list' | 'profile_editor'>('equipments')
+  const [activeTab, setActiveTab] = useState<'equipments' | 'cameras' | 'annotation_profiles' | 'profiles_list' | 'profile_editor'>('equipments')
 
   // Inline edit/rename state for equipment and camera
   const [editingRegistry, setEditingRegistry] = useState<EditingRegistry>(null)
@@ -521,7 +522,7 @@ export function SettingsPage() {
       <div className="page-heading">
         <div>
           <h1>Configurar</h1>
-          <p>Cadastre os equipamentos, câmeras e perfis de importação.</p>
+          <p>Cadastre os equipamentos, câmeras, perfis de anotação e perfis de importação.</p>
         </div>
       </div>
       {error && <p className="form-error">{error}</p>}
@@ -546,6 +547,16 @@ export function SettingsPage() {
             >
               <span className="settings-nav-text">Câmeras</span>
               <span className="settings-nav-badge">{cameras.length}</span>
+            </button>
+
+            <div className="settings-nav-divider" />
+            <span className="settings-nav-section-title">Anotação</span>
+            <button
+              className={`settings-nav-item ${activeTab === 'annotation_profiles' ? 'settings-nav-item--active' : ''}`}
+              onClick={() => setActiveTab('annotation_profiles')}
+              type="button"
+            >
+              <span className="settings-nav-text">Perfis de anotação</span>
             </button>
 
             <div className="settings-nav-divider" />
@@ -594,6 +605,8 @@ export function SettingsPage() {
               {renderRegistryList('camera', cameras)}
             </form>
           )}
+
+          {activeTab === 'annotation_profiles' && <AnnotationProfilesSection />}
 
           {activeTab === 'profiles_list' && (
             <div className="create-card settings-card">

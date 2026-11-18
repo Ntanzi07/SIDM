@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -221,5 +222,30 @@ func TestMongoSearch(t *testing.T) {
 				t.Errorf("got %v (total %d), want %s (total %d)", names, total, tc.want, tc.wantTotal)
 			}
 		})
+	}
+}
+
+func TestMongoPerfilDoPacote(t *testing.T) {
+	r := testRepo(t)
+	ctx := context.Background()
+	for _, p := range []Package{
+		{Name: "b", Profile: "capacete"}, {Name: "a", Profile: "capacete"}, {Name: "c", Profile: "veiculos"}, {Name: "antigo"},
+	} {
+		if err := r.CreatePackage(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := r.PackagesWithProfile(ctx, "capacete")
+	if err != nil || strings.Join(got, ",") != "a,b" {
+		t.Errorf("PackagesWithProfile = %v, %v", got, err)
+	}
+	if err := r.SetPackageProfile(ctx, "antigo", "capacete"); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := r.FindPackage(ctx, "antigo"); p.Profile != "capacete" {
+		t.Errorf("perfil = %q", p.Profile)
+	}
+	if err := r.SetPackageProfile(ctx, "nao-existe", "x"); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("inexistente: %v", err)
 	}
 }

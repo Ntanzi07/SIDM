@@ -63,9 +63,10 @@ func main() {
 	ann := annotation.New(annRepo)
 
 	// As imagens de antes dos perfis vão para fields/objects (uma vez só:
-	// nas próximas subidas não há mais nada para migrar).
+	// nas próximas subidas não há mais nada para migrar). Sem o prazo de 10s
+	// da conexão: num banco grande, a migração pode demorar mais.
 	imgRepo := images.NewMongoRepo(db)
-	if n, err := imgRepo.Migrate(ctx); err != nil {
+	if n, err := imgRepo.Migrate(context.Background()); err != nil {
 		log.Fatalf("falha ao migrar as imagens: %v", err)
 	} else if n > 0 {
 		log.Printf("%d imagens migradas para os campos do perfil de anotação", n)
@@ -78,6 +79,19 @@ func main() {
 	img := images.New(imgRepo, fs, nil, impRepo, ann) // impRepo: o perfil jpeg-ini do upload
 	cat := catalog.New(catalog.NewMongoRepo(db), fs, img, ann)
 	img.SetCatalog(cat)
+	// No disco toda imagem é <sha1>.ext: as verificadas de antes, com o nome
+	// v2 no arquivo, voltam para o sha1 (uma vez só).
+	if n, failed, err := img.MigrateFiles(context.Background()); err != nil {
+		log.Fatalf("falha ao migrar os arquivos das imagens: %v", err)
+	} else {
+		if n > 0 {
+			log.Printf("%d arquivos de imagens verificadas voltaram para <sha1>.ext", n)
+		}
+		for _, f := range failed {
+			log.Printf("AVISO: o arquivo da imagem %s não foi movido; tenta de novo na próxima subida", f)
+		}
+	}
+	ann.SetPackages(cat) // um perfil em uso não pode ser apagado
 
 	boxRepo := boxes.NewMongoRepo(db)
 	if err := boxRepo.EnsureIndexes(ctx); err != nil {

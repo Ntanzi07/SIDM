@@ -24,7 +24,7 @@ do próprio JPEG**.
  1. criar pacote         2. upload                3. (opcional) import de CSV         4. fila de anotação          5. verificar
  POST /packages  ──▶  POST /images?package=X ──▶  POST /packages/X/import  ──▶  POST /packages/X/next  ──▶  PUT /images/{sha1}
                       (pending, nome = hash;     (pré-preenche os rascunhos)    (cada pessoa pega uma)      {"complete": true}
-                       guarda o INI embutido)                                                               (renomeia para v2)
+                       guarda o INI embutido)                                                               (o arquivo fica <sha1>)
 ```
 
 - **Pacote:** um lote de imagens enviado junto. Cada pacote é uma pasta no servidor,
@@ -35,7 +35,9 @@ do próprio JPEG**.
   tudo e sem renomear. A imagem continua `pending`.
 - **Verificar:** `PUT` com `"complete": true` valida tudo pelo perfil de anotação do
   pacote (inclusive os obrigatórios), confere o cadastro de equipamento e câmera,
-  renomeia o arquivo (padrão v2, no perfil `veiculos`) e marca `verified`.
+  calcula o nome v2 (no perfil `veiculos`) e marca `verified`. **O arquivo não muda
+  de nome:** no disco toda imagem é `<sha1>.ext`, e o nome de saída é escolhido no
+  export (veja [Nomes no disco e no export](#nomes-no-disco-e-no-export)).
 - **Perfil de anotação:** cada pacote tem um, e ele diz o que se anota (veja
   [Perfis de anotação](#perfis-de-anotação)). A imagem guarda a anotação em
   `fields` (os campos) e `objects` (os objetos, ex.: os veículos).
@@ -196,7 +198,7 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `GET /images/{sha1}/file` | o arquivo da imagem |
 | `GET /images/{sha1}/boxes` | as caixas (CVAT) da imagem, em cada tarefa |
 | `POST /images/{sha1}/release` | devolve a imagem para a fila |
-| `POST /images/{sha1}/reopen` | reabre para edição: uma verificada volta a pendente (perde o nome v2) e fica reservada para quem pediu |
+| `POST /images/{sha1}/reopen` | reabre para edição: uma verificada volta a pendente e fica reservada para quem pediu |
 | `POST /imports/inspect` | "raio-x" de um CSV (ou, com `?type=jpeg-ini`, do INI de até 20 imagens): colunas, exemplos e valores distintos |
 | `GET /packages/{name}/cvat.zip` | as imagens do pacote, para criar a task no CVAT |
 | `GET /packages/{name}/boxes` | por tarefa: imagens do pacote anotadas nela |
@@ -285,8 +287,8 @@ no nome de uma imagem na lista também abre: as verificadas na visualização, a
 pendentes direto na anotação.
 
 **Editar** chama `POST /images/{sha1}/reopen`: a imagem volta para **pendente**
-(o arquivo perde o nome v2 até ser verificada de novo), a anotação atual fica
-como rascunho, e ela já fica **reservada** para quem clicou, para ninguém pegar
+(o nome v2 calculado sai do banco até ela ser verificada de novo), a anotação atual
+fica como rascunho, e ela já fica **reservada** para quem clicou, para ninguém pegar
 na fila no meio. A reabertura vai para o histórico. As caixas não mudam.
 
 ### Editar e apagar cadastros e pacotes
@@ -295,8 +297,9 @@ na fila no meio. A reabertura vai para o histórico. As caixas não mudam.
 
 - **Renomear** (`PATCH {"name": "..."}`) é em **cascata**:
   - as pendentes trocam o nome no banco, numa operação só;
-  - as verificadas têm o **arquivo renomeado** para o novo nome v2, uma a uma, com o
+  - nas verificadas, o nome v2 (no banco) é calculado de novo, uma a uma, com o
     histórico registrando a troca (`changed_by` = `<usuário> (renomear equipment)`).
+    Nenhum arquivo muda no disco.
 - Se o nome novo **já existe**, os dois são **fundidos** (`"merged": true`). Serve para
   limpar duplicatas que o import criou (`8003-MF4739` e `8003-mf4739`, por exemplo).
 - Se alguma verificada falhar (arquivo em uso, banco fora), ela vai em `failed`, o nome
@@ -422,7 +425,8 @@ Placa = GGB5H24
 
 **O arquivo nunca é alterado.** O INI desses equipamentos costuma ser **assinado
 digitalmente** (campos `Assinatura` e `Hash`), e qualquer mudança nos bytes invalida a
-assinatura. O SIDM só renomeia o arquivo: nunca recomprime, limpa ou reescreve.
+assinatura. O SIDM nunca recomprime, limpa ou reescreve o arquivo (nem renomeia: no
+disco ele é sempre `<sha1>.ext`).
 A `Assinatura` também **não** vai para o banco, porque só faz sentido junto do arquivo original.
 
 ### Exemplo de perfil de INI
@@ -570,6 +574,11 @@ alterado: para mudar, salve uma cópia com outro nome.
 }
 ```
 
+Na tela, os perfis ficam em **Configurar → Perfis de anotação**: criar, editar, duplicar
+(o `veiculos` só pode ser duplicado) e apagar. Os erros do perfil voltam todos juntos
+e a linha de cada campo com problema fica marcada. Um perfil **em uso** por algum
+pacote não pode ser apagado: troque o perfil desses pacotes antes.
+
 Para testar um perfil antes de usar, o `POST /annotation-profiles/{name}/check` confere
 uma anotação sem gravar nada.
 
@@ -593,14 +602,34 @@ PUT /images/{sha1}
 }
 ```
 
-- **O nome do arquivo:** no `veiculos`, o padrão v2. Nos outros perfis, o arquivo
-  continua `<sha1>.ext` (o modelo de nome por perfil é um próximo passo).
+- **O nome:** no disco, sempre `<sha1>.ext`. No `veiculos`, a verificada também
+  guarda o nome v2 no banco (`file_name`), que o export usa.
 - **Import e INI** só preenchem o que o perfil do pacote tem; o resto aparece no
   relatório, em `outside_profile`. Os perfis de import (e os filtros e pastas do
   export) ainda escrevem e leem os campos do `veiculos`.
 - **Migração:** na subida, o servidor leva as imagens de antes dos perfis (campos
   soltos e `vehicles`) para `fields`/`objects`, numa operação no próprio Mongo. Só
   roda uma vez: nas próximas subidas não há nada para migrar.
+
+---
+
+## Nomes no disco e no export
+
+**No disco, toda imagem é `dataset/<pacote>/<sha1>.ext`**, pendente ou verificada.
+Verificar, reabrir ou renomear um equipamento nunca move arquivo. Assim:
+
+- o caminho de uma imagem nunca muda (só se o pacote for renomeado);
+- nenhum perfil de anotação precisa saber montar nome de arquivo;
+- o nome com os metadados é escolhido **na saída**, no perfil de export.
+
+No perfil `veiculos`, a verificada guarda também o **nome v2** no banco (`file_name`,
+com `pattern_version: "v2"`). É o nome que o modo "Nome do SIDM (v2)" do export usa;
+nos outros perfis esse modo usa o `<sha1>`. Os modelos de nome do export (o padrão
+antigo, ou um personalizado) montam o nome a partir dos campos.
+
+As verificadas de antes desta regra (com o nome v2 no arquivo) voltam para
+`<sha1>.ext` na primeira subida do servidor, uma a uma. Se alguma falhar, o log avisa
+e ela é tentada de novo na próxima subida.
 
 ---
 
@@ -814,7 +843,8 @@ go tool cover -html=cover.out
   aberto. Assim o hash, a detecção de duplicata e a leitura do INI funcionam igual para
   todos os arquivos.
 - **O arquivo original é intocável:** o INI dos equipamentos é assinado, então o SIDM
-  só renomeia. O INI vai para o banco como uma **lista** de `{section, key, value}`, e
+  não mexe nos bytes. No disco o nome é sempre `<sha1>.ext`: o nome com os metadados
+  (v2) fica no banco e só aparece no export. O INI vai para o banco como uma **lista** de `{section, key, value}`, e
   não como mapa, para manter a ordem e para chaves com `.` ou `$` não serem problema.
 - **Banco e disco nunca divergem:** quando uma operação mexe nos dois e a segunda parte
   falha, a primeira é desfeita.

@@ -245,22 +245,14 @@ func (s *Service) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 	img.Fields, img.Objects = clean.Fields, clean.Objects
 	img.UpdatedAt = now
 
-	moved := false
 	if req.Complete {
+		// O arquivo NÃO muda de nome: no disco toda imagem é <sha1>.ext. O
+		// nome v2 fica no banco (file_name), e o export escolhe o nome de saída.
 		name, version, msg := s.finalName(r.Context(), img, profile)
 		if msg != "" {
 			platform.WriteError(w, http.StatusBadRequest, msg)
 			return
 		}
-		newPath := files.VerifiedPath(img.Package, name)
-		if newPath != img.Path {
-			if err := s.files.Move(img.Path, newPath); err != nil {
-				platform.ServerError(w, err)
-				return
-			}
-			moved = true
-		}
-		img.Path = newPath
 		img.FileName = name
 		img.Status = StatusVerified
 		img.PatternVersion = version
@@ -271,9 +263,6 @@ func (s *Service) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.repo.ReplaceImage(r.Context(), img, before.UpdatedAt); err != nil {
-		if moved { // desfaz o move para disco e banco não divergirem
-			_ = s.files.Move(img.Path, before.Path)
-		}
 		if errors.Is(err, ErrConflict) {
 			platform.WriteError(w, http.StatusConflict, "a imagem foi alterada por outra pessoa enquanto você editava: recarregue")
 			return
@@ -470,8 +459,8 @@ func (s *Service) handleReopen(w http.ResponseWriter, r *http.Request) {
 
 	moved := false
 	if img.Status == StatusVerified {
-		// Sem modelo de nome (perfil que não é o veiculos), a verificada já
-		// se chama <sha1>.ext: não há o que mover.
+		// No disco a imagem já se chama <sha1>.ext; o move só acontece numa
+		// verificada de antes, que ainda tivesse o nome v2 no arquivo.
 		pendingPath := files.PendingPath(img.Package, img.SHA1, img.Ext)
 		if pendingPath != img.Path {
 			if err := s.files.Move(img.Path, pendingPath); err != nil {
