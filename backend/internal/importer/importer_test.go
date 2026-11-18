@@ -5,7 +5,30 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"SIDM/internal/annotation"
 )
+
+// vehicles é o perfil de anotação padrão, que os perfis daqui preenchem.
+var vehicles = annotation.Vehicles()
+
+// validate normaliza (vehicles -> objects.vehicle) e valida contra o perfil
+// veiculos.
+func validate(p *Profile) error {
+	p.Normalize()
+	return p.Validate(&vehicles)
+}
+
+func transform(p *Profile, t *Table) ([]Record, Report) { return Transform(p, &vehicles, t) }
+
+// vehicleObjs: os objetos "vehicle" como texto, para comparar.
+func vehicleObjs(v annotation.Values) string {
+	var out []string
+	for _, o := range v.Objects {
+		out = append(out, fmt.Sprintf("%s%v", o.Type, o.Fields))
+	}
+	return strings.Join(out, " ")
+}
 
 // Um perfil completo, no estilo de um CSV real de equipamento.
 func sampleProfile() *Profile {
@@ -42,7 +65,7 @@ func read(t *testing.T, cfg ReaderConfig, content string) *Table {
 // ---------- Validate ----------
 
 func TestValidateOK(t *testing.T) {
-	if err := sampleProfile().Validate(); err != nil {
+	if err := validate(sampleProfile()); err != nil {
 		t.Fatalf("perfil válido recusado: %v", err)
 	}
 }
@@ -72,20 +95,24 @@ func TestValidateErros(t *testing.T) {
 			p.Fields["captured_at"] = r
 		}, "timezone"},
 		"split fora de conditions": {func(p *Profile) { r := p.Fields["weather"]; r.Split = ","; p.Fields["weather"] = r }, "split"},
-		"veículo sem placa":        {func(p *Profile) { delete(p.Vehicles.Fields, "plate") }, "vehicles.fields.plate"},
-		"modo de veículo errado":   {func(p *Profile) { p.Vehicles.Mode = "tabela" }, "vehicles.mode"},
+		"key fora dos campos":      {func(p *Profile) { p.Vehicles.Key = "color" }, "objects.vehicle.key"},
+		"modo de veículo errado":   {func(p *Profile) { p.Vehicles.Mode = "tabela" }, "objects.vehicle.mode"},
 		"columns sem {n}": {func(p *Profile) {
 			p.Vehicles.Mode, p.Vehicles.Max = VehiclesPerColumns, 2
 		}, "{n}"},
 		"columns sem max": {func(p *Profile) {
 			p.Vehicles = &VehicleRules{Mode: VehiclesPerColumns, Fields: map[string]FieldRule{"plate": {Column: "Placa{n}"}}}
-		}, "vehicles.max"},
+		}, "objects.vehicle.max"},
+		"tipo de objeto que o perfil não tem": {func(p *Profile) {
+			p.Objects = map[string]*ObjectRules{"rider": {Mode: ObjectsPerRow, Fields: map[string]FieldRule{"x": {Column: "X"}}}}
+		}, "objects.rider"},
+		"campo de objeto que o perfil não tem": {func(p *Profile) { p.Vehicles.Fields["velocidade"] = FieldRule{Column: "V"} }, "objects.vehicle.fields.velocidade"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			p := sampleProfile()
 			tc.mod(p)
-			err := p.Validate()
+			err := validate(p)
 			if err == nil {
 				t.Fatal("esperava erro")
 			}
@@ -100,7 +127,7 @@ func TestValidateJuntaTodosOsErros(t *testing.T) {
 	p := sampleProfile()
 	p.Match.By = "x"
 	p.Reader.Encoding = "utf-16"
-	err := p.Validate()
+	err := validate(p)
 	if err == nil || !strings.Contains(err.Error(), "reader.encoding") || !strings.Contains(err.Error(), "match.by") {
 		t.Errorf("deveria listar os dois erros de uma vez: %v", err)
 	}
@@ -200,7 +227,7 @@ img3.jpg;X;Limpo;ofusc;03/09/2026 23:59:59;XYZ9999;Van
 
 func TestTransform(t *testing.T) {
 	p := sampleProfile()
-	records, rep := Transform(p, read(t, p.Reader, sampleCSV))
+	records, rep := transform(p, read(t, p.Reader, sampleCSV))
 
 	if rep.Rows != 5 || rep.Records != 3 || len(records) != 3 {
 		t.Fatalf("rows=%d records=%d; want 5 linhas e 3 imagens", rep.Rows, rep.Records)
@@ -210,34 +237,35 @@ func TestTransform(t *testing.T) {
 	}
 
 	t.Run("img1: duas linhas agrupadas, dois veículos", func(t *testing.T) {
-		a := records[0].Annotation
+		a := records[0].Values
 		if records[0].Key != "img1.jpg" || records[0].Line != 2 {
 			t.Errorf("key=%q line=%d", records[0].Key, records[0].Line)
 		}
-		if a.Equipment != "8003-MF4739" {
-			t.Errorf("valor fixo não aplicado: %q", a.Equipment)
+		if a.Fields["equipment"] != "8003-MF4739" {
+			t.Errorf("valor fixo não aplicado: %v", a.Fields["equipment"])
 		}
-		if a.DayTime != "night" || a.Weather != "rain" {
-			t.Errorf("map (ignorando maiúscula): day_time=%q weather=%q", a.DayTime, a.Weather)
+		if a.Fields["day_time"] != "night" || a.Fields["weather"] != "rain" {
+			t.Errorf("map (ignorando maiúscula): %v", a.Fields)
 		}
-		if fmt.Sprint(a.Conditions) != "[glare low_contrast]" {
-			t.Errorf("split + map: %v", a.Conditions)
+		if fmt.Sprint(a.Fields["conditions"]) != "[glare low_contrast]" {
+			t.Errorf("split + map: %v", a.Fields["conditions"])
 		}
 		want := time.Date(2026, 9, 3, 11, 25, 23, 0, time.UTC) // 08:25 em São Paulo = 11:25 UTC
-		if a.CapturedAt == nil || !a.CapturedAt.Equal(want) {
-			t.Errorf("captured_at = %v, want %v", a.CapturedAt, want)
+		if got, _ := a.Fields["captured_at"].(time.Time); !got.Equal(want) {
+			t.Errorf("captured_at = %v, want %v", a.Fields["captured_at"], want)
 		}
-		if len(a.Vehicles) != 2 {
-			t.Fatalf("veículos = %+v", a.Vehicles)
+		if len(a.Objects) != 2 {
+			t.Fatalf("veículos = %+v", a.Objects)
 		}
-		if a.Vehicles[0] != (Vehicle{Plate: "ABC1D23", Type: "truck"}) {
-			t.Errorf("placa deveria vir maiúscula e sem hífen: %+v", a.Vehicles[0])
+		// maiúscula e sem hífen: o formato da placa só passa assim
+		if got := vehicleObjs(annotation.Values{Objects: a.Objects[:1]}); got != "vehiclemap[plate:ABC1D23 type:truck]" {
+			t.Errorf("placa deveria vir sem hífen: %s", got)
 		}
 	})
 
 	t.Run("img2: valores ruins ficam vazios", func(t *testing.T) {
-		a := records[1].Annotation
-		if a.DayTime != "day" || a.Weather != "" || a.CapturedAt != nil || len(a.Vehicles) != 0 {
+		a := records[1].Values
+		if a.Fields["day_time"] != "day" || a.Fields["weather"] != nil || a.Fields["captured_at"] != nil || len(a.Objects) != 0 {
 			t.Errorf("img2 = %+v", a)
 		}
 	})
@@ -249,7 +277,7 @@ func TestTransform(t *testing.T) {
 		if rep.Unmapped["day_time"]["X"] != 1 {
 			t.Errorf("X deveria estar em unmapped: %v", rep.Unmapped)
 		}
-		if rep.Unmapped["vehicles.type"]["Van"] != 1 {
+		if rep.Unmapped["vehicle.type"]["Van"] != 1 {
 			t.Errorf("Van deveria estar em unmapped: %v", rep.Unmapped)
 		}
 		if rep.ErrorCount != 1 || rep.Errors[0].Line != 4 || rep.Errors[0].Field != "captured_at" {
@@ -272,20 +300,20 @@ func TestTransformVeiculosEmColunas(t *testing.T) {
 			},
 		},
 	}
-	if err := p.Validate(); err != nil {
+	if err := validate(p); err != nil {
 		t.Fatal(err)
 	}
 
 	csv := "hash,Placa1,Cor1,Placa2,Cor2,Placa3,Cor3\nABCDEF,AAA1111,branco,,,CCC3333,preto\n"
-	records, _ := Transform(p, read(t, p.Reader, csv))
+	records, _ := transform(p, read(t, p.Reader, csv))
 
 	if records[0].Key != "abcdef" {
 		t.Errorf("sha1 deveria ser normalizado para minúsculo: %q", records[0].Key)
 	}
-	got := records[0].Annotation.Vehicles
-	want := []Vehicle{{Plate: "AAA1111", Color: "white"}, {Plate: "CCC3333", Color: "black"}}
-	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("veículos = %+v, want %+v (a coluna 2 vazia deveria ser pulada)", got, want)
+	got := vehicleObjs(records[0].Values)
+	want := "vehiclemap[color:white plate:AAA1111] vehiclemap[color:black plate:CCC3333]"
+	if got != want {
+		t.Errorf("veículos = %s, want %s (a coluna 2 vazia deveria ser pulada)", got, want)
 	}
 }
 
@@ -296,7 +324,7 @@ func TestErrosLimitados(t *testing.T) {
 	for i := 0; i < maxErrors+50; i++ {
 		fmt.Fprintf(&b, "img%d.jpg;data-ruim\n", i)
 	}
-	_, rep := Transform(p, read(t, p.Reader, b.String()))
+	_, rep := transform(p, read(t, p.Reader, b.String()))
 	if rep.ErrorCount != maxErrors+50 || len(rep.Errors) != maxErrors {
 		t.Errorf("error_count=%d errors=%d; want o total contado e só %d listados", rep.ErrorCount, len(rep.Errors), maxErrors)
 	}
@@ -345,27 +373,28 @@ func TestTransformCampoCodificadoSemMap(t *testing.T) {
 			"type":  {Column: "Tipo"},
 		}},
 	}
-	if err := p.Validate(); err != nil {
+	if err := validate(p); err != nil {
 		t.Fatal(err)
 	}
 	csv := "Arquivo;Periodo;Equip;Placa;Tipo\n" +
 		"a.jpg;night;8003 X;AAA1A11;car\n" + // o próprio valor
 		"b.jpg;N;8003 X;BBB1B11;T\n" + // a letra do padrão
 		"c.jpg;Noite;8003 X;CCC1C11;AUTOMOVEL\n" // nenhum dos dois: fica vazio e vai para o relatório
-	records, rep := Transform(p, read(t, p.Reader, csv))
+	records, rep := transform(p, read(t, p.Reader, csv))
 	if len(records) != 3 {
 		t.Fatalf("records = %d", len(records))
 	}
 	got := func(i int) string {
-		a := records[i].Annotation
-		return a.DayTime + "/" + a.Vehicles[0].Type + "/" + a.Equipment
+		a := records[i].Values
+		str := func(v any) string { s, _ := v.(string); return s }
+		return str(a.Fields["day_time"]) + "/" + str(a.Objects[0].Fields["type"]) + "/" + str(a.Fields["equipment"])
 	}
 	for i, want := range []string{"night/car/8003 X", "night/truck/8003 X", "/" + "/8003 X"} {
 		if got(i) != want {
 			t.Errorf("linha %d: %q, want %q", i+2, got(i), want)
 		}
 	}
-	if rep.Unmapped["vehicles.type"]["AUTOMOVEL"] != 1 || rep.Unmapped["day_time"]["Noite"] != 1 {
+	if rep.Unmapped["vehicle.type"]["AUTOMOVEL"] != 1 || rep.Unmapped["day_time"]["Noite"] != 1 {
 		t.Errorf("unmapped = %v", rep.Unmapped)
 	}
 }

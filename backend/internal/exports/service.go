@@ -7,27 +7,43 @@ import (
 	"io"
 	"os"
 	"path"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/export"
 	"SIDM/internal/images"
 	"SIDM/internal/platform"
 )
 
 type Service struct {
-	repo    Repo
-	images  Images
-	boxes   Boxes
-	catalog Catalog
-	files   Files
-	now     func() time.Time
+	repo       Repo
+	images     Images
+	boxes      Boxes
+	catalog    Catalog
+	files      Files
+	annotation Annotation
+	now        func() time.Time
 }
 
-func New(repo Repo, img Images, bx Boxes, cat Catalog, fs Files) *Service {
-	return &Service{repo: repo, images: img, boxes: bx, catalog: cat, files: fs,
+func New(repo Repo, img Images, bx Boxes, cat Catalog, fs Files, ann Annotation) *Service {
+	return &Service{repo: repo, images: img, boxes: bx, catalog: cat, files: fs, annotation: ann,
 		now: func() time.Time { return time.Now().UTC() }}
+}
+
+// AnnotationProfile busca o perfil de anotação de um perfil de export (vazio
+// = o padrão). Um que não existe é InvalidError.
+func (s *Service) AnnotationProfile(ctx context.Context, name string) (*annotation.Profile, error) {
+	if name == "" {
+		name = annotation.DefaultProfile
+	}
+	ap, err := s.annotation.FindProfile(ctx, name)
+	if errors.Is(err, platform.ErrNotFound) {
+		return nil, &InvalidError{fmt.Sprintf("annotation_profile: o perfil de anotação %q não existe", name)}
+	}
+	return ap, err
 }
 
 // TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
@@ -43,6 +59,9 @@ func (s *Service) ListProfiles(ctx context.Context) ([]export.Profile, error) {
 	if err != nil {
 		return nil, err
 	}
+	for i := range saved {
+		saved[i].Normalize() // os salvos antes dos perfis de anotação têm os filtros antigos
+	}
 	return append(export.Builtins(), saved...), nil
 }
 
@@ -51,14 +70,24 @@ func (s *Service) FindProfile(ctx context.Context, name string) (*export.Profile
 	if p, ok := export.Builtin(name); ok {
 		return &p, nil
 	}
-	return s.repo.FindExportProfile(ctx, name)
+	p, err := s.repo.FindExportProfile(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	p.Normalize()
+	return p, nil
 }
 
-// Validate limpa e valida um perfil que veio de fora.
-func Validate(p *export.Profile) error {
+// Validate limpa e valida um perfil que veio de fora, contra o perfil de
+// anotação dele.
+func (s *Service) Validate(ctx context.Context, p *export.Profile) error {
 	p.Builtin = false // só o servidor marca perfil padrão
 	p.Normalize()
-	if err := p.Validate(); err != nil {
+	ap, err := s.AnnotationProfile(ctx, p.AnnotationProfile)
+	if err != nil {
+		return err
+	}
+	if err := p.Validate(ap); err != nil {
 		return &InvalidError{err.Error()}
 	}
 	return nil
@@ -112,6 +141,11 @@ func (s *Service) Prepare(ctx context.Context, p *export.Profile, task string) e
 	if task = strings.TrimSpace(task); task != "" {
 		p.Task = task
 	}
+	ap, err := s.AnnotationProfile(ctx, p.AnnotationProfile)
+	if err != nil {
+		return err
+	}
+	p.Bind(ap)
 	if p.Task == "" {
 		return &InvalidError{"escolha a tarefa de anotação (as caixas de qual tarefa entram no dataset)"}
 	}
@@ -148,18 +182,18 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 	if len(pkgs) == 0 {
 		pkgs = []string{""} // todos
 	}
-	f := p.Filters
+	fields, objs := p.FilterValues()
+	objects := make([]images.ObjectFilter, 0, len(objs))
+	for _, t := range sortedKeys(objs) {
+		objects = append(objects, images.ObjectFilter{Type: t, Fields: objs[t]})
+	}
 	const pageSize = 500
 	for _, pkg := range pkgs {
 		for skip := int64(0); ; skip += pageSize {
 			imgs, _, err := s.images.List(ctx, images.ImageFilter{
 				Package: pkg, Status: images.StatusVerified,
-				Fields: nonEmpty(map[string]string{
-					"equipment": f.Equipment, "camera": f.Camera, "direction": f.Direction,
-					"day_time": f.DayTime, "weather": f.Weather,
-				}),
-				Object: nonEmpty(map[string]string{"type": f.VehicleType, "color": f.VehicleColor}),
-				Limit:  pageSize, Skip: skip,
+				Fields: fields, Objects: objects,
+				Limit: pageSize, Skip: skip,
 			})
 			if err != nil {
 				return nil, nil, err
@@ -230,22 +264,23 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 	return items, prev, nil
 }
 
-// nonEmpty tira os filtros vazios.
-func nonEmpty(m map[string]string) map[string]string {
-	for k, v := range m {
-		if v == "" {
-			delete(m, k)
-		}
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
-	return m
+	sort.Strings(out)
+	return out
 }
 
 // imageMeta: os metadados da imagem que viram pasta ou parte do nome de
-// saída. Cada campo da imagem vira meta[campo] (de uma lista, o primeiro
-// valor; "conditions" também vira "condition"; uma data vira AAAAMMDDTHHMMSSZ
-// e, a captured_at, também "date"). Do PRIMEIRO objeto saem meta[campo] (se
-// a imagem não tem um campo com o mesmo nome) e meta[<tipo>_<campo>]: no
-// perfil veiculos, isso dá plate, plate_type, vehicle_type, vehicle_color...
+// saída (as chaves de export.MetaFields). Cada campo da imagem vira
+// meta[campo] (de uma lista, o primeiro valor; "conditions" também vira
+// "condition"; uma data vira AAAAMMDDTHHMMSSZ e, a captured_at, também
+// "date"). Do PRIMEIRO objeto de cada tipo sai meta[<tipo>_<campo>], e do
+// primeiro objeto da imagem, meta[campo] (se a imagem não tem um campo com o
+// mesmo nome): no perfil veiculos, isso dá vehicle_type, vehicle_color,
+// plate, plate_type...
 func imageMeta(img *images.Image) export.Meta {
 	m := export.Meta{"package": img.Package}
 	for k, v := range img.Fields {
@@ -257,10 +292,14 @@ func imageMeta(img *images.Image) export.Meta {
 	if t, ok := img.Fields["captured_at"].(time.Time); ok {
 		m["date"] = t.UTC().Format("20060102")
 	}
-	if len(img.Objects) > 0 {
-		o := img.Objects[0]
+	seen := map[string]bool{}
+	for i, o := range img.Objects {
+		if seen[o.Type] {
+			continue
+		}
+		seen[o.Type] = true
 		for k, v := range o.Fields {
-			if _, taken := img.Fields[k]; !taken {
+			if _, taken := img.Fields[k]; !taken && i == 0 {
 				m[k] = metaValue(v)
 			}
 			m[o.Type+"_"+k] = metaValue(v)

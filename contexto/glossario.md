@@ -9,8 +9,8 @@
 | **fila** | a ordem de anotação; cada imagem fica **reservada** 15 min para quem pegou |
 | **reabrir** | uma verificada volta a pendente para ser editada |
 | **perfil de anotação** | o que se anota nas imagens de um pacote: campos e tipos de objeto (`annotation`) |
-| **perfil de import** | como ler um CSV ou o INI e traduzir para os campos (`imports`/`importer`) |
-| **perfil de export** | formato, divisão, filtros, pastas e nomes do dataset (`exports`/`export`) |
+| **perfil de import** | como ler um CSV ou o INI e traduzir para os campos de um perfil de anotação (`imports`/`importer`) |
+| **perfil de export** | formato, divisão, filtros, pastas e nomes do dataset, pelos campos de um perfil de anotação (`exports`/`export`) |
 | **campo** | um dado da imagem (`fields.day_time`) ou de um objeto (`objects[0].plate`) |
 | **objeto sem caixa** | uma lista na imagem, preenchida na anotação (ex.: veículos com placa) |
 | **objeto com caixa** | uma label do CVAT; cada caixa é um objeto (ex.: capacete) |

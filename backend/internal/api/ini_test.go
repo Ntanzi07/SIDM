@@ -189,7 +189,7 @@ func TestImportINIRelatorioPorImagem(t *testing.T) {
 	env.withINIProfile(t)
 
 	rep := decodeImport(t, env.do("POST", "/packages/"+testPkg+"/import?profile=ini-mfr1", nil, nil))
-	if rep.Unmapped["vehicles.type"]["TRICICLO"] != 1 {
+	if rep.Unmapped["vehicle.type"]["TRICICLO"] != 1 {
 		t.Errorf("unmapped = %v", rep.Unmapped)
 	}
 }

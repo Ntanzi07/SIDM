@@ -101,13 +101,13 @@ func main() {
 	cat.Listen(bx) // as caixas guardam o pacote de cada imagem
 	img.Listen(bx) // e são apagadas junto com a imagem
 
-	imp := imports.New(impRepo, img, cat)
+	imp := imports.New(impRepo, img, cat, ann)
 
 	expRepo := exports.NewMongoRepo(db)
 	if err := expRepo.EnsureIndexes(ctx); err != nil {
 		log.Fatalf("falha ao preparar os perfis de export no Mongo: %v", err)
 	}
-	exp := exports.New(expRepo, img, bx, cat, fs)
+	exp := exports.New(expRepo, img, bx, cat, fs, ann)
 	bx.Listen(exp) // os perfis de export guardam a tarefa
 
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }

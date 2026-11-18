@@ -15,8 +15,8 @@ mexem nelas pelo `Service` dele.
 | `imports` | módulo | perfis de import, raio-x de arquivo, import de CSV/INI nos rascunhos | `import_profiles` |
 | `exports` | módulo | perfis de export salvos, preview e download do zip | `export_profiles` |
 | `filename` | biblioteca pura | nome v2 (formatar e ler), tabelas de códigos, sanitização | — |
-| `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import | — |
-| `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas, nomes, escrita COCO/YOLO/VOC | — |
+| `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import para os campos de um perfil de anotação (`annotation.Values`) | — |
+| `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC | — |
 | `files` | biblioteca | disco: receber com hash, guardar, mover, apagar | — |
 | `crypt` | biblioteca | abrir imagens criptografadas dos equipamentos | — |
 | `platform` | comum | erros (`ErrNotFound`, `ErrDuplicate`), `Route`, `Page[T]`, `WriteJSON`, `UserFrom`, conexão Mongo, `mongotest` | — |
@@ -69,8 +69,8 @@ argumento do `api.New`.
 | `hooks/` | estado e regras das telas (`useAnnotator`, `useImageBoxes`) |
 | `types/` | os tipos da API (`annotation.ts` espelha o módulo `annotation`) |
 | `utils/annotationForm.ts` | conversão API ↔ formulário dos campos do perfil |
+| `utils/importProfiles.ts` | ordem e rótulo dos perfis de import nas telas de pacote (os do perfil do pacote primeiro) |
 | `pages/<Tela>/` | uma pasta por tela, com o `.tsx` e o `.css` |
 | `components/` | o que é usado por mais de uma tela |
-| `data/annotationOptions.ts` | rótulos do perfil `veiculos`, ainda usados pelo **export** (filtros e pastas) |
 
 O proxy do Vite manda `/api` para `http://localhost:8080`.

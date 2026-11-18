@@ -95,8 +95,8 @@ func (s *Service) handleListImages(w http.ResponseWriter, r *http.Request) {
 	f := ImageFilter{
 		Package: q.Get("package"),
 		Status:  q.Get("status"),
-		Fields:  map[string]string{},
-		Object:  map[string]string{},
+		Fields:  map[string]any{},
+		Object:  map[string]any{},
 		Limit:   platform.IntParam(q, "limit", 50, 1, 500),
 		Skip:    platform.IntParam(q, "skip", 0, 0, 1<<31),
 	}
@@ -116,7 +116,7 @@ func (s *Service) handleListImages(w http.ResponseWriter, r *http.Request) {
 			f.Object[legacyObject[key]] = v
 		}
 	}
-	if p, ok := f.Object["plate"]; ok {
+	if p, ok := f.Object["plate"].(string); ok {
 		f.Object["plate"] = strings.ToUpper(p) // placa é guardada em maiúsculas
 	}
 

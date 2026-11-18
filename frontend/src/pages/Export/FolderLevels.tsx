@@ -1,40 +1,14 @@
-import { annotationOptions } from '../../data/annotationOptions'
 import type { FolderField, FolderLevel } from '../../services/api'
 
-const FIELD_LABELS: Record<string, string> = {
-  vehicle_type: 'Tipo de veículo',
-  plate_type: 'Tipo de placa',
-  plate_category: 'Categoria da placa',
-  vehicle_color: 'Cor do veículo',
-  resolution: 'Resolução',
-  direction: 'Direção',
-  day_time: 'Período',
-  weather: 'Clima',
-  capture_angle: 'Ângulo de captura',
-  image_range: 'Alcance',
-  equipment: 'Equipamento',
-  camera: 'Câmera',
-  package: 'Pacote',
-  split: 'Divisão (train/valid/test)',
+// O nome na tela de um campo (o backend manda; campo que o perfil de
+// anotação não tem aparece pela chave).
+function fieldLabel(field: FolderField | undefined, key: string): string {
+  return field?.label ?? key
 }
 
-// Rótulo em português de cada valor (para a tabela de nomes).
-const OPTION_KEYS: Record<string, keyof typeof annotationOptions> = {
-  vehicle_type: 'type',
-  vehicle_color: 'color',
-  plate_type: 'plate_type',
-  plate_category: 'plate_category',
-  direction: 'direction',
-  day_time: 'day_time',
-  weather: 'weather',
-  capture_angle: 'capture_angle',
-  image_range: 'image_range',
-}
-
-function valueLabel(field: string, value: string): string {
-  const key = OPTION_KEYS[field]
-  const options = key ? (annotationOptions[key] as readonly (readonly [string, string])[]) : []
-  return options.find(([v]) => v === value)?.[1] ?? value
+// O nome na tela de cada valor (para a tabela de nomes).
+function valueLabel(field: FolderField | undefined, value: string): string {
+  return field?.labels?.[value] ?? value
 }
 
 // Nome final da pasta de um valor (o que o backend vai usar).
@@ -50,7 +24,8 @@ function sortedValues(values: Record<string, string>): string[] {
 const BAD_CHARS = /[/\\:*?"<>|]/
 
 // Os níveis da árvore de pastas do VOC: de qual metadado sai cada nível e
-// como cada valor vira nome de pasta.
+// como cada valor vira nome de pasta. Os campos são os do perfil de anotação
+// do perfil de export (GET /export-folder-fields).
 export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
   levels: FolderLevel[]
   fields: FolderField[]
@@ -58,7 +33,7 @@ export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
   onChange: (levels: FolderLevel[]) => void
 }) {
   const byName = new Map(fields.map((field) => [field.field, field]))
-  const unused = fields.filter((field) => !levels.some((level) => level.field === field.field))
+  const unused = fields.filter((field) => field.folder && !field.alias && !levels.some((level) => level.field === field.field))
 
   const update = (index: number, patch: Partial<FolderLevel>) =>
     onChange(levels.map((level, i) => (i === index ? { ...level, ...patch } : level)))
@@ -79,7 +54,7 @@ export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
   const example = levels.map((level) => {
     const field = byName.get(level.field)
     const first = field?.values ? sortedValues(field.values)[0] : undefined
-    return first ? folderNameOf(level, first, field) : `<${FIELD_LABELS[level.field] ?? level.field}>`
+    return first ? folderNameOf(level, first, field) : `<${fieldLabel(field, level.field)}>`
   })
 
   return (
@@ -95,7 +70,8 @@ export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
         return (
           <div className="folder-level" key={level.field}>
             <div className="folder-level__head">
-              <strong>{index + 1}. {FIELD_LABELS[level.field] ?? level.field}</strong>
+              <strong>{index + 1}. {fieldLabel(field, level.field)}</strong>
+              {!field?.folder && <span className="form-error folder-level__missing">o perfil de anotação não tem este campo</span>}
               <span className="export-actions__spacer" />
               <button aria-label="Subir" className="button button--secondary button--sm" disabled={index === 0} onClick={() => move(index, -1)} type="button">↑</button>
               <button aria-label="Descer" className="button button--secondary button--sm" disabled={index === levels.length - 1} onClick={() => move(index, 1)} type="button">↓</button>
@@ -109,7 +85,7 @@ export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
                     const name = level.names?.[value] ?? ''
                     return (
                       <tr key={value}>
-                        <td>{valueLabel(level.field, value)} <small>({value})</small></td>
+                        <td>{valueLabel(field, value)} <small>({value})</small></td>
                         <td>
                           <input
                             className={BAD_CHARS.test(name) ? 'folder-level__bad' : undefined}
@@ -152,11 +128,12 @@ export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
           value=""
         >
           <option value="">+ Adicionar nível de pasta…</option>
-          {unused.map((field) => <option key={field.field} value={field.field}>{FIELD_LABELS[field.field] ?? field.field}</option>)}
+          {unused.map((field) => <option key={field.field} value={field.field}>{field.label}</option>)}
         </select>
       )}
       <p className="profile-name-hint">
-        Os dados do veículo vêm do primeiro veículo da imagem. Nome de pasta não pode ter / \ : * ? " &lt; &gt; |.
+        Os campos de objeto vêm do primeiro objeto do tipo na imagem; de uma lista, o primeiro valor.
+        Nome de pasta não pode ter / \ : * ? " &lt; &gt; |.
       </p>
     </div>
   )

@@ -93,8 +93,8 @@ func (m *MongoRepo) ReplaceImage(ctx context.Context, img *Image, prevUpdatedAt 
 
 func (f ImageFilter) toBSON() bson.D {
 	filter := bson.D{}
-	add := func(field, value string) {
-		if value != "" {
+	add := func(field string, value any) {
+		if value != nil && value != "" {
 			filter = append(filter, bson.E{Key: field, Value: value})
 		}
 	}
@@ -107,17 +107,38 @@ func (f ImageFilter) toBSON() bson.D {
 	// Os filtros de objeto usam $elemMatch: todas as condições precisam valer
 	// para o MESMO objeto. Sem isso, "caminhão branco" traria uma imagem
 	// com um caminhão preto e um carro branco.
-	if len(f.Object) > 0 {
+	elem := func(typ string, fields map[string]any) bson.E {
 		obj := bson.D{}
-		for _, k := range sortedKeys(f.Object) {
-			obj = append(obj, bson.E{Key: "fields." + k, Value: f.Object[k]})
+		if typ != "" {
+			obj = append(obj, bson.E{Key: "type", Value: typ})
 		}
-		filter = append(filter, bson.E{Key: "objects", Value: bson.D{{Key: "$elemMatch", Value: obj}}})
+		for _, k := range sortedKeys(fields) {
+			obj = append(obj, bson.E{Key: "fields." + k, Value: fields[k]})
+		}
+		return bson.E{Key: "objects", Value: bson.D{{Key: "$elemMatch", Value: obj}}}
+	}
+	var objs []bson.D
+	if len(f.Object) > 0 {
+		objs = append(objs, bson.D{elem("", f.Object)})
+	}
+	for _, o := range f.Objects {
+		objs = append(objs, bson.D{elem(o.Type, o.Fields)})
+	}
+	switch len(objs) {
+	case 0:
+	case 1:
+		filter = append(filter, objs[0]...)
+	default: // um $elemMatch por objeto: no mesmo nível, um sobrescreveria o outro
+		and := bson.A{}
+		for _, o := range objs {
+			and = append(and, o)
+		}
+		filter = append(filter, bson.E{Key: "$and", Value: and})
 	}
 	return filter
 }
 
-func sortedKeys(m map[string]string) []string {
+func sortedKeys[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

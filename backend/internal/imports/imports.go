@@ -44,6 +44,12 @@ type Images interface {
 	ProfileOf(ctx context.Context, pkg string) (*annotation.Profile, error)
 }
 
+// Annotation é o que o import usa dos perfis de anotação: os campos de
+// destino de um perfil de import são os do perfil de anotação dele.
+type Annotation interface {
+	FindProfile(ctx context.Context, name string) (*annotation.Profile, error)
+}
+
 // Catalog é o que o import usa do catálogo: o pacote tem que existir, e os
 // equipamentos e câmeras novos do CSV são cadastrados.
 type Catalog interface {

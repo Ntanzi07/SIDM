@@ -105,13 +105,24 @@ var ErrConflict = errors.New("alterado por outra pessoa")
 type ImageFilter struct {
 	Package string
 	Status  string
-	// Fields: campo da imagem = valor (numa lista, basta conter o valor).
-	Fields map[string]string
-	// Object: todos valendo para o MESMO objeto (ex.: type=truck e
-	// color=white é um caminhão branco, não um caminhão e algo branco).
-	Object map[string]string
-	Limit  int64
-	Skip   int64
+	// Fields: campo da imagem = valor (numa lista, basta conter o valor). O
+	// valor no tipo do campo: texto, float64 (número) ou bool.
+	Fields map[string]any
+	// Object: todos valendo para o MESMO objeto, de qualquer tipo (ex.:
+	// type=truck e color=white é um caminhão branco, não um caminhão e algo
+	// branco).
+	Object map[string]any
+	// Objects: o mesmo, mas de um tipo de objeto: a imagem precisa ter, para
+	// CADA item, um objeto daquele tipo com todos os valores.
+	Objects []ObjectFilter
+	Limit   int64
+	Skip    int64
+}
+
+// ObjectFilter: um objeto do tipo Type com todos os valores de Fields.
+type ObjectFilter struct {
+	Type   string
+	Fields map[string]any
 }
 
 // HistoryEntry é um documento da collection image_history.

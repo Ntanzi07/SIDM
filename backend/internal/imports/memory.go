@@ -48,6 +48,7 @@ func (m *Memory) FindProfile(ctx context.Context, name string) (*importer.Profil
 	if !ok {
 		return nil, platform.ErrNotFound
 	}
+	p.Normalize()
 	return &p, nil
 }
 
@@ -95,6 +96,7 @@ func (m *Memory) ListProfiles(ctx context.Context, q string, limit, skip int64) 
 	out := []importer.Profile{}
 	for _, p := range m.Profiles {
 		if strings.Contains(strings.ToLower(p.Name), strings.ToLower(q)) {
+			p.Normalize()
 			out = append(out, p)
 		}
 	}

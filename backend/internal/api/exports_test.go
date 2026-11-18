@@ -327,10 +327,28 @@ func TestExportVOCPorPastas(t *testing.T) {
 			Values map[string]string `json:"values"`
 		} `json:"items"`
 	}
+	byField := func() map[string]map[string]string {
+		out := map[string]map[string]string{}
+		for _, it := range fields.Items {
+			out[it.Field] = it.Values
+		}
+		return out
+	}
 	decode(t, env.do("GET", "/export-folder-fields", nil, nil), &fields)
-	if len(fields.Items) == 0 || fields.Items[0].Field != "vehicle_type" || fields.Items[0].Values["car"] != "car" {
+	if got := byField(); got["vehicle_type"]["car"] != "car" || got["resolution"]["640x480"] != "01-640x480" {
 		t.Errorf("campos = %+v", fields.Items)
 	}
+
+	// outro perfil de anotação: os campos dele, sem os de veículo
+	env.withCapacete(t)
+	decode(t, env.do("GET", "/export-folder-fields?annotation_profile=capacete-moto", nil, nil), &fields)
+	if got := byField(); got["vehicle_type"] != nil || got["day_time"]["night"] != "night" {
+		t.Errorf("campos do capacete-moto = %+v", fields.Items)
+	}
+	if _, ok := byField()["riders"]; !ok {
+		t.Errorf("riders (número) deveria servir de pasta: %+v", fields.Items)
+	}
+	assertStatus(t, env.do("GET", "/export-folder-fields?annotation_profile=nao-existe", nil, nil), http.StatusBadRequest)
 }
 
 func TestPadraoInlineMantemONome(t *testing.T) {
@@ -347,5 +365,46 @@ func TestPadraoInlineMantemONome(t *testing.T) {
 	body, _ = json.Marshal(map[string]any{"profile": b})
 	if p, _, _ := preview(t, env, string(body)); p.Profile != "personalizado" {
 		t.Errorf("com mudança: %q", p.Profile)
+	}
+}
+
+// Export de pacote de outro perfil de anotação: filtro, pastas e nome pelos
+// campos dele.
+func TestExportComPerfilProprio(t *testing.T) {
+	env := newTestEnv(t)
+	env.withCapacete(t)
+	env.box.Tasks["capacete"] = boxes.Task{Name: "capacete"}
+	verify := func(name, body string) string {
+		sha := env.uploadTo(t, "motos", upFile{name, name})[0].SHA1
+		assertStatus(t, env.doJSON("PUT", "/images/"+sha, body), http.StatusOK)
+		putTask(env, "capacete", sha, "com_capacete")
+		return sha
+	}
+	two := verify("a.jpg", `{"fields": {"day_time": "night", "riders": 2}, "objects": [{"type": "plate", "fields": {"text": "abc1d23"}}], "complete": true}`)
+	verify("b.jpg", `{"fields": {"day_time": "day", "riders": 1}, "complete": true}`)
+
+	profile := `{"name":"motos","format":"voc","split":{"train":100,"valid":0,"test":0},"annotation_profile":"capacete-moto",
+		"layout":"folders","folders":[{"field":"day_time"},{"field":"plate_text"}],"file_name":"{plate_text}-{sha1}",
+		"filters":{"fields":{"riders":"2"}}}`
+	p, code, msg := preview(t, env, `{"profile":`+profile+`,"task":"capacete"}`)
+	if code != http.StatusOK || p.Total != 1 || p.Folders["night/ABC1D23"] != 1 {
+		t.Fatalf("%d %s %+v", code, msg, p)
+	}
+	if len(p.Examples) != 1 || p.Examples[0] != "night/ABC1D23/ABC1D23-"+two+".jpg" {
+		t.Errorf("exemplos = %v", p.Examples)
+	}
+
+	// um campo que o perfil não tem: 400 ao salvar
+	bad := strings.Replace(profile, `"riders":"2"`, `"weather":"rain"`, 1)
+	rec := env.doJSON("POST", "/export-profiles", bad)
+	assertStatus(t, rec, http.StatusBadRequest)
+	if !strings.Contains(errorMsg(t, rec), "filters.fields.weather") {
+		t.Errorf("erro = %q", errorMsg(t, rec))
+	}
+	// salvo e lido de volta, com o perfil de anotação
+	assertStatus(t, env.doJSON("POST", "/export-profiles", profile), http.StatusCreated)
+	rec = env.do("GET", "/export-profiles/motos", nil, nil)
+	if !strings.Contains(rec.Body.String(), `"annotation_profile":"capacete-moto"`) || !strings.Contains(rec.Body.String(), `"riders":"2"`) {
+		t.Errorf("perfil salvo = %s", rec.Body.String())
 	}
 }

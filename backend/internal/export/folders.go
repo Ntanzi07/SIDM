@@ -4,8 +4,6 @@ import (
 	"path"
 	"sort"
 	"strings"
-
-	"SIDM/internal/filename"
 )
 
 // Layouts de saída.
@@ -28,61 +26,11 @@ type FolderLevel struct {
 // DefaultUnknown é a pasta das imagens sem o metadado do nível.
 const DefaultUnknown = "Desconhecido"
 
-// FolderFields são os metadados que podem virar nível de pasta. Os do
-// veículo vêm do PRIMEIRO veículo da imagem. "split" é o grupo
-// (train/valid/test) da divisão do perfil.
-var FolderFields = []string{
-	"vehicle_type", "plate_type", "plate_category", "vehicle_color",
-	"resolution", "direction", "day_time", "weather", "capture_angle", "image_range",
-	"equipment", "camera", "package", "split",
-}
-
-// codeTable: campos com valores fechados (os de filename.Codes).
-var codeTable = map[string]string{
-	"vehicle_type": "vehicle_type", "plate_type": "plate_type", "plate_category": "plate_category",
-	"vehicle_color": "vehicle_color", "resolution": "resolution", "direction": "direction",
-	"day_time": "day_time", "weather": "weather", "capture_angle": "capture_angle", "image_range": "image_range",
-}
-
-// Meta são os metadados de uma imagem que podem virar pasta (campo -> valor).
+// Meta são os metadados de uma imagem que podem virar pasta ou parte do
+// nome (campo -> valor).
 type Meta map[string]string
 
-// FolderValues devolve os valores possíveis de um campo, com o nome padrão
-// da pasta de cada um (para a tela montar a tabela de nomes). Campos abertos
-// (equipamento, câmera, pacote) devolvem nil.
-func FolderValues(field string) map[string]string {
-	if field == "split" {
-		return map[string]string{SplitTrain: SplitTrain, SplitValid: SplitValid, SplitTest: SplitTest}
-	}
-	table, ok := codeTable[field]
-	if !ok {
-		return nil
-	}
-	out := map[string]string{}
-	for code, value := range filename.Codes()[table] {
-		out[value] = defaultFolderName(field, code, value)
-	}
-	return out
-}
-
-// defaultFolderName: o próprio valor; na resolução, "<código>-<valor>"
-// ("01-640x480"), que mantém as pastas em ordem.
-func defaultFolderName(field, code, value string) string {
-	if field == "resolution" {
-		return code + "-" + value
-	}
-	return value
-}
-
-var resolutionCode = func() map[string]string {
-	out := map[string]string{}
-	for code, value := range filename.Codes()["resolution"] {
-		out[value] = code
-	}
-	return out
-}()
-
-// Dir monta a pasta da imagem a partir dos níveis do perfil.
+// Dir monta a pasta da imagem a partir dos níveis do perfil (depois do Bind).
 func (p *Profile) Dir(m Meta, split string) string {
 	parts := make([]string, 0, len(p.Folders))
 	for _, lvl := range p.Folders {
@@ -90,12 +38,12 @@ func (p *Profile) Dir(m Meta, split string) string {
 		if lvl.Field == "split" {
 			value = split
 		}
-		parts = append(parts, folderName(lvl, value))
+		parts = append(parts, folderName(lvl, p.specs[lvl.Field], value))
 	}
 	return path.Join(parts...)
 }
 
-func folderName(lvl FolderLevel, value string) string {
+func folderName(lvl FolderLevel, spec MetaField, value string) string {
 	if value == "" {
 		if lvl.Unknown != "" {
 			return lvl.Unknown
@@ -105,10 +53,8 @@ func folderName(lvl FolderLevel, value string) string {
 	if name, ok := lvl.Names[value]; ok && name != "" {
 		return name
 	}
-	if lvl.Field == "resolution" {
-		if code, ok := resolutionCode[value]; ok {
-			return defaultFolderName(lvl.Field, code, value)
-		}
+	if name := spec.Values[value]; name != "" {
+		return sanitizeFolder(name) // o nome padrão (na resolução, "01-640x480")
 	}
 	return sanitizeFolder(value)
 }
@@ -186,13 +132,15 @@ func (p *Profile) validateFolders(add func(string, ...any)) {
 	if len(p.Folders) == 0 {
 		add("folders: escolha pelo menos um nível de pasta")
 	}
-	if len(p.Folders) > len(FolderFields) {
-		add("folders: no máximo %d níveis", len(FolderFields))
+	if len(p.Folders) > maxFolderLevels {
+		add("folders: no máximo %d níveis", maxFolderLevels)
 	}
 	seen := map[string]bool{}
 	for i, lvl := range p.Folders {
-		if !contains(FolderFields, lvl.Field) {
-			add("folders[%d]: campo desconhecido %q (use: %s)", i, lvl.Field, strings.Join(FolderFields, ", "))
+		spec, ok := p.specs[lvl.Field]
+		if !ok || !spec.Folder {
+			add("folders[%d]: campo %q não serve de pasta no perfil de anotação %s (use: %s)", i, lvl.Field, p.annotationName(),
+				strings.Join(keysWhere(p.specs, func(m MetaField) bool { return m.Folder }), ", "))
 			continue
 		}
 		if seen[lvl.Field] {
@@ -202,15 +150,14 @@ func (p *Profile) validateFolders(add func(string, ...any)) {
 		if lvl.Unknown != "" && !validFolderName(lvl.Unknown) {
 			add(`folders[%d].unknown: %q não serve de nome de pasta (sem / \ : * ? " < > |, até 64 caracteres)`, i, lvl.Unknown)
 		}
-		known := FolderValues(lvl.Field)
 		values := make([]string, 0, len(lvl.Names))
 		for value := range lvl.Names {
 			values = append(values, value)
 		}
 		sort.Strings(values)
 		for _, value := range values {
-			if known != nil {
-				if _, ok := known[value]; !ok {
+			if spec.Values != nil {
+				if _, ok := spec.Values[value]; !ok {
 					add("folders[%d].names: valor desconhecido %q para %s", i, value, lvl.Field)
 				}
 			}
@@ -220,6 +167,9 @@ func (p *Profile) validateFolders(add func(string, ...any)) {
 		}
 	}
 }
+
+// maxFolderLevels: uma árvore mais funda que isso não ajuda ninguém.
+const maxFolderLevels = 10
 
 func contains(list []string, s string) bool {
 	for _, v := range list {

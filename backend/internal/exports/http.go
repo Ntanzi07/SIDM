@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/export"
 	"SIDM/internal/platform"
 )
@@ -48,7 +49,7 @@ func writeErr(w http.ResponseWriter, err error, notFound string) {
 // ---------- perfis ----------
 
 // decodeProfile lê e valida um perfil (corpo JSON).
-func decodeProfile(w http.ResponseWriter, r *http.Request) (*export.Profile, bool) {
+func (s *Service) decodeProfile(w http.ResponseWriter, r *http.Request) (*export.Profile, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxExportProfileBytes)
 	var p export.Profile
 	dec := json.NewDecoder(r.Body)
@@ -57,7 +58,7 @@ func decodeProfile(w http.ResponseWriter, r *http.Request) (*export.Profile, boo
 		platform.WriteError(w, http.StatusBadRequest, "JSON inválido: "+err.Error())
 		return nil, false
 	}
-	if err := Validate(&p); err != nil {
+	if err := s.Validate(r.Context(), &p); err != nil {
 		writeErr(w, err, "")
 		return nil, false
 	}
@@ -89,7 +90,7 @@ func (s *Service) handleGetProfile(w http.ResponseWriter, r *http.Request) {
 
 // POST /export-profiles
 func (s *Service) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
-	p, ok := decodeProfile(w, r)
+	p, ok := s.decodeProfile(w, r)
 	if !ok {
 		return
 	}
@@ -111,7 +112,7 @@ func (s *Service) handleReplaceProfile(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err, "")
 		return
 	}
-	p, ok := decodeProfile(w, r)
+	p, ok := s.decodeProfile(w, r)
 	if !ok {
 		return
 	}
@@ -136,24 +137,49 @@ func (s *Service) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusOK, map[string]any{"name": name, "deleted": true})
 }
 
-// GET /export-folder-fields
-// Os campos do modelo de nome dos arquivos (name_fields, legacy_template) e
-// os metadados que podem virar nível de pasta (layout por pastas), com os
-// valores possíveis e o nome padrão da pasta de cada um (null = campo aberto,
-// como equipamento e câmera: a pasta é o próprio valor).
+// GET /export-folder-fields?annotation_profile=veiculos
+// Os metadados que um perfil de anotação (vazio = o padrão) dá às imagens,
+// para as pastas (layout por pastas) e o modelo de nome dos arquivos:
+//
+//	fields: todos, com o nome na tela, o grupo (file, image ou o tipo do
+//	        objeto), se servem de pasta e de nome, os valores possíveis com o
+//	        nome padrão da pasta de cada um (null = campo aberto, como
+//	        equipamento: a pasta é o próprio valor) e os nomes na tela dos
+//	        valores. alias = nome antigo/atalho (aceito, mas a tela não oferece).
+//	items: os que servem de pasta (field, values), como antes;
+//	name_fields: as chaves que servem de nome;
+//	legacy_template: o padrão antigo (só no perfil veiculos).
 func (s *Service) handleFolderFields(w http.ResponseWriter, r *http.Request) {
-	type field struct {
+	ap, err := s.AnnotationProfile(r.Context(), strings.TrimSpace(r.URL.Query().Get("annotation_profile")))
+	if err != nil {
+		writeErr(w, err, "")
+		return
+	}
+	type item struct {
 		Field  string            `json:"field"`
 		Values map[string]string `json:"values"`
 	}
-	out := make([]field, 0, len(export.FolderFields))
-	for _, f := range export.FolderFields {
-		out = append(out, field{Field: f, Values: export.FolderValues(f)})
+	fields := export.MetaFields(ap)
+	items, names := []item{}, []string{}
+	for _, f := range fields {
+		if f.Alias {
+			continue
+		}
+		if f.Folder {
+			items = append(items, item{Field: f.Key, Values: f.Values})
+		}
+		if f.Name {
+			names = append(names, f.Key)
+		}
+	}
+	legacy := ""
+	if ap.Name == annotation.DefaultProfile {
+		legacy = export.TemplateLegacy
 	}
 	platform.WriteJSON(w, http.StatusOK, map[string]any{
-		"items": out, "unknown": export.DefaultUnknown,
-		// campos do modelo de nome dos arquivos de saída, e o padrão antigo
-		"name_fields": export.NameFields(), "legacy_template": export.TemplateLegacy,
+		"annotation_profile": ap.Name, "fields": fields,
+		"items": items, "unknown": export.DefaultUnknown,
+		"name_fields": names, "legacy_template": legacy,
 	})
 }
 
@@ -228,7 +254,7 @@ func (s *Service) parseRequest(w http.ResponseWriter, r *http.Request) (*export.
 	} else if builtin || p.Name == "" {
 		p.Name = "personalizado"
 	}
-	if err := Validate(&p); err != nil {
+	if err := s.Validate(r.Context(), &p); err != nil {
 		writeErr(w, err, "")
 		return nil, "", false
 	}

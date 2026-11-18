@@ -1,22 +1,78 @@
 {
   "name": "csv-equipamento-8003",
   "description": "Exemplo: ajuste as colunas e os valores para o seu CSV",
-  "reader": { "type": "csv", "delimiter": ";", "encoding": "utf-8" },
-  "match": { "column": "Arquivo", "by": "original_name" },
-  "fields": {
-    "equipment":   { "value": "8003-MF4739" },
-    "camera":      { "column": "Camera" },
-    "day_time":    { "column": "Turno", "map": { "D": "day", "N": "night" } },
-    "weather":     { "column": "Clima", "map": { "Limpo": "clear", "Chuva": "rain", "Neblina": "fog" } },
-    "conditions":  { "column": "Obs", "split": ",", "map": { "ofuscamento": "glare", "baixo contraste": "low_contrast" } },
-    "captured_at": { "column": "DataHora", "date_format": "02/01/2006 15:04:05", "timezone": "America/Sao_Paulo" }
+  "annotation_profile": "veiculos",
+  "reader": {
+    "type": "csv",
+    "delimiter": ";",
+    "encoding": "utf-8"
   },
-  "vehicles": {
-    "mode": "row",
-    "fields": {
-      "plate": { "column": "Placa" },
-      "type":  { "column": "Tipo", "map": { "Carro": "car", "Moto": "motorcycle", "Caminhão": "truck", "Ônibus": "bus" } },
-      "color": { "column": "Cor",  "map": { "Branco": "white", "Preto": "black", "Prata": "silver" } }
+  "match": {
+    "column": "Arquivo",
+    "by": "original_name"
+  },
+  "fields": {
+    "equipment": {
+      "value": "8003-MF4739"
+    },
+    "camera": {
+      "column": "Camera"
+    },
+    "day_time": {
+      "column": "Turno",
+      "map": {
+        "D": "day",
+        "N": "night"
+      }
+    },
+    "weather": {
+      "column": "Clima",
+      "map": {
+        "Limpo": "clear",
+        "Chuva": "rain",
+        "Neblina": "fog"
+      }
+    },
+    "conditions": {
+      "column": "Obs",
+      "split": ",",
+      "map": {
+        "ofuscamento": "glare",
+        "baixo contraste": "low_contrast"
+      }
+    },
+    "captured_at": {
+      "column": "DataHora",
+      "date_format": "02/01/2006 15:04:05",
+      "timezone": "America/Sao_Paulo"
+    }
+  },
+  "objects": {
+    "vehicle": {
+      "mode": "row",
+      "key": "plate",
+      "fields": {
+        "plate": {
+          "column": "Placa"
+        },
+        "type": {
+          "column": "Tipo",
+          "map": {
+            "Carro": "car",
+            "Moto": "motorcycle",
+            "Caminhão": "truck",
+            "Ônibus": "bus"
+          }
+        },
+        "color": {
+          "column": "Cor",
+          "map": {
+            "Branco": "white",
+            "Preto": "black",
+            "Prata": "silver"
+          }
+        }
+      }
     }
   }
 }

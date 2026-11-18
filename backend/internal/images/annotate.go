@@ -10,7 +10,6 @@ import (
 
 	"SIDM/internal/annotation"
 	"SIDM/internal/filename"
-	"SIDM/internal/importer"
 )
 
 // annotationRequest é o corpo do PUT /images/{sha1}.
@@ -154,24 +153,6 @@ func ValuesFromMeta(m filename.ImageMeta) annotation.Values {
 		Objects: []annotation.Object{},
 	}
 	for _, x := range m.Vehicles {
-		v.Objects = append(v.Objects, vehicleObject(x.Plate, x.PlateType, x.PlateCategory, x.Type, x.Color))
-	}
-	return v
-}
-
-// ValuesFromAnnotation: o que o import (CSV ou INI) descobriu, nos campos do
-// perfil veiculos (os perfis de import ainda escrevem nesses campos).
-func ValuesFromAnnotation(a importer.Annotation) annotation.Values {
-	var captured time.Time
-	if a.CapturedAt != nil {
-		captured = a.CapturedAt.UTC()
-	}
-	v := annotation.Values{
-		Fields: vehicleFields(a.Equipment, a.Camera, a.Direction, a.Resolution, a.CaptureAngle,
-			a.DayTime, a.ImageRange, a.Weather, a.Conditions, captured),
-		Objects: []annotation.Object{},
-	}
-	for _, x := range a.Vehicles {
 		v.Objects = append(v.Objects, vehicleObject(x.Plate, x.PlateType, x.PlateCategory, x.Type, x.Color))
 	}
 	return v

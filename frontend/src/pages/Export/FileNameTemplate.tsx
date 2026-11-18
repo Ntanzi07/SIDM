@@ -1,42 +1,21 @@
 import { useRef, useState } from 'react'
+import type { FolderField } from '../../services/api'
 
-const FIELD_LABELS: Record<string, string> = {
-  sha1: 'Hash (sha1)',
-  name: 'Nome do SIDM (v2)',
-  original: 'Nome original',
-  package: 'Pacote',
-  equipment: 'Equipamento',
-  camera: 'Câmera',
-  captured_at: 'Data e hora',
-  date: 'Data',
-  plate: 'Placa',
-  direction: 'Direção',
-  resolution: 'Resolução',
-  capture_angle: 'Ângulo',
-  day_time: 'Período',
-  vehicle_type: 'Tipo de veículo',
-  image_range: 'Alcance',
-  plate_type: 'Tipo de placa',
-  plate_category: 'Categoria da placa',
-  weather: 'Clima',
-  condition: 'Condição',
-  vehicle_color: 'Cor do veículo',
-}
-
-// Os campos na ordem do padrão antigo, depois os outros.
+// Os campos do padrão antigo primeiro, na ordem dele; depois os outros, na
+// ordem do backend (arquivo, imagem, objetos).
 const ORDER = [
   'sha1', 'direction', 'resolution', 'capture_angle', 'day_time', 'vehicle_type', 'image_range',
-  'plate_type', 'plate_category', 'weather', 'condition', 'plate',
-  'vehicle_color', 'captured_at', 'date', 'name', 'original', 'package', 'equipment', 'camera',
+  'vehicle_plate_type', 'vehicle_plate_category', 'weather', 'condition', 'vehicle_plate',
 ]
 
 type Mode = 'v2' | 'legacy' | 'custom'
 
 // O nome dos arquivos de saída: o do SIDM (v2), o padrão antigo (hash +
-// características + placa) ou um modelo próprio com campos entre chaves.
+// características + placa; só no perfil veiculos) ou um modelo próprio com
+// os campos do perfil de anotação entre chaves.
 export function FileNameTemplate({ value, fields, legacy, onChange }: {
   value: string
-  fields: string[]
+  fields: FolderField[]
   legacy: string
   onChange: (value: string) => void
 }) {
@@ -44,8 +23,15 @@ export function FileNameTemplate({ value, fields, legacy, onChange }: {
   // "Personalizado" escolhido fica, mesmo com o texto vazio ou igual ao antigo.
   // (o componente é remontado a cada perfil aberto: key no ExportPage)
   const [custom, setCustom] = useState(false)
-  const mode: Mode = custom ? 'custom' : value === '' ? 'v2' : value === legacy ? 'legacy' : 'custom'
-  const sorted = [...fields].sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99))
+  const mode: Mode = custom ? 'custom' : value === '' ? 'v2' : legacy && value === legacy ? 'legacy' : 'custom'
+  const offered = fields.filter((field) => field.name && !field.alias)
+  const sorted = offered
+    .map((field, i) => ({ field, rank: (ORDER.indexOf(field.field) + 1 || 99) * 1000 + i }))
+    .sort((a, b) => a.rank - b.rank)
+    .map(({ field }) => field)
+  // Campos do modelo que o perfil de anotação não tem (ex.: trocou o perfil).
+  const known = new Set(fields.filter((field) => field.name).map((field) => field.field))
+  const unknown = [...value.matchAll(/\{([^{}]*)\}/g)].map((m) => m[1]).filter((field) => !known.has(field))
   const missingHash = (mode === 'custom' || value !== '') && !value.includes('{sha1}') && !value.includes('{name}')
 
   // Insere o campo onde está o cursor (ou no fim).
@@ -62,8 +48,8 @@ export function FileNameTemplate({ value, fields, legacy, onChange }: {
   }
 
   const options: Array<[Mode, string, string]> = [
-    ['v2', 'Nome do SIDM (v2)', 'o nome guardado: sha1_v2_equipamento_câmera_…'],
-    ['legacy', 'Padrão antigo', 'hash + características + placa: …3a3fF01LDBEB1S01KOY7386.jpg'],
+    ['v2', 'Nome do SIDM', 'o nome guardado (no perfil veiculos, o v2: sha1_v2_equipamento_câmera_…; nos outros, o sha1)'],
+    ...(legacy ? [['legacy', 'Padrão antigo', 'hash + características + placa: …3a3fF01LDBEB1S01KOY7386.jpg'] as [Mode, string, string]] : []),
     ['custom', 'Personalizado', 'monte o nome com os campos'],
   ]
 
@@ -77,7 +63,7 @@ export function FileNameTemplate({ value, fields, legacy, onChange }: {
               name="file-name-mode"
               onChange={() => {
                 setCustom(key === 'custom')
-                onChange(key === 'v2' ? '' : key === 'legacy' ? legacy : value || legacy)
+                onChange(key === 'v2' ? '' : key === 'legacy' ? legacy : value || legacy || '{sha1}')
               }}
               type="radio"
             />
@@ -98,16 +84,19 @@ export function FileNameTemplate({ value, fields, legacy, onChange }: {
           />
           <div className="file-name__chips">
             {sorted.map((field) => (
-              <button className="file-name__chip" key={field} onClick={() => insert(field)} title={`{${field}}`} type="button">
-                {FIELD_LABELS[field] ?? field}
+              <button className="file-name__chip" key={field.field} onClick={() => insert(field.field)} title={`{${field.field}}`} type="button">
+                {field.label}
               </button>
             ))}
           </div>
           {missingHash && <p className="form-error">Use {'{sha1}'} (ou {'{name}'}) no nome, para cada imagem ter um nome diferente.</p>}
+          {unknown.length > 0 && (
+            <p className="form-error">O perfil de anotação não tem: {unknown.map((field) => `{${field}}`).join(' ')}.</p>
+          )}
           <p className="profile-name-hint">
-            Os campos saem com o código do nome v2 (direção F/T, resolução 01…10, …). Campo sem valor vira "_" na largura dele.
-            Os do veículo vêm do primeiro veículo; a condição é a primeira da imagem. A extensão é a do arquivo.
-            O exemplo do nome aparece na prévia.
+            Os campos de lista com código saem com o código (no perfil veiculos, o do nome v2: direção F/T, resolução 01…10, …).
+            Campo sem valor vira "_" na largura dele. Os de objeto vêm do primeiro objeto do tipo; de uma lista, o primeiro valor.
+            A extensão é a do arquivo. O exemplo do nome aparece na prévia.
           </p>
         </>
       )}

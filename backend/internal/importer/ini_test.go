@@ -109,28 +109,28 @@ func TestINITableETemplateDeData(t *testing.T) {
 			},
 		},
 	}
-	if err := p.Validate(); err != nil {
+	if err := validate(p); err != nil {
 		t.Fatal(err)
 	}
 
 	entries := ParseINI(ExtractJPEGTrailer(fakeJPEG(sampleINI)))
 	run := *p
 	run.Match = MatchConfig{Column: "_sha1", By: MatchBySHA1}
-	records, rep := Transform(&run, INITable("_sha1", "abc", entries))
+	records, rep := transform(&run, INITable("_sha1", "abc", entries))
 
 	if len(records) != 1 || records[0].Key != "abc" {
 		t.Fatalf("records = %+v", records)
 	}
-	a := records[0].Annotation
+	a := records[0].Values
 	want := time.Date(2026, 9, 18, 13, 32, 28, 321e6, time.UTC) // 10:32:28.321 em São Paulo
-	if a.CapturedAt == nil || !a.CapturedAt.Equal(want) {
-		t.Errorf("captured_at = %v, want %v (template juntando data, hora e ms)", a.CapturedAt, want)
+	if got, _ := a.Fields["captured_at"].(time.Time); !got.Equal(want) {
+		t.Errorf("captured_at = %v, want %v (template juntando data, hora e ms)", a.Fields["captured_at"], want)
 	}
-	if a.Equipment != "MFR1-0001" || rep.ErrorCount != 0 {
-		t.Errorf("equipment=%q erros=%+v", a.Equipment, rep.Errors)
+	if a.Fields["equipment"] != "MFR1-0001" || rep.ErrorCount != 0 {
+		t.Errorf("equipment=%v erros=%+v", a.Fields["equipment"], rep.Errors)
 	}
-	if len(a.Vehicles) != 1 || a.Vehicles[0] != (Vehicle{Plate: "GGB5H24", Type: "car"}) {
-		t.Errorf("veículo (modo single) = %+v", a.Vehicles)
+	if got := vehicleObjs(a); got != "vehiclemap[plate:GGB5H24 type:car]" {
+		t.Errorf("veículo (modo single) = %s", got)
 	}
 }
 
@@ -152,7 +152,7 @@ func TestValidateINI(t *testing.T) {
 			Fields: map[string]FieldRule{"equipment": {Column: "NMetrologico.Equip"}},
 		}
 	}
-	if err := base().Validate(); err != nil {
+	if err := validate(base()); err != nil {
 		t.Fatalf("perfil INI válido recusado: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestValidateINI(t *testing.T) {
 		"com match": {func(p *Profile) { p.Match = MatchConfig{Column: "x", By: MatchBySHA1} }, "match"},
 		"veículos por linha": {func(p *Profile) {
 			p.Vehicles = &VehicleRules{Mode: VehiclesPerRow, Fields: map[string]FieldRule{"plate": {Column: "P"}}}
-		}, "vehicles.mode"},
+		}, "objects.vehicle.mode"},
 		"template sem chaves": {func(p *Profile) { p.Fields["camera"] = FieldRule{Template: "sem colunas"} }, "template"},
 		"column e template":   {func(p *Profile) { p.Fields["camera"] = FieldRule{Column: "A", Template: "{B}"} }, "exatamente um"},
 	}
@@ -171,7 +171,7 @@ func TestValidateINI(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			p := base()
 			tc.mod(p)
-			err := p.Validate()
+			err := validate(p)
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want algo com %q", err, tc.want)
 			}

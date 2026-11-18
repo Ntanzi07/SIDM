@@ -215,7 +215,7 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `POST /annotation-profiles` | cria um perfil de anotação (os erros voltam todos juntos, em `problems`) |
 | `GET`/`PUT`/`DELETE /annotation-profiles/{name}` | um perfil de anotação (o padrão não muda) |
 | `POST /annotation-profiles/{name}/check` | confere uma anotação contra o perfil, sem gravar: valores limpos ou problemas |
-| `GET /export-folder-fields` | metadados que podem virar pasta no VOC por pastas, com o nome padrão de cada valor |
+| `GET /export-folder-fields?annotation_profile=` | metadados de um perfil de anotação que podem virar pasta (VOC por pastas) ou parte do nome, com o nome padrão de cada valor |
 | `GET /import-profiles` | lista os perfis de import |
 | `POST /import-profiles` | cria um perfil de import |
 | `GET /import-profiles/{name}` | um perfil |
@@ -347,6 +347,7 @@ importado direto, só escolhendo o perfil.
 ```json
 {
   "name": "csv-pg-veiculos",
+  "annotation_profile": "veiculos",
   "reader": { "type": "csv", "delimiter": ";" },
   "match": { "column": "imagem_nome", "by": "original_name" },
   "fields": {
@@ -355,11 +356,11 @@ importado direto, só escolhendo o perfil.
                      "date_format": "2006-01-02 15:04:05.000",
                      "timezone": "America/Sao_Paulo" }
   },
-  "vehicles": { "mode": "row", "fields": {
+  "objects": { "vehicle": { "mode": "row", "key": "plate", "fields": {
     "plate": { "column": "Placa Digitada" },
     "type":  { "column": "dados_imagem_classificacao",
                "map": { "AUTOMOVEL": "car", "CAMINHAO": "truck", "MOTOCICLETA": "motorcycle", "ONIBUS": "bus" } }
-  }}
+  }}}
 }
 ```
 
@@ -367,8 +368,34 @@ importado direto, só escolhendo o perfil.
 |---|---|
 | `reader` | `type: "csv"`, com `delimiter` (padrão `,`) e `encoding` (`utf-8` ou `latin1`; o BOM do Excel é removido). Ou `type: "jpeg-ini"` (veja [INI embutido no JPEG](#ini-embutido-no-jpeg)). |
 | `match` | só no CSV: a coluna que identifica a imagem, comparada com o nome original (`original_name`) ou com o hash (`sha1`) |
-| `fields` | campos da imagem: `equipment`, `camera`, `direction`, `resolution`, `capture_angle`, `day_time`, `image_range`, `weather`, `conditions`, `captured_at` |
-| `vehicles` | `mode: "single"` (um veículo por imagem), `"row"` (uma linha por veículo, agrupadas pela imagem) ou `"columns"` (`Placa{n}` na mesma linha, com `max`) |
+| `annotation_profile` | o [perfil de anotação](#perfis-de-anotação) que o perfil preenche (padrão: `veiculos`). Os campos de destino são os dele, e os valores dos `map` são conferidos contra ele ao salvar |
+| `fields` | campos da imagem do perfil de anotação (no `veiculos`: `equipment`, `camera`, `direction`, `resolution`, `capture_angle`, `day_time`, `image_range`, `weather`, `conditions`, `captured_at`) |
+| `objects` | por tipo de objeto **sem caixa** do perfil (no `veiculos`, `vehicle`): `mode` `"single"` (um por imagem), `"row"` (uma linha por objeto, agrupadas pela imagem) ou `"columns"` (`Placa{n}` na mesma linha, com `max`); `key` é o campo que diz que o objeto existe (sem valor nele, não há objeto; vazio = algum campo de coluna com valor); `fields`, os campos do tipo |
+
+O formato de antes (`"vehicles": {...}`) ainda é aceito: vira `objects.vehicle` com
+`key: "plate"`. Os perfis já salvos voltam no formato novo.
+
+Num perfil como o `capacete-moto`, os destinos são os campos dele:
+
+```json
+{
+  "name": "csv-motos",
+  "annotation_profile": "capacete-moto",
+  "reader": { "type": "csv", "delimiter": ";" },
+  "match": { "column": "Arquivo", "by": "original_name" },
+  "fields": {
+    "day_time": { "column": "Turno", "map": { "D": "day", "N": "night" } },
+    "riders":   { "column": "Pessoas" }
+  },
+  "objects": { "plate": { "mode": "row", "key": "text", "fields": { "text": { "column": "Placa" } } } }
+}
+```
+
+O valor vira o tipo do campo: lista (sem `map`, aceita o valor, o código ou o nome
+da opção na tela: `night`, `N` ou `Noite`), número (`2` ou `2,5`), sim/não
+(`true`/`false`, `sim`/`não`, `1`/`0`), data (com `date_format`). Num texto com
+formato, como a placa, os separadores saem se só assim o valor passa
+(`ABC-1234` → `ABC1234`).
 
 Cada campo usa **um** de:
 - `column`: o valor de uma coluna (no INI, `"Secao.Chave"`);
@@ -434,6 +461,7 @@ A `Assinatura` também **não** vai para o banco, porque só faz sentido junto d
 ```json
 {
   "name": "ini-mfr1",
+  "annotation_profile": "veiculos",
   "reader": { "type": "jpeg-ini" },
   "fields": {
     "equipment":   { "column": "NMetrologico.Equip" },
@@ -441,10 +469,10 @@ A `Assinatura` também **não** vai para o banco, porque só faz sentido junto d
                      "date_format": "02/01/2006 15:04:05.000",
                      "timezone": "America/Sao_Paulo" }
   },
-  "vehicles": { "mode": "single", "fields": {
+  "objects": { "vehicle": { "mode": "single", "key": "plate", "fields": {
     "plate": { "column": "NMetrologico.Placa" },
     "type":  { "column": "NMetrologico.TipoVeiculo", "map": { "AUTOMOVEL": "car" } }
-  }}
+  }}}
 }
 ```
 
@@ -604,9 +632,10 @@ PUT /images/{sha1}
 
 - **O nome:** no disco, sempre `<sha1>.ext`. No `veiculos`, a verificada também
   guarda o nome v2 no banco (`file_name`), que o export usa.
-- **Import e INI** só preenchem o que o perfil do pacote tem; o resto aparece no
-  relatório, em `outside_profile`. Os perfis de import (e os filtros e pastas do
-  export) ainda escrevem e leem os campos do `veiculos`.
+- **Import e INI** preenchem os campos do perfil de anotação do perfil de import
+  (`annotation_profile`). Num pacote de outro perfil, só entra o que o pacote tem;
+  o resto aparece no relatório, em `outside_profile`. O export também usa os campos
+  de um perfil de anotação (filtros, pastas e nome; veja [Export](#export-para-treino-rf-detr-yolo-pascal-voc)).
 - **Migração:** na subida, o servidor leva as imagens de antes dos perfis (campos
   soltos e `vehicles`) para `fields`/`objects`, numa operação no próprio Mongo. Só
   roda uma vez: nas próximas subidas não há nada para migrar.
@@ -657,26 +686,33 @@ tarefa; um perfil próprio guarda a tarefa junto.
 - **formato e divisão** (porcentagens que somam 100; no YOLO a validação não pode ser 0);
 - **nome dos arquivos**: o do SIDM (v2), o **padrão antigo** (hash +
   características + placa, ex.: `02d9…3a3fF01LDBEB1S01KOY7386.jpg`) ou um modelo
-  próprio com campos entre chaves, como `placa-{plate}_{sha1}`. Os campos de código
-  (`{direction}`, `{resolution}`, `{capture_angle}`, `{day_time}`, `{vehicle_type}`,
-  `{image_range}`, `{plate_type}`, `{plate_category}`, `{weather}`, `{condition}`,
-  `{vehicle_color}`) saem com o código do nome v2 (F/T, 01…10, …); há também
-  `{sha1}`, `{plate}`, `{captured_at}`, `{date}`, `{name}`, `{original}`,
-  `{package}`, `{equipment}` e `{camera}`. Campo sem valor vira `_` na largura dele
-  (o padrão antigo continua com tamanho fixo); os do veículo vêm do primeiro
-  veículo e a condição é a primeira da imagem. O modelo tem que ter `{sha1}` (ou
-  `{name}`), para os nomes não repetirem. O `.xml`, o `.txt` e o COCO usam o nome
-  novo;
+  próprio com campos entre chaves, como `placa-{plate}_{sha1}`. Os campos são os
+  do perfil de anotação (veja abaixo): cada campo da imagem pela chave
+  (`{day_time}`) e cada campo de objeto sem caixa como `{<tipo>_<campo>}`
+  (`{vehicle_type}`, do primeiro objeto do tipo); há também `{sha1}`, `{name}`,
+  `{original}` e `{package}`. Um campo de lista com código sai com o código (no
+  `veiculos`, o do nome v2: F/T, 01…10, …). Campo sem valor vira `_` na largura
+  dele (a do maior código; o padrão antigo continua com tamanho fixo). O modelo
+  tem que ter `{sha1}` (ou `{name}`), para os nomes não repetirem. O `.xml`, o
+  `.txt` e o COCO usam o nome novo;
 - **pastas de saída** (só no VOC): **por divisão** (`train/valid/test`) ou **por
-  pastas**, uma árvore com os níveis que você escolhe, na ordem que quiser: tipo de
-  veículo, tipo e categoria da placa, cor, resolução, direção, período, clima,
-  ângulo, alcance, equipamento, câmera, pacote e a própria divisão. Cada valor
+  pastas**, uma árvore com os níveis que você escolhe, na ordem que quiser: os
+  campos do perfil de anotação (no `veiculos`: tipo de veículo, tipo e categoria
+  da placa, cor, resolução, direção, período, clima, ângulo, alcance,
+  equipamento, câmera…), o pacote e a própria divisão. Cada valor
   ganha o nome de pasta que você der (`rear` → `Traseiro`); sem nome, vale o padrão
   (o próprio valor; na resolução, `01-640x480`). Imagens sem o dado vão para
-  `Desconhecido` (ou o nome escolhido). Os dados do veículo vêm do primeiro veículo
-  da imagem. Sem o nível "Divisão", a divisão não é usada;
+  `Desconhecido` (ou o nome escolhido). Os campos de objeto vêm do primeiro objeto
+  do tipo na imagem. Sem o nível "Divisão", a divisão não é usada;
 - **pacotes** (vazio = todos);
-- **filtros de metadados** (período, clima, direção, tipo e cor do veículo, equipamento, câmera);
+- **perfil de anotação** (`annotation_profile`, padrão `veiculos`): de onde vêm os
+  campos dos filtros, das pastas e do nome. Não limita os pacotes: imagens de um
+  pacote de outro perfil entram, mas sem esses campos (não passam nos filtros e
+  vão para `Desconhecido` nas pastas);
+- **filtros** nos campos do perfil de anotação: `filters.fields` (campo da imagem →
+  valor) e `filters.objects` (tipo → campo → valor, todos no mesmo objeto), ex.:
+  `{"fields": {"day_time": "night"}, "objects": {"vehicle": {"type": "truck"}}}`.
+  Os nomes antigos (`day_time`, `vehicle_type`…) ainda são aceitos;
 - **labels**: quais entram e com que nome. Dar o mesmo nome a duas labels junta as
   classes (`Placa` e `placa` viram `placa`). A ordem das classes define os ids
   (YOLO começa em 0, COCO em 1) e aparece na prévia.

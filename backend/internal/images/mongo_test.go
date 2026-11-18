@@ -124,7 +124,7 @@ func TestListImagesFiltros(t *testing.T) {
 
 	// A: noturna, um caminhão branco.
 	a := newImage("a", base)
-	a.Status, a.Fields = StatusVerified, map[string]any{"day_time": "night", "equipment": "8003-MF4739", "conditions": []string{"glare"}}
+	a.Status, a.Fields = StatusVerified, map[string]any{"day_time": "night", "equipment": "8003-MF4739", "conditions": []string{"glare"}, "riders": 2.0, "helmet": true}
 	a.Objects = []annotation.Object{veh("AAA1111", "truck", "white")}
 
 	// B: noturna, caminhão PRETO + carro BRANCO (a pegadinha do $elemMatch).
@@ -150,13 +150,21 @@ func TestListImagesFiltros(t *testing.T) {
 		{"sem filtro, mais antigas primeiro", ImageFilter{}, "[a b c]"},
 		{"por status", ImageFilter{Status: StatusPending}, "[c]"},
 		{"por pacote", ImageFilter{Package: "pacote-1"}, "[a b]"},
-		{"por período", ImageFilter{Fields: map[string]string{"day_time": "night"}}, "[a b]"},
-		{"por equipamento", ImageFilter{Fields: map[string]string{"equipment": "1000-AAA"}}, "[b]"},
-		{"lista contém o valor", ImageFilter{Fields: map[string]string{"conditions": "glare"}}, "[a]"},
-		{"caminhão branco ($elemMatch)", ImageFilter{Object: map[string]string{"type": "truck", "color": "white"}}, "[a]"},
-		{"só cor branca", ImageFilter{Object: map[string]string{"color": "white"}}, "[a b]"},
-		{"por placa", ImageFilter{Object: map[string]string{"plate": "CCC3333"}}, "[b]"},
-		{"filtros combinados sem resultado", ImageFilter{Fields: map[string]string{"day_time": "night"}, Status: StatusPending}, "[]"},
+		{"por período", ImageFilter{Fields: map[string]any{"day_time": "night"}}, "[a b]"},
+		{"por equipamento", ImageFilter{Fields: map[string]any{"equipment": "1000-AAA"}}, "[b]"},
+		{"lista contém o valor", ImageFilter{Fields: map[string]any{"conditions": "glare"}}, "[a]"},
+		{"caminhão branco ($elemMatch)", ImageFilter{Object: map[string]any{"type": "truck", "color": "white"}}, "[a]"},
+		{"só cor branca", ImageFilter{Object: map[string]any{"color": "white"}}, "[a b]"},
+		{"por placa", ImageFilter{Object: map[string]any{"plate": "CCC3333"}}, "[b]"},
+		{"filtros combinados sem resultado", ImageFilter{Fields: map[string]any{"day_time": "night"}, Status: StatusPending}, "[]"},
+		{"número", ImageFilter{Fields: map[string]any{"riders": 2.0}}, "[a]"},
+		{"sim/não", ImageFilter{Fields: map[string]any{"helmet": true}}, "[a]"},
+		{"objeto de um tipo", ImageFilter{Objects: []ObjectFilter{{Type: "vehicle", Fields: map[string]any{"color": "white"}}}}, "[a b]"},
+		{"tipo de objeto que não tem", ImageFilter{Objects: []ObjectFilter{{Type: "rider", Fields: map[string]any{"color": "white"}}}}, "[]"},
+		{"dois objetos ($and)", ImageFilter{Objects: []ObjectFilter{
+			{Type: "vehicle", Fields: map[string]any{"type": "truck", "color": "black"}},
+			{Type: "vehicle", Fields: map[string]any{"type": "car"}},
+		}}, "[b]"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -185,7 +193,7 @@ func TestListImagesFiltros(t *testing.T) {
 	})
 
 	t.Run("sem resultados devolve slice vazio", func(t *testing.T) {
-		items, _, _ := s.ListImages(ctx, ImageFilter{Fields: map[string]string{"equipment": "nada"}, Limit: 10})
+		items, _, _ := s.ListImages(ctx, ImageFilter{Fields: map[string]any{"equipment": "nada"}, Limit: 10})
 		if items == nil {
 			t.Error("esperava []Image{}, veio nil")
 		}
@@ -591,7 +599,7 @@ func TestRenamePackageImages(t *testing.T) {
 	if err != nil || n != 2 {
 		t.Fatalf("RenamePackageImages = %d, %v; want 2", n, err)
 	}
-	want := map[string]string{
+	want := map[string]any{
 		"a": "dataset/novo-nome-maior/a.jpg",
 		"b": "dataset/novo-nome-maior/b_v2_ção.jpg",
 		"c": "dataset/velho-2/c.jpg",

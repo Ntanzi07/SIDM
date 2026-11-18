@@ -8,39 +8,17 @@ import (
 	"strings"
 	"time"
 
-	"SIDM/internal/filename"
+	"SIDM/internal/annotation"
 )
 
-// Annotation é o que o import descobriu sobre UMA imagem.
-// Campo vazio = o arquivo não disse nada (ou o valor não tinha tradução).
-type Annotation struct {
-	Equipment    string     `json:"equipment,omitempty"`
-	Camera       string     `json:"camera,omitempty"`
-	Direction    string     `json:"direction,omitempty"`
-	Resolution   string     `json:"resolution,omitempty"`
-	CaptureAngle string     `json:"capture_angle,omitempty"`
-	DayTime      string     `json:"day_time,omitempty"`
-	ImageRange   string     `json:"image_range,omitempty"`
-	Weather      string     `json:"weather,omitempty"`
-	Conditions   []string   `json:"conditions,omitempty"`
-	CapturedAt   *time.Time `json:"captured_at,omitempty"`
-	Vehicles     []Vehicle  `json:"vehicles,omitempty"`
-}
-
-type Vehicle struct {
-	Plate         string `json:"plate"`
-	PlateType     string `json:"plate_type,omitempty"`
-	PlateCategory string `json:"plate_category,omitempty"`
-	Type          string `json:"type,omitempty"`
-	Color         string `json:"color,omitempty"`
-}
-
 // Record é uma imagem descrita pelo arquivo: a chave (nome original ou sha1)
-// e a anotação. Line é a primeira linha do arquivo que fala dela.
+// e a anotação, nos campos do perfil de anotação (ainda não conferida: o
+// Fit do perfil é que limpa e avisa do que não serve). Line é a primeira
+// linha do arquivo que fala dela.
 type Record struct {
-	Key        string     `json:"key"`
-	Line       int        `json:"line"`
-	Annotation Annotation `json:"annotation"`
+	Key    string            `json:"key"`
+	Line   int               `json:"line"`
+	Values annotation.Values `json:"values"`
 }
 
 // Report diz o que NÃO deu certo na transformação. Nada aqui é fatal: o
@@ -67,10 +45,17 @@ type RowError struct {
 
 const maxErrors = 100
 
-// Transform aplica o perfil em todas as linhas.
-func Transform(p *Profile, t *Table) ([]Record, Report) {
+// Transform aplica o perfil em todas as linhas. ap é o perfil de anotação
+// do pacote: diz o tipo de cada campo (lista, número, data...) e os valores
+// aceitos. Um campo que ap não tem vai como texto, e o Fit do perfil avisa.
+func Transform(p *Profile, ap *annotation.Profile, t *Table) ([]Record, Report) {
+	if p.Vehicles != nil { // formato antigo, ainda não normalizado
+		cp := *p
+		cp.Normalize()
+		p = &cp
+	}
 	rep := Report{Rows: len(t.Rows), Unmapped: map[string]map[string]int{}, Errors: []RowError{}}
-	tr := &transformer{p: p, rep: &rep}
+	tr := &transformer{p: p, ap: ap, rep: &rep}
 
 	byKey := map[string]*Record{}
 	var order []string
@@ -87,13 +72,13 @@ func Transform(p *Profile, t *Table) ([]Record, Report) {
 
 		rec, seen := byKey[key]
 		if !seen {
-			rec = &Record{Key: key, Line: row.Line}
+			rec = &Record{Key: key, Line: row.Line, Values: annotation.Values{Fields: map[string]any{}, Objects: []annotation.Object{}}}
 			byKey[key] = rec
 			order = append(order, key)
 			// Campos da imagem vêm da PRIMEIRA linha da imagem.
-			tr.imageFields(row, &rec.Annotation)
+			rec.Values.Fields = tr.imageFields(row)
 		}
-		rec.Annotation.Vehicles = append(rec.Annotation.Vehicles, tr.vehicles(row)...)
+		rec.Values.Objects = append(rec.Values.Objects, tr.objects(row)...)
 	}
 
 	records := make([]Record, 0, len(order))
@@ -106,6 +91,7 @@ func Transform(p *Profile, t *Table) ([]Record, Report) {
 
 type transformer struct {
 	p   *Profile
+	ap  *annotation.Profile
 	rep *Report
 }
 
@@ -145,42 +131,26 @@ func fillTemplate(tpl string, values map[string]string) string {
 	return strings.TrimSpace(out)
 }
 
-// codeLookup: para cada tabela do padrão, o que o CSV pode trazer sem um
-// "map" (o valor, "car", ou a letra do nome do arquivo, "C"), em minúsculas,
-// apontando para o valor certo. Montado uma vez só.
-var codeLookup = func() map[string]map[string]string {
-	out := map[string]map[string]string{}
-	for table, codes := range filename.Codes() {
-		m := map[string]string{}
-		for code, value := range codes {
-			m[strings.ToLower(code)] = value
-			m[strings.ToLower(value)] = value
-		}
-		out[table] = m
-	}
-	return out
-}()
-
 // translate passa o valor pelo Map. Valor sem tradução: devolve "" e anota
 // no relatório (o ensaio mostra em "valores sem tradução").
 //
 // Sem Map, um campo de texto livre (placa, equipamento) vai como está. Um
-// campo CODIFICADO (tipo, cor, período...) só aceita o próprio valor ("car")
-// ou a letra do padrão ("C"), sem diferenciar maiúscula. Antes, sem Map,
-// qualquer texto passava ("AUTOMOVEL") e quebrava a verificação depois.
-func (tr *transformer) translate(field, value string, rule FieldRule) string {
+// campo de LISTA (choice/multi: tipo, cor, período...) só aceita, sem
+// diferenciar maiúscula, o próprio valor ("car"), o código do nome do
+// arquivo ("C") ou o nome da tela ("Carro"). Antes, sem Map, qualquer texto
+// passava ("AUTOMOVEL") e quebrava a verificação depois.
+func (tr *transformer) translate(where string, f *annotation.Field, value string, rule FieldRule) string {
 	if value == "" {
 		return value
 	}
 	if rule.Map == nil {
-		table, coded := codeTable[strings.TrimPrefix(field, "vehicles.")]
-		if !coded {
+		if f == nil || (f.Type != annotation.TypeChoice && f.Type != annotation.TypeMulti) {
 			return value
 		}
-		if v, ok := codeLookup[table][strings.ToLower(value)]; ok {
+		if v, ok := optionOf(f, value); ok {
 			return v
 		}
-		tr.unmapped(field, value)
+		tr.unmapped(where, value)
 		return ""
 	}
 	for from, to := range rule.Map {
@@ -188,8 +158,126 @@ func (tr *transformer) translate(field, value string, rule FieldRule) string {
 			return to
 		}
 	}
-	tr.unmapped(field, value)
+	tr.unmapped(where, value)
 	return ""
+}
+
+// optionOf acha a opção do campo pelo valor, pelo código ou pelo nome da
+// tela, sem diferenciar maiúscula.
+func optionOf(f *annotation.Field, s string) (string, bool) {
+	for _, o := range f.Options {
+		if strings.EqualFold(o.Value, s) || (o.Code != "" && strings.EqualFold(o.Code, s)) {
+			return o.Value, true
+		}
+	}
+	for _, o := range f.Options {
+		if o.Label != "" && strings.EqualFold(o.Label, s) {
+			return o.Value, true
+		}
+	}
+	return "", false
+}
+
+// typed converte um texto já traduzido no tipo do campo (número, sim/não).
+// Os outros tipos ficam texto: o Clean do perfil confere.
+func typed(f *annotation.Field, s string) (any, error) {
+	switch f.Type {
+	case annotation.TypeNumber:
+		n, err := strconv.ParseFloat(strings.Replace(s, ",", ".", 1), 64)
+		if err != nil {
+			return nil, fmt.Errorf("%q não é um número", s)
+		}
+		return n, nil
+	case annotation.TypeBool:
+		switch strings.ToLower(s) {
+		case "true", "1", "s", "sim", "y", "yes", "verdadeiro":
+			return true, nil
+		case "false", "0", "n", "nao", "não", "no", "falso":
+			return false, nil
+		}
+		return nil, fmt.Errorf("%q não é sim/não (use true ou false)", s)
+	}
+	return s, nil
+}
+
+// patternSeparators: o que sai de um texto com formato (ex.: a placa
+// "ABC-1234") quando ele só passa no formato sem os separadores.
+var patternSeparators = strings.NewReplacer("-", "", " ", "", ".", "")
+
+// fitPattern: um texto com formato que só não passa por causa de
+// separadores ("ABC-1234" numa placa [A-Z0-9]{7}) vai sem eles.
+func fitPattern(f *annotation.Field, s string) string {
+	if f.Type != annotation.TypeText || f.Pattern == "" {
+		return s
+	}
+	re, err := regexp.Compile(`^(?:` + f.Pattern + `)$`)
+	if err != nil {
+		return s
+	}
+	check := s
+	if f.Upper {
+		check = strings.ToUpper(s)
+	}
+	if re.MatchString(check) {
+		return s
+	}
+	if bare := patternSeparators.Replace(check); re.MatchString(bare) {
+		return bare
+	}
+	return s
+}
+
+// value lê e converte UM campo: o valor bruto da regra, traduzido e no tipo
+// do campo. nil = vazio (ou sem tradução, ou inválido: já anotado no
+// relatório). f nil: o perfil de anotação não tem o campo, e o texto vai
+// como veio (o Fit avisa).
+func (tr *transformer) value(row Row, where string, f *annotation.Field, rule FieldRule, n int) any {
+	raw := tr.raw(row, rule, n)
+	if raw == "" {
+		return nil
+	}
+	if f == nil {
+		return raw
+	}
+	switch f.Type {
+	case annotation.TypeDateTime:
+		t, err := parseDate(raw, rule)
+		if err != nil {
+			tr.addError(row.Line, where, err.Error())
+			return nil
+		}
+		return t
+
+	case annotation.TypeMulti:
+		parts := []string{raw}
+		if rule.Split != "" {
+			parts = strings.Split(raw, rule.Split)
+		}
+		var out []string
+		for _, part := range parts {
+			if v := tr.translate(where, f, strings.TrimSpace(part), rule); v != "" && !contains(out, v) {
+				out = append(out, v)
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+
+	s := tr.translate(where, f, raw, rule)
+	if s == "" {
+		return nil
+	}
+	v, err := typed(f, s)
+	if err != nil {
+		tr.addError(row.Line, where, err.Error())
+		return nil
+	}
+	if str, ok := v.(string); ok {
+		return fitPattern(f, str)
+	}
+	return v
 }
 
 func (tr *transformer) unmapped(field, value string) {
@@ -206,97 +294,91 @@ func (tr *transformer) addError(line int, field, msg string) {
 	}
 }
 
-func (tr *transformer) imageFields(row Row, a *Annotation) {
-	targets := map[string]*string{
-		"equipment": &a.Equipment, "camera": &a.Camera, "direction": &a.Direction,
-		"resolution": &a.Resolution, "capture_angle": &a.CaptureAngle, "day_time": &a.DayTime,
-		"image_range": &a.ImageRange, "weather": &a.Weather,
-	}
-
-	// Ordem fixa: o relatório sai igual em toda execução.
-	names := make([]string, 0, len(tr.p.Fields))
-	for name := range tr.p.Fields {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-
-	for _, name := range names {
-		rule := tr.p.Fields[name]
-		value := tr.raw(row, rule, 0)
-		if value == "" {
-			continue
+func (tr *transformer) imageFields(row Row) map[string]any {
+	out := map[string]any{}
+	for _, name := range sortedRules(tr.p.Fields) { // ordem fixa: o relatório sai igual em toda execução
+		var f *annotation.Field
+		if tr.ap != nil {
+			f, _ = tr.ap.Field(name)
 		}
-
-		switch name {
-		case "captured_at":
-			t, err := parseDate(value, rule)
-			if err != nil {
-				tr.addError(row.Line, name, err.Error())
-				continue
-			}
-			a.CapturedAt = &t
-
-		case "conditions":
-			parts := []string{value}
-			if rule.Split != "" {
-				parts = strings.Split(value, rule.Split)
-			}
-			for _, part := range parts {
-				if v := tr.translate(name, strings.TrimSpace(part), rule); v != "" && !contains(a.Conditions, v) {
-					a.Conditions = append(a.Conditions, v)
-				}
-			}
-
-		default:
-			*targets[name] = tr.translate(name, value, rule)
-		}
-	}
-}
-
-func (tr *transformer) vehicles(row Row) []Vehicle {
-	v := tr.p.Vehicles
-	if v == nil {
-		return nil
-	}
-	if v.Mode == VehiclesPerRow || v.Mode == VehiclesSingle {
-		if veh, ok := tr.vehicle(row, 0); ok {
-			return []Vehicle{veh}
-		}
-		return nil
-	}
-
-	var out []Vehicle
-	for n := 1; n <= v.Max; n++ {
-		if veh, ok := tr.vehicle(row, n); ok {
-			out = append(out, veh)
+		if v := tr.value(row, name, f, tr.p.Fields[name], 0); v != nil {
+			out[name] = v
 		}
 	}
 	return out
 }
 
-// vehicle monta o veículo n da linha (n=0 no modo "row").
-// Sem placa = não há veículo ali (ex: Placa2 vazia).
-func (tr *transformer) vehicle(row Row, n int) (Vehicle, bool) {
-	rules := tr.p.Vehicles.Fields
-	plate := strings.ToUpper(strings.ReplaceAll(tr.raw(row, rules["plate"], n), "-", ""))
-	if plate == "" {
-		return Vehicle{}, false
+// objects monta os objetos da linha, tipo por tipo (em ordem de nome).
+func (tr *transformer) objects(row Row) []annotation.Object {
+	types := make([]string, 0, len(tr.p.Objects))
+	for t := range tr.p.Objects {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+
+	var out []annotation.Object
+	for _, t := range types {
+		rules := tr.p.Objects[t]
+		if rules.Mode != ObjectsPerColumns {
+			if o, ok := tr.object(row, t, rules, 0); ok {
+				out = append(out, o)
+			}
+			continue
+		}
+		for n := 1; n <= rules.Max; n++ {
+			if o, ok := tr.object(row, t, rules, n); ok {
+				out = append(out, o)
+			}
+		}
+	}
+	return out
+}
+
+// object monta o objeto n da linha (n=0 fora do modo "columns"). Sem valor
+// no campo Key (ex: Placa2 vazia), ou, sem Key, em nenhum campo que vem de
+// coluna, não há objeto ali.
+func (tr *transformer) object(row Row, typ string, rules *ObjectRules, n int) (annotation.Object, bool) {
+	var def *annotation.ObjectType
+	if tr.ap != nil {
+		def, _ = tr.ap.Object(typ)
+	}
+	if rules.Key != "" {
+		if tr.raw(row, rules.Fields[rules.Key], n) == "" {
+			return annotation.Object{}, false
+		}
+	} else {
+		present := false
+		for _, rule := range rules.Fields {
+			if rule.Value == "" && tr.raw(row, rule, n) != "" {
+				present = true
+				break
+			}
+		}
+		if !present {
+			return annotation.Object{}, false
+		}
 	}
 
-	get := func(field string) string {
-		rule, ok := rules[field]
-		if !ok {
-			return ""
+	fields := map[string]any{}
+	for _, name := range sortedRules(rules.Fields) {
+		var f *annotation.Field
+		if def != nil {
+			f, _ = def.Field(name)
 		}
-		return tr.translate("vehicles."+field, tr.raw(row, rule, n), rule)
+		if v := tr.value(row, typ+"."+name, f, rules.Fields[name], n); v != nil {
+			fields[name] = v
+		}
 	}
-	return Vehicle{
-		Plate:         plate,
-		PlateType:     get("plate_type"),
-		PlateCategory: get("plate_category"),
-		Type:          get("type"),
-		Color:         get("color"),
-	}, true
+	return annotation.Object{Type: typ, Fields: fields}, true
+}
+
+func sortedRules(m map[string]FieldRule) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // parseDate lê a data no formato do perfil, no fuso do perfil, e devolve em UTC.

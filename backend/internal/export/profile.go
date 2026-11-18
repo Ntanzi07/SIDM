@@ -10,10 +10,11 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"SIDM/internal/filename"
+	"SIDM/internal/annotation"
 )
 
 // Formatos de saída.
@@ -46,6 +47,11 @@ type Profile struct {
 	// Task: a tarefa de anotação cujas caixas entram. Vazio = escolher na
 	// hora de exportar (os perfis padrão servem para qualquer tarefa).
 	Task string `json:"task,omitempty" bson:"task,omitempty"`
+	// AnnotationProfile: o perfil de anotação cujos campos os filtros, as
+	// pastas e o modelo de nome usam (vazio = o padrão, "veiculos"). Não
+	// limita os pacotes: imagem de pacote de outro perfil só não tem os
+	// campos (não passa nos filtros; vai para a pasta "Desconhecido").
+	AnnotationProfile string `json:"annotation_profile,omitempty" bson:"annotation_profile,omitempty"`
 
 	// Packages: quais pacotes entram (vazio = todos).
 	Packages []string `json:"packages,omitempty" bson:"packages,omitempty"`
@@ -57,6 +63,10 @@ type Profile struct {
 	Builtin   bool      `json:"builtin,omitempty" bson:"-"` // perfil padrão do sistema (não dá para editar)
 	CreatedBy string    `json:"created_by,omitempty" bson:"created_by,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitzero" bson:"updated_at,omitempty"`
+
+	// specs: os metadados do perfil de anotação (o Bind preenche).
+	specs map[string]MetaField
+	ap    *annotation.Profile
 }
 
 // Split em porcentagens (somam 100). A divisão é FIXA por imagem: cada
@@ -68,8 +78,18 @@ type Split struct {
 	Test  int `json:"test" bson:"test"`
 }
 
-// Filters usam os mesmos valores da anotação ("night", "rain"...).
+// Filters: só entram as imagens com estes valores, nos campos do perfil de
+// anotação (os mesmos valores da anotação: "night", "rain"...).
 type Filters struct {
+	// Fields: campo da imagem -> valor (numa lista, basta conter o valor).
+	Fields map[string]string `json:"fields,omitempty" bson:"fields,omitempty"`
+	// Objects: tipo de objeto -> campo -> valor. Todos os campos de um tipo
+	// valem para o MESMO objeto (um caminhão branco, não um caminhão e algo
+	// branco).
+	Objects map[string]map[string]string `json:"objects,omitempty" bson:"objects,omitempty"`
+
+	// Os filtros de antes dos perfis de anotação (perfil veiculos). Ainda
+	// são aceitos; o Normalize passa para Fields e Objects["vehicle"].
 	Equipment    string `json:"equipment,omitempty" bson:"equipment,omitempty"`
 	Camera       string `json:"camera,omitempty" bson:"camera,omitempty"`
 	Direction    string `json:"direction,omitempty" bson:"direction,omitempty"`
@@ -77,6 +97,180 @@ type Filters struct {
 	Weather      string `json:"weather,omitempty" bson:"weather,omitempty"`
 	VehicleType  string `json:"vehicle_type,omitempty" bson:"vehicle_type,omitempty"`
 	VehicleColor string `json:"vehicle_color,omitempty" bson:"vehicle_color,omitempty"`
+}
+
+// normalize passa os filtros antigos para Fields/Objects e tira os vazios.
+func (f *Filters) normalize() {
+	set := func(m map[string]string, k, v string) map[string]string {
+		if v = strings.TrimSpace(v); v == "" {
+			return m
+		}
+		if m == nil {
+			m = map[string]string{}
+		}
+		if _, ok := m[k]; !ok {
+			m[k] = v
+		}
+		return m
+	}
+	f.Fields = set(f.Fields, "equipment", f.Equipment)
+	f.Fields = set(f.Fields, "camera", f.Camera)
+	f.Fields = set(f.Fields, "direction", f.Direction)
+	f.Fields = set(f.Fields, "day_time", f.DayTime)
+	f.Fields = set(f.Fields, "weather", f.Weather)
+	if f.VehicleType != "" || f.VehicleColor != "" {
+		if f.Objects == nil {
+			f.Objects = map[string]map[string]string{}
+		}
+		v := set(f.Objects["vehicle"], "type", f.VehicleType)
+		f.Objects["vehicle"] = set(v, "color", f.VehicleColor)
+	}
+	f.Equipment, f.Camera, f.Direction, f.DayTime, f.Weather, f.VehicleType, f.VehicleColor = "", "", "", "", "", "", ""
+
+	clean := func(m map[string]string) map[string]string {
+		out := map[string]string{}
+		for k, v := range m {
+			if k, v = strings.TrimSpace(k), strings.TrimSpace(v); k != "" && v != "" {
+				out[k] = v
+			}
+		}
+		if len(out) == 0 {
+			return nil
+		}
+		return out
+	}
+	f.Fields = clean(f.Fields)
+	objs := map[string]map[string]string{}
+	for t, m := range f.Objects {
+		if m = clean(m); m != nil && strings.TrimSpace(t) != "" {
+			objs[strings.TrimSpace(t)] = m
+		}
+	}
+	f.Objects = objs
+	if len(objs) == 0 {
+		f.Objects = nil
+	}
+}
+
+// Bind liga o perfil ao perfil de anotação dele (o de AnnotationProfile):
+// os campos das pastas, do nome e dos filtros são os desse perfil. Precisa
+// vir antes do Validate, do Dir e do FileNameOf.
+func (p *Profile) Bind(ap *annotation.Profile) {
+	p.ap = ap
+	p.specs = fieldSpecs(ap)
+}
+
+func (p *Profile) annotationName() string {
+	if p.ap != nil {
+		return p.ap.Name
+	}
+	return p.AnnotationProfile
+}
+
+// FilterValues são os filtros no tipo de cada campo (número como float64,
+// sim/não como bool), prontos para a busca de imagens. Depois do Bind e do
+// Validate.
+func (p *Profile) FilterValues() (fields map[string]any, objects map[string]map[string]any) {
+	fields = map[string]any{}
+	for k, v := range p.Filters.Fields {
+		var def *annotation.Field
+		if p.ap != nil {
+			def, _ = p.ap.Field(k)
+		}
+		fields[k] = filterValue(def, v)
+	}
+	objects = map[string]map[string]any{}
+	for t, m := range p.Filters.Objects {
+		var ot *annotation.ObjectType
+		if p.ap != nil {
+			ot, _ = p.ap.Object(t)
+		}
+		objects[t] = map[string]any{}
+		for k, v := range m {
+			var def *annotation.Field
+			if ot != nil {
+				def, _ = ot.Field(k)
+			}
+			objects[t][k] = filterValue(def, v)
+		}
+	}
+	return fields, objects
+}
+
+// filterValue converte o texto do filtro no tipo do campo. Um campo de texto
+// com maiúsculas (a placa) é buscado em maiúsculas.
+func filterValue(f *annotation.Field, s string) any {
+	if f == nil {
+		return s
+	}
+	switch f.Type {
+	case annotation.TypeNumber:
+		if n, err := strconv.ParseFloat(s, 64); err == nil {
+			return n
+		}
+	case annotation.TypeBool:
+		if b, err := strconv.ParseBool(s); err == nil {
+			return b
+		}
+	case annotation.TypeText:
+		if f.Upper {
+			return strings.ToUpper(s)
+		}
+	}
+	return s
+}
+
+// validateFilters confere os filtros contra o perfil de anotação.
+func (p *Profile) validateFilters(add func(string, ...any)) {
+	check := func(path string, f *annotation.Field, v string) {
+		if f.Type == annotation.TypeDateTime {
+			add("%s: não dá para filtrar por data e hora", path)
+			return
+		}
+		val := filterValue(f, v)
+		if s, ok := val.(string); ok && (f.Type == annotation.TypeNumber || f.Type == annotation.TypeBool) {
+			add("%s: %q não é um valor de %s", path, s, map[string]string{annotation.TypeNumber: "número", annotation.TypeBool: "sim/não (true ou false)"}[f.Type])
+			return
+		}
+		if f.Type == annotation.TypeMulti {
+			val = []string{v}
+		}
+		if _, err := f.Clean(val); err != nil {
+			add("%s: %v", path, err)
+		}
+	}
+	for _, k := range sortedKeys(p.Filters.Fields) {
+		f, ok := p.ap.Field(k)
+		if !ok {
+			add("filters.fields.%s: o perfil de anotação %s não tem este campo", k, p.ap.Name)
+			continue
+		}
+		check("filters.fields."+k, f, p.Filters.Fields[k])
+	}
+	for _, t := range sortedKeys(p.Filters.Objects) {
+		ot, ok := p.ap.Object(t)
+		if !ok || ot.Box {
+			add("filters.objects.%s: o perfil de anotação %s não tem este tipo de objeto (sem caixa)", t, p.ap.Name)
+			continue
+		}
+		for _, k := range sortedKeys(p.Filters.Objects[t]) {
+			f, ok := ot.Field(k)
+			if !ok {
+				add("filters.objects.%s.%s: %q não tem este campo", t, k, t)
+				continue
+			}
+			check("filters.objects."+t+"."+k, f, p.Filters.Objects[t][k])
+		}
+	}
+}
+
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // LabelRules: primeiro renomeia (Rename: label do CVAT -> nome final; dois
@@ -143,6 +337,8 @@ func (p *Profile) Normalize() {
 	p.Description = strings.TrimSpace(p.Description)
 	p.Format = strings.ToLower(strings.TrimSpace(p.Format))
 	p.Task = strings.TrimSpace(p.Task)
+	p.AnnotationProfile = strings.TrimSpace(p.AnnotationProfile)
+	p.Filters.normalize()
 	p.normalizeFolders()
 	p.normalizeFileName()
 	pkgs := p.Packages[:0:0]
@@ -173,10 +369,15 @@ func (p *Profile) Normalize() {
 	p.Labels.Include = include
 }
 
-// Validate confere o perfil (depois do Normalize).
-func (p *Profile) Validate() error {
+// Validate confere o perfil (depois do Normalize) contra ap, o perfil de
+// anotação dele (o de AnnotationProfile, ou o padrão).
+func (p *Profile) Validate(ap *annotation.Profile) error {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
+	p.Bind(ap)
+	if p.AnnotationProfile != "" && p.AnnotationProfile != ap.Name {
+		add("annotation_profile: %q, mas os campos foram conferidos contra %q", p.AnnotationProfile, ap.Name)
+	}
 
 	if !profileNameRe.MatchString(p.Name) {
 		add(`name: use só letras, números e "-" (ex: yolo-noturnas)`)
@@ -200,24 +401,7 @@ func (p *Profile) Validate() error {
 		add("split: no YOLO, valid não pode ser 0 (o Ultralytics exige a validação)")
 	}
 
-	codes := filename.Codes()
-	check := func(field, table, value string) {
-		if value == "" {
-			return
-		}
-		for _, v := range codes[table] {
-			if v == value {
-				return
-			}
-		}
-		add("filters.%s: valor desconhecido %q", field, value)
-	}
-	f := p.Filters
-	check("direction", "direction", f.Direction)
-	check("day_time", "day_time", f.DayTime)
-	check("weather", "weather", f.Weather)
-	check("vehicle_type", "vehicle_type", f.VehicleType)
-	check("vehicle_color", "vehicle_color", f.VehicleColor)
+	p.validateFilters(add)
 
 	for _, label := range append(append([]string{}, p.Labels.Include...), mapValues(p.Labels.Rename)...) {
 		if strings.ContainsAny(label, "\r\n\t") {

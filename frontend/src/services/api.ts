@@ -36,11 +36,16 @@ export type FieldRule = {
   timezone?: string
 }
 
-export type VehicleRules = {
+// Como achar os objetos de um tipo no arquivo (espelha importer.ObjectRules).
+export type ObjectRules = {
   mode: 'single' | 'row' | 'columns'
   max?: number
+  key?: string // o campo que diz que o objeto existe (ex.: a placa)
   fields: Record<string, FieldRule>
 }
+
+// O nome antigo.
+export type VehicleRules = ObjectRules
 
 export type ImportProfile = {
   name: string
@@ -54,8 +59,11 @@ export type ImportProfile = {
     column: string
     by: 'original_name' | 'sha1'
   }
+  // O perfil de anotação que este perfil preenche (vazio = veiculos): as
+  // chaves de fields e objects são as dele.
+  annotation_profile?: string
   fields?: Record<string, FieldRule>
-  vehicles?: VehicleRules
+  objects?: Record<string, ObjectRules> // tipo de objeto -> regras
   created_by?: string
   updated_at?: string
 }
@@ -84,8 +92,9 @@ export type CreateImportProfileInput = {
     column: string
     by: 'original_name' | 'sha1'
   }
+  annotation_profile?: string
   fields: Record<string, FieldRule>
-  vehicles?: VehicleRules
+  objects?: Record<string, ObjectRules>
 }
 
 export type ImportReport = {
@@ -683,14 +692,11 @@ export async function importTaskBoxes(task: string, file: File, dryRun: boolean,
 
 export type ExportSplit = { train: number; valid: number; test: number }
 
+// Filtros nos campos do perfil de anotação do perfil de export (os valores
+// como texto: número "2", sim/não "true").
 export type ExportFilters = {
-  equipment?: string
-  camera?: string
-  direction?: string
-  day_time?: string
-  weather?: string
-  vehicle_type?: string
-  vehicle_color?: string
+  fields?: Record<string, string> // campo da imagem -> valor
+  objects?: Record<string, Record<string, string>> // tipo de objeto -> campo -> valor (o MESMO objeto)
 }
 
 // Um nível da árvore de pastas (layout "folders", só VOC).
@@ -708,6 +714,8 @@ export type ExportProfile = {
   folders?: FolderLevel[]
   file_name?: string // modelo do nome dos arquivos; vazio = o nome do SIDM (v2)
   task?: string // tarefa de anotação (os padrões não têm: escolhe na hora)
+  // perfil de anotação dos campos dos filtros, das pastas e do nome (vazio = veiculos)
+  annotation_profile?: string
   split: ExportSplit
   packages?: string[]
   filters: ExportFilters
@@ -734,19 +742,31 @@ export type ExportPreview = {
   packages: string[]
 }
 
-// Metadados que podem virar pasta, com o nome padrão da pasta de cada valor
-// (values null: campo aberto, a pasta é o próprio valor).
-export type FolderField = { field: string; values: Record<string, string> | null }
-
-export type ExportFieldsInfo = {
-  items: FolderField[]
-  unknown: string
-  name_fields: string[] // campos do modelo de nome dos arquivos
-  legacy_template: string // o padrão antigo: hash + características + placa
+// Um metadado da imagem (de um perfil de anotação) que pode virar pasta ou
+// parte do nome, com o nome padrão da pasta de cada valor (values null:
+// campo aberto, a pasta é o próprio valor).
+export type FolderField = {
+  field: string
+  label: string
+  group: string // file, image ou o tipo do objeto
+  values: Record<string, string> | null
+  labels?: Record<string, string> // valor -> nome na tela
+  folder: boolean
+  name: boolean
+  alias?: boolean // nome antigo/atalho: aceito, mas não oferecido
 }
 
-export async function getExportFolderFields(): Promise<ExportFieldsInfo> {
-  return request('/export-folder-fields')
+export type ExportFieldsInfo = {
+  annotation_profile: string
+  fields: FolderField[]
+  unknown: string
+  name_fields: string[] // campos do modelo de nome dos arquivos
+  legacy_template: string // o padrão antigo (só no perfil veiculos)
+}
+
+export async function getExportFolderFields(annotationProfile?: string): Promise<ExportFieldsInfo> {
+  const query = annotationProfile ? `?annotation_profile=${encodeURIComponent(annotationProfile)}` : ''
+  return request(`/export-folder-fields${query}`)
 }
 
 export async function listExportProfiles(): Promise<ExportProfile[]> {
@@ -811,6 +831,12 @@ export function downloadExport(profile: ExportProfile): void {
   document.body.appendChild(form)
   form.submit()
   form.remove()
+}
+
+// O perfil de anotação de cada pacote (nome -> perfil), sem buscar capa.
+export async function listPackageProfiles(): Promise<Record<string, string>> {
+  const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
+  return Object.fromEntries(response.items.map((item) => [item.name, item.profile]))
 }
 
 // Só os nomes dos pacotes (sem buscar capa).

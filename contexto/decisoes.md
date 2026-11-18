@@ -25,3 +25,7 @@ apagada: marque "**substituída por** <data>".
 | 2026-11 | Perfil em uso por um pacote não pode ser apagado | a anotação do pacote ficaria sem perfil |
 | 2026-11 | **No disco toda imagem é `<sha1>.ext`**; o nome v2 é só um dado no banco; o export escolhe o nome | nenhum perfil precisa saber montar nome de arquivo; o caminho nunca muda |
 | 2026-11 | Contexto para IAs em `contexto/`, com ponteiros por ferramenta na raiz | a equipe usa várias IAs e elas precisam seguir as mesmas regras |
+| 2026-11 | O perfil de import diz qual perfil de anotação preenche (`annotation_profile`) e é validado contra ele; `vehicles` vira `objects.vehicle` (com `key: plate`) | os destinos de um CSV dependem do que o pacote anota |
+| 2026-11 | Perfil de import num pacote de outro perfil de anotação **não é recusado**: o `Transform` usa o perfil do pacote e o resto vai para `outside_profile` | segue a regra do `Fit` (um valor de fora não derruba o import) |
+| 2026-11 | O perfil de export tem `annotation_profile` só para os campos de filtros, pastas e nome; **não limita os pacotes** | os padrões (`rf-detr`, `yolo`) servem para qualquer tarefa; imagem de outro perfil só não tem os campos |
+| 2026-11 | Campo de objeto no export/pasta/nome é `<tipo>_<campo>` (do primeiro objeto do tipo); o nome sem o tipo (`plate`) fica como atalho | no `veiculos` os nomes de sempre (`vehicle_type`, `plate_type`) continuam valendo |

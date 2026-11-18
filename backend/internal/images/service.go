@@ -160,7 +160,7 @@ func (s *Service) RenameRegistry(ctx context.Context, reg catalog.Registry, oldN
 	const pageSize = 200
 	skip := int64(0)
 	for {
-		filter := ImageFilter{Status: StatusVerified, Fields: map[string]string{reg.ImageField(): oldName}, Limit: pageSize, Skip: skip}
+		filter := ImageFilter{Status: StatusVerified, Fields: map[string]any{reg.ImageField(): oldName}, Limit: pageSize, Skip: skip}
 		page, _, err := s.repo.ListImages(ctx, filter)
 		if err != nil {
 			return res, err

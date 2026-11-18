@@ -20,14 +20,31 @@ import (
 const MaxListedKeys = 100
 
 type Service struct {
-	repo    Repo
-	images  Images
-	catalog Catalog
-	now     func() time.Time
+	repo       Repo
+	images     Images
+	catalog    Catalog
+	annotation Annotation
+	now        func() time.Time
 }
 
-func New(repo Repo, img Images, cat Catalog) *Service {
-	return &Service{repo: repo, images: img, catalog: cat, now: func() time.Time { return time.Now().UTC() }}
+func New(repo Repo, img Images, cat Catalog, ann Annotation) *Service {
+	return &Service{repo: repo, images: img, catalog: cat, annotation: ann, now: func() time.Time { return time.Now().UTC() }}
+}
+
+// Validate normaliza (o formato antigo, vehicles, vira objects.vehicle) e
+// confere o perfil contra o perfil de anotação que ele preenche.
+func (s *Service) Validate(ctx context.Context, p *importer.Profile) error {
+	p.Normalize()
+	ap, err := s.annotation.FindProfile(ctx, p.AnnotationProfile)
+	if errors.Is(err, platform.ErrNotFound) {
+		ap = nil // o Validate diz que não existe, junto com os outros erros
+	} else if err != nil {
+		return err
+	}
+	if err := p.Validate(ap); err != nil {
+		return &InvalidError{err.Error()}
+	}
+	return nil
 }
 
 // ---------- perfis ----------
@@ -101,13 +118,16 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 	if err != nil {
 		return nil, err
 	}
+	// O Transform usa os campos do perfil do PACOTE (normalmente o mesmo do
+	// perfil de import): o que ele não tem fica de fora e é listado.
+	p.Normalize()
 
 	var records []importer.Record
 	var byKey map[string][]images.Image
 	if p.Reader.Type == importer.ReaderJPEGINI {
-		records, byKey, err = s.iniRecords(ctx, run.Package, p, rep)
+		records, byKey, err = s.iniRecords(ctx, run.Package, p, annot, rep)
 	} else {
-		records, byKey, err = s.csvRecords(ctx, run.Package, p, table, rep)
+		records, byKey, err = s.csvRecords(ctx, run.Package, p, annot, table, rep)
 	}
 	if err != nil {
 		return nil, err
@@ -146,12 +166,24 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 			continue
 		}
 
-		ann := rec.Annotation
-		ann.Equipment = rep.sanitizeName(rec.Line, "equipment", ann.Equipment, filename.SanitizeEquipment)
-		ann.Camera = rep.sanitizeName(rec.Line, "camera", ann.Camera, filename.SanitizeCamera)
+		vals := rec.Values
+		refs := refFields(annot)
+		for key, ref := range refs {
+			if v, _ := vals.Fields[key].(string); v != "" {
+				sanitize := filename.SanitizeEquipment
+				if ref == annotation.RefCamera {
+					sanitize = filename.SanitizeCamera
+				}
+				if name := rep.sanitizeName(rec.Line, key, v, sanitize); name != "" {
+					vals.Fields[key] = name
+				} else {
+					delete(vals.Fields, key)
+				}
+			}
+		}
 
 		// Encaixa no perfil do pacote: o que ele não tem fica de fora.
-		fit, outside := annot.Fit(images.ValuesFromAnnotation(ann))
+		fit, outside := annot.Fit(vals)
 		for _, o := range outside {
 			rep.OutsideProfileCount++
 			if len(rep.OutsideProfile) < MaxListedKeys {
@@ -168,11 +200,14 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 			rep.Unchanged++
 			continue
 		}
-		if v, _ := img.Fields[annotation.RefEquipment].(string); v != "" {
-			equipments[v] = true
-		}
-		if v, _ := img.Fields[annotation.RefCamera].(string); v != "" {
-			cameras[v] = true
+		for key, ref := range refs {
+			if v, _ := img.Fields[key].(string); v != "" && fit.Fields[key] == v {
+				if ref == annotation.RefCamera {
+					cameras[v] = true
+				} else {
+					equipments[v] = true
+				}
+			}
 		}
 		writes = append(writes, write{before: before, after: img})
 	}
@@ -216,7 +251,7 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 
 // csvRecords traduz as linhas do CSV e busca as imagens de uma vez (em
 // lotes), não uma consulta por linha.
-func (s *Service) csvRecords(ctx context.Context, pkg string, p *importer.Profile, table *importer.Table, rep *Report) ([]importer.Record, map[string][]images.Image, error) {
+func (s *Service) csvRecords(ctx context.Context, pkg string, p *importer.Profile, annot *annotation.Profile, table *importer.Table, rep *Report) ([]importer.Record, map[string][]images.Image, error) {
 	if len(table.Rows) > 0 && !hasColumn(table, p.Match.Column) {
 		return nil, nil, &InvalidError{fmt.Sprintf(
 			"o CSV não tem a coluna %q que o perfil usa para achar a imagem (colunas: %s)",
@@ -224,7 +259,7 @@ func (s *Service) csvRecords(ctx context.Context, pkg string, p *importer.Profil
 	}
 
 	var records []importer.Record
-	records, rep.Report = importer.Transform(p, table)
+	records, rep.Report = importer.Transform(p, annot, table)
 
 	keys := make([]string, len(records))
 	for i, rec := range records {
@@ -247,7 +282,7 @@ func (s *Service) csvRecords(ctx context.Context, pkg string, p *importer.Profil
 
 // iniRecords monta os registros a partir do INI JÁ GUARDADO no banco de cada
 // imagem pendente do pacote. Não precisa de arquivo.
-func (s *Service) iniRecords(ctx context.Context, pkg string, p *importer.Profile, rep *Report) ([]importer.Record, map[string][]images.Image, error) {
+func (s *Service) iniRecords(ctx context.Context, pkg string, p *importer.Profile, annot *annotation.Profile, rep *Report) ([]importer.Record, map[string][]images.Image, error) {
 	records := []importer.Record{}
 	byKey := map[string][]images.Image{}
 
@@ -266,9 +301,9 @@ func (s *Service) iniRecords(ctx context.Context, pkg string, p *importer.Profil
 				rep.WithoutINI++
 				continue
 			}
-			ann, one := images.AnnotationFromINI(p, img.SHA1, img.INI)
+			vals, one := images.AnnotationFromINI(p, annot, img.SHA1, img.INI)
 			mergeTransformReport(&rep.Report, one, img.SHA1)
-			records = append(records, importer.Record{Key: img.SHA1, Annotation: ann})
+			records = append(records, importer.Record{Key: img.SHA1, Values: vals})
 			byKey[img.SHA1] = []images.Image{img}
 		}
 		if len(page) < pageSize {
@@ -341,6 +376,17 @@ func (s *Service) registerMissing(
 		}
 	}
 	return missing, nil
+}
+
+// refFields: os campos de cadastro da imagem (chave -> equipment/camera).
+func refFields(p *annotation.Profile) map[string]string {
+	out := map[string]string{}
+	for _, f := range p.Fields {
+		if f.Type == annotation.TypeRef {
+			out[f.Key] = f.Ref
+		}
+	}
+	return out
 }
 
 func hasColumn(t *importer.Table, col string) bool {

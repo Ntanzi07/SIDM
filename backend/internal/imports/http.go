@@ -35,7 +35,7 @@ func (s *Service) Routes() []platform.Route {
 
 // POST /import-profiles  (corpo: o perfil em JSON)
 func (s *Service) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
-	p, ok := decodeProfile(w, r)
+	p, ok := s.decodeProfile(w, r)
 	if !ok {
 		return
 	}
@@ -55,7 +55,7 @@ func (s *Service) handleCreateProfile(w http.ResponseWriter, r *http.Request) {
 // map e manda o perfil de novo.
 func (s *Service) handleReplaceProfile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	p, ok := decodeProfile(w, r)
+	p, ok := s.decodeProfile(w, r)
 	if !ok {
 		return
 	}
@@ -121,9 +121,10 @@ func (s *Service) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusOK, map[string]any{"name": name, "deleted": true})
 }
 
-// decodeProfile lê e VALIDA o perfil. Os erros de validação vão todos juntos,
-// para a pessoa corrigir o JSON de uma vez.
-func decodeProfile(w http.ResponseWriter, r *http.Request) (*importer.Profile, bool) {
+// decodeProfile lê e VALIDA o perfil (contra o perfil de anotação dele). Os
+// erros de validação vão todos juntos, para a pessoa corrigir o JSON de uma
+// vez.
+func (s *Service) decodeProfile(w http.ResponseWriter, r *http.Request) (*importer.Profile, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxProfileBytes)
 	var p importer.Profile
 	dec := json.NewDecoder(r.Body)
@@ -132,8 +133,12 @@ func decodeProfile(w http.ResponseWriter, r *http.Request) (*importer.Profile, b
 		platform.WriteError(w, http.StatusBadRequest, "JSON inválido: "+err.Error())
 		return nil, false
 	}
-	if err := p.Validate(); err != nil {
-		platform.WriteError(w, http.StatusBadRequest, err.Error())
+	var invalid *InvalidError
+	if err := s.Validate(r.Context(), &p); errors.As(err, &invalid) {
+		platform.WriteError(w, http.StatusBadRequest, invalid.Msg)
+		return nil, false
+	} else if err != nil {
+		platform.ServerError(w, err)
 		return nil, false
 	}
 	return &p, true

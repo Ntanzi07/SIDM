@@ -6,6 +6,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { UploadStatus } from './UploadStatus'
 import { BoxesSection } from './BoxesSection'
 import { ImportWarnings } from './ImportWarnings'
+import { forPackage, optionLabel } from '../../utils/importProfiles'
 import './Packages.css'
 
 const PAGE_SIZE = 100
@@ -306,7 +307,9 @@ export function PackageDetailPage() {
               value={importProfile}
             >
               <option value="">{importSource === 'csv' ? 'Selecione um perfil CSV' : 'Selecione um perfil de INI'}</option>
-              {(importSource === 'csv' ? profiles : iniProfiles).map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+              {forPackage(importSource === 'csv' ? profiles : iniProfiles, selectedPackage?.profile).map((profile) => (
+                <option key={profile.name} value={profile.name}>{optionLabel(profile, selectedPackage?.profile)}</option>
+              ))}
             </select>
             {importSource === 'csv' && <label className="existing-import__file">
               <span>{importFile?.name ?? 'Selecionar CSV'}</span>
@@ -358,7 +361,9 @@ export function PackageDetailPage() {
               value={uploadIniProfile}
             >
               <option value="">Sem perfil de INI</option>
-              {iniProfiles.map((profile) => <option key={profile.name} value={profile.name}>INI: {profile.name}</option>)}
+              {forPackage(iniProfiles, selectedPackage?.profile).map((profile) => (
+                <option key={profile.name} value={profile.name}>{optionLabel(profile, selectedPackage?.profile, 'INI: ')}</option>
+              ))}
             </select>
           )}
           <label className="button button--secondary upload-images-button">

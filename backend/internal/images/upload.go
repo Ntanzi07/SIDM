@@ -173,10 +173,10 @@ func (s *Service) ingestOne(ctx context.Context, pkg string, annot *annotation.P
 		img.INI = entries
 		res.INI = true
 		if profile != nil {
-			ann, rep := AnnotationFromINI(profile, sum, entries)
-			ann.Equipment, ann.Camera, res.Warnings = s.SanitizeAndRegister(ctx, ann.Equipment, ann.Camera)
+			vals, rep := AnnotationFromINI(profile, annot, sum, entries)
+			res.Warnings = s.SanitizeAndRegister(ctx, annot, &vals)
 			res.Warnings = append(res.Warnings, ReportWarnings(rep)...)
-			fit, dropped := annot.Fit(ValuesFromAnnotation(ann))
+			fit, dropped := annot.Fit(vals)
 			res.Warnings = append(res.Warnings, dropped...)
 			if MergeAnnotation(img, fit, false) {
 				res.Prefilled = true
@@ -293,46 +293,50 @@ func ReadEmbeddedINI(path string, size int64) []importer.INIEntry {
 
 // AnnotationFromINI aplica um perfil jpeg-ini nas entradas de UMA imagem,
 // passando pelo mesmo Transform do CSV (mesmas regras de map, data, template).
-func AnnotationFromINI(p *importer.Profile, sha string, entries []importer.INIEntry) (importer.Annotation, importer.Report) {
+// ap é o perfil de anotação do pacote.
+func AnnotationFromINI(p *importer.Profile, ap *annotation.Profile, sha string, entries []importer.INIEntry) (annotation.Values, importer.Report) {
 	run := *p
 	run.Match = importer.MatchConfig{Column: INIKeyColumn, By: importer.MatchBySHA1}
-	records, rep := importer.Transform(&run, importer.INITable(INIKeyColumn, sha, entries))
+	records, rep := importer.Transform(&run, ap, importer.INITable(INIKeyColumn, sha, entries))
 	if len(records) == 0 {
-		return importer.Annotation{}, rep
+		return annotation.Values{Fields: map[string]any{}, Objects: []annotation.Object{}}, rep
 	}
-	return records[0].Annotation, rep
+	return records[0].Values, rep
 }
 
-// SanitizeAndRegister: equipamento e câmera vindos do INI passam pela mesma
-// sanitização do cadastro e são cadastrados se ainda não existirem (igual ao
-// import de CSV). Nome impossível de sanitizar vira aviso e fica vazio.
-func (s *Service) SanitizeAndRegister(ctx context.Context, equipment, camera string) (string, string, []string) {
+// SanitizeAndRegister: os campos de cadastro (equipamento, câmera) vindos do
+// INI passam pela mesma sanitização do cadastro e são cadastrados se ainda
+// não existirem (igual ao import de CSV). Nome impossível de sanitizar vira
+// aviso e sai dos valores.
+func (s *Service) SanitizeAndRegister(ctx context.Context, ap *annotation.Profile, v *annotation.Values) []string {
 	var warnings []string
-	clean := func(value, what string,
-		sanitize func(string) (string, error),
-		exists func(context.Context, string) (bool, error),
-		create func(context.Context, string) error,
-	) string {
+	for _, f := range ap.Fields {
+		if f.Type != annotation.TypeRef {
+			continue
+		}
+		value, _ := v.Fields[f.Key].(string)
 		if value == "" {
-			return ""
+			continue
+		}
+		what, sanitize, exists, create := "equipamento", filename.SanitizeEquipment, s.catalog.EquipmentExists, s.catalog.CreateEquipment
+		if f.Ref == annotation.RefCamera {
+			what, sanitize, exists, create = "câmera", filename.SanitizeCamera, s.catalog.CameraExists, s.catalog.CreateCamera
 		}
 		name, err := sanitize(value)
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("%s %q ignorado: %v", what, value, err))
-			return ""
+			delete(v.Fields, f.Key)
+			continue
 		}
+		v.Fields[f.Key] = name
 		if ok, err := exists(ctx, name); err == nil && !ok {
 			if err := create(ctx, name); err != nil && !errors.Is(err, platform.ErrDuplicate) {
 				warnings = append(warnings, fmt.Sprintf("não foi possível cadastrar %s %q", what, name))
 				platform.LogError(err)
 			}
 		}
-		return name
 	}
-
-	equipment = clean(equipment, "equipamento", filename.SanitizeEquipment, s.catalog.EquipmentExists, s.catalog.CreateEquipment)
-	camera = clean(camera, "câmera", filename.SanitizeCamera, s.catalog.CameraExists, s.catalog.CreateCamera)
-	return equipment, camera, warnings
+	return warnings
 }
 
 // ReportWarnings resume o relatório de uma imagem em avisos legíveis.

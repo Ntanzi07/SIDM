@@ -10,18 +10,18 @@ Atualizado em 2026-11-18. Branch de trabalho: `feat/moduloConfigs`.
 - Imagens sempre como `<sha1>.ext` no disco; nome v2 só no banco e no export.
 - Tarefas e caixas do CVAT; export COCO (RF-DETR), YOLO e Pascal VOC; layout por pastas;
   modelo de nome de saída.
+- Import e export pelos campos do perfil de anotação: o perfil de import tem
+  `annotation_profile` e preenche `fields`/`objects.<tipo>` dele (o formato antigo
+  `vehicles` ainda é aceito); o perfil de export tem `annotation_profile`, filtros
+  genéricos (`filters.fields`/`filters.objects`) e pastas/nome calculados do perfil
+  (`export.MetaFields`, `GET /export-folder-fields?annotation_profile=`). As telas de
+  Configurar e Exportar montam os campos a partir do perfil.
 
 ## Próximos passos (em ordem)
 
-1. **Import e export pelos campos do perfil.** Hoje só o `veiculos` funciona de ponta a ponta:
-   - os perfis de import (CSV/INI) escrevem nos campos fixos de veículo (`importer.Annotation`);
-   - os filtros do export (`export.Filters`) são fixos;
-   - as pastas por nível e os campos do modelo de nome no frontend são uma lista fixa
-     (`data/annotationOptions.ts`, `FolderLevels.tsx`, `FileNameTemplate.tsx`). O backend
-     do export já monta `meta` com os campos de qualquer perfil (`exports.imageMeta`).
-2. **Atributos nas caixas:** os tipos de objeto com caixa do perfil ganham campos de
+1. **Atributos nas caixas:** os tipos de objeto com caixa do perfil ganham campos de
    verdade (importar os atributos do COCO do CVAT, validar pelo perfil, editar na tela).
-3. **Export de várias tarefas** (ex.: para-brisa + placa num dataset), com a opção "só
+2. **Export de várias tarefas** (ex.: para-brisa + placa num dataset), com a opção "só
    imagens anotadas em todas as tarefas" para não ensinar que a placa não marcada é fundo.
 
 ## Pendências menores
@@ -35,8 +35,8 @@ Atualizado em 2026-11-18. Branch de trabalho: `feat/moduloConfigs`.
 
 - `frontend/STRUCTURE.md`: esboço antigo de pastas (`features/`, `AuthProvider`...) que
   **não existe**. A estrutura real está em `arquitetura.md`.
-- `frontend/PLAN.md`: a parte dos rótulos (`data/annotationOptions.ts`) e "equipamento não
-  é cadastrado na anotação" mudaram: a anotação usa os rótulos do perfil e pede confirmação
+- `frontend/PLAN.md`: a parte dos rótulos (`data/annotationOptions.ts`, que não existe
+  mais) e "equipamento não é cadastrado na anotação" mudaram: a anotação usa os rótulos do perfil e pede confirmação
   para cadastrar um equipamento novo.
 - `README.md` → "Decisões de projeto" → "A API depende de uma interface": hoje cada módulo
   tem o seu `Repo` e o `Memory` para os testes.

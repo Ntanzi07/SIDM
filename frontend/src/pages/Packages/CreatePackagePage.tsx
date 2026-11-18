@@ -5,6 +5,7 @@ import { createPackage, imageFiles, importPackageCsv, listAnnotationProfiles, li
 import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
 import { UploadStatus } from './UploadStatus'
+import { forPackage, optionLabel } from '../../utils/importProfiles'
 import './Packages.css'
 
 export function CreatePackagePage() {
@@ -176,8 +177,8 @@ export function CreatePackagePage() {
               value={iniProfile}
             >
               <option value="">Não preencher pelo INI</option>
-              {iniProfiles.map((profile) => (
-                <option key={profile.name} value={profile.name}>{profile.name}</option>
+              {forPackage(iniProfiles, annotationProfile).map((profile) => (
+                <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
               ))}
             </select>
             <small className="form-hint">
@@ -199,8 +200,8 @@ export function CreatePackagePage() {
             value={profileName}
           >
             <option value="">Não importar CSV</option>
-            {profiles.map((profile) => (
-              <option key={profile.name} value={profile.name}>{profile.name}</option>
+            {forPackage(profiles, annotationProfile).map((profile) => (
+              <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
             ))}
           </select>
           {profileError && <small className="form-hint form-hint--error">{profileError}</small>}

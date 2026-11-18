@@ -15,6 +15,7 @@ package exports
 import (
 	"context"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/export"
@@ -41,6 +42,12 @@ type Images interface {
 type Boxes interface {
 	FindTask(ctx context.Context, name string) (*boxes.Task, error)
 	FindSets(ctx context.Context, task string, shas []string) (map[string]boxes.Set, error)
+}
+
+// Annotation: os perfis de anotação (os campos dos filtros, das pastas e do
+// nome de um perfil de export são os do perfil de anotação dele).
+type Annotation interface {
+	FindProfile(ctx context.Context, name string) (*annotation.Profile, error)
 }
 
 // Catalog: os pacotes do perfil têm que existir.

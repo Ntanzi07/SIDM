@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
-import { annotationOptions } from '../../data/annotationOptions'
 import {
   createExportProfile,
   deleteExportProfile,
   downloadExport,
   getExportFolderFields,
+  listAnnotationProfiles,
   listExportProfiles,
-  listPackageNames,
+  listPackageProfiles,
   listTasks,
   previewExport,
   updateExportProfile,
@@ -16,6 +16,7 @@ import {
   type ExportProfile,
   type ExportFieldsInfo,
 } from '../../services/api'
+import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { FileNameTemplate } from './FileNameTemplate'
 import { FolderLevels } from './FolderLevels'
 import { Link } from 'react-router-dom'
@@ -35,6 +36,37 @@ function usesSplit(profile: ExportProfile): boolean {
 }
 
 const SPLIT_LABELS = { train: 'Treino', valid: 'Validação', test: 'Teste' } as const
+
+const DEFAULT_ANNOTATION_PROFILE = 'veiculos'
+const label = (item: { key: string; label?: string }) => item.label || item.key
+
+// Um filtro: lista vira <select>, sim/não também; o resto é texto livre.
+// Data e hora não filtra.
+function FilterField({ field, value, onChange }: { field: ProfileField; value: string; onChange: (value: string) => void }) {
+  if (field.type === 'datetime') return null
+  const options: Array<[string, string]> | null = field.type === 'choice' || field.type === 'multi'
+    ? (field.options ?? []).map((o) => [o.value, o.label || o.value])
+    : field.type === 'bool' ? [['true', 'Sim'], ['false', 'Não']] : null
+  return (
+    <label className="form-field">
+      <span>{label(field)}</span>
+      {options ? (
+        <select onChange={(event) => onChange(event.target.value)} value={value}>
+          <option value="">Qualquer</option>
+          {options.map(([v, name]) => <option key={v} value={v}>{name}</option>)}
+          {value && !options.some(([v]) => v === value) && <option value={value}>{value} (não existe no perfil)</option>}
+        </select>
+      ) : (
+        <input
+          inputMode={field.type === 'number' ? 'decimal' : undefined}
+          onChange={(event) => onChange(event.target.value.trim())}
+          placeholder="Qualquer"
+          value={value}
+        />
+      )}
+    </label>
+  )
+}
 
 type LabelRow = { label: string; count: number; checked: boolean; rename: string }
 
@@ -97,9 +129,10 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
 
 export function ExportPage() {
   const [profiles, setProfiles] = useState<ExportProfile[]>([])
-  const [packages, setPackages] = useState<string[]>([])
+  const [packageProfiles, setPackageProfiles] = useState<Record<string, string>>({}) // pacote -> perfil de anotação
   const [tasks, setTasks] = useState<AnnotationTask[]>([])
-  const [folderFields, setFolderFields] = useState<ExportFieldsInfo>({ items: [], unknown: 'Desconhecido', name_fields: [], legacy_template: '' })
+  const [annotationProfiles, setAnnotationProfiles] = useState<AnnotationProfile[]>([])
+  const [folderFields, setFolderFields] = useState<ExportFieldsInfo>({ annotation_profile: '', fields: [], unknown: 'Desconhecido', name_fields: [], legacy_template: '' })
   const [selected, setSelected] = useState<string | null>(null) // nome do perfil salvo/padrão aberto
   const [draft, setDraft] = useState<ExportProfile>(newProfile())
   const [rows, setRows] = useState<LabelRow[]>([])
@@ -110,13 +143,13 @@ export function ExportPage() {
 
   useEffect(() => {
     let active = true
-    Promise.all([listExportProfiles(), listPackageNames(), listTasks(), getExportFolderFields()])
-      .then(([profileList, packageNames, taskList, fields]) => {
+    Promise.all([listExportProfiles(), listPackageProfiles(), listTasks(), listAnnotationProfiles()])
+      .then(([profileList, pkgProfiles, taskList, annProfiles]) => {
         if (!active) return
         setProfiles(profileList)
-        setPackages(packageNames)
+        setPackageProfiles(pkgProfiles)
         setTasks(taskList)
-        setFolderFields(fields)
+        setAnnotationProfiles(annProfiles)
         const first = profileList[0]
         if (first) {
           const next = withDefaultTask(structuredClone(first), taskList)
@@ -128,6 +161,18 @@ export function ExportPage() {
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o export.') })
     return () => { active = false }
   }, [])
+
+  // Os campos de pasta e de nome do perfil de anotação escolhido.
+  const annotationName = draft.annotation_profile || DEFAULT_ANNOTATION_PROFILE
+  useEffect(() => {
+    let active = true
+    getExportFolderFields(annotationName)
+      .then((fields) => { if (active) setFolderFields(fields) })
+      .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os campos do perfil de anotação.') })
+    return () => { active = false }
+  }, [annotationName])
+  const annotationProfile = annotationProfiles.find((profile) => profile.name === annotationName)
+  const packages = Object.keys(packageProfiles).sort((a, b) => a.localeCompare(b))
 
   const original = profiles.find((profile) => profile.name === selected)
   const isBuiltin = Boolean(original?.builtin)
@@ -170,14 +215,37 @@ export function ExportPage() {
     setPreview(null)
   }
 
-  function changeFilter(key: keyof ExportFilters, value: string) {
+  // objectType vazio: campo da imagem; senão, campo do objeto desse tipo.
+  function changeFilter(objectType: string, key: string, value: string) {
     setDraft((currentDraft) => {
-      const filters = { ...currentDraft.filters }
-      if (value) filters[key] = value
-      else delete filters[key]
+      const filters: ExportFilters = { ...currentDraft.filters }
+      if (!objectType) {
+        const fields = { ...(filters.fields ?? {}) }
+        if (value) fields[key] = value
+        else delete fields[key]
+        filters.fields = Object.keys(fields).length > 0 ? fields : undefined
+      } else {
+        const objects = { ...(filters.objects ?? {}) }
+        const fields = { ...(objects[objectType] ?? {}) }
+        if (value) fields[key] = value
+        else delete fields[key]
+        if (Object.keys(fields).length > 0) objects[objectType] = fields
+        else delete objects[objectType]
+        filters.objects = Object.keys(objects).length > 0 ? objects : undefined
+      }
       return { ...currentDraft, filters }
     })
     setPreview(null)
+  }
+
+  // Trocar o perfil de anotação troca os campos: os filtros e as pastas
+  // começam de novo (o modelo de nome fica, e avisa do que o perfil não tem).
+  function changeAnnotationProfile(name: string) {
+    change({
+      annotation_profile: name === DEFAULT_ANNOTATION_PROFILE ? undefined : name,
+      filters: {},
+      ...(draft.layout === 'folders' ? { folders: [] } : {}),
+    })
   }
 
   function changeRow(index: number, patch: Partial<LabelRow>) {
@@ -244,15 +312,10 @@ export function ExportPage() {
 
   const sameNameAsBuiltin = profiles.some((profile) => profile.builtin && profile.name === draft.name.trim())
   const canSave = draft.name.trim() !== '' && splitSum === 100 && foldersOk && !sameNameAsBuiltin && (dirty || !selected)
-  const filterSelect = (key: keyof ExportFilters, label: string, options: readonly (readonly [string, string])[]) => (
-    <label className="form-field">
-      <span>{label}</span>
-      <select onChange={(event) => changeFilter(key, event.target.value)} value={draft.filters[key] ?? ''}>
-        <option value="">Qualquer</option>
-        {options.map(([value, name]) => <option key={value} value={value}>{name}</option>)}
-      </select>
-    </label>
-  )
+  const firstFolderField = folderFields.fields.find((field) => field.folder && !field.alias && field.group !== 'file')?.field ?? 'package'
+  // Pacotes de outro perfil de anotação entram, mas sem os campos (não
+  // passam nos filtros; vão para "Desconhecido").
+  const otherProfile = (name: string) => Boolean(packageProfiles[name]) && packageProfiles[name] !== annotationName
 
   return (
     <section className="export-page">
@@ -328,6 +391,21 @@ export function ExportPage() {
             )}
             {isBuiltin && <p className="profile-name-hint">Os perfis padrão servem para qualquer tarefa: escolha na hora.</p>}
 
+            <h3>Perfil de anotação</h3>
+            <div className="profile-form-grid">
+              <label className="form-field">
+                <span>Os campos dos filtros, das pastas e do nome</span>
+                <select onChange={(event) => changeAnnotationProfile(event.target.value)} value={annotationName}>
+                  {annotationProfiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
+                  {!annotationProfile && annotationProfiles.length > 0 && <option value={annotationName}>{annotationName} (não existe mais)</option>}
+                </select>
+              </label>
+            </div>
+            <p className="profile-name-hint">
+              Use o perfil dos pacotes que vão no dataset. Imagens de pacotes de outro perfil entram, mas sem esses campos
+              (não passam nos filtros e vão para "Desconhecido" nas pastas).
+            </p>
+
             <h3>Formato</h3>
             <div className="export-formats">
               {FORMATS.map(([value, label, hint]) => (
@@ -357,7 +435,7 @@ export function ExportPage() {
                     <input
                       checked={isFolders}
                       name="layout"
-                      onChange={() => change({ layout: 'folders', folders: draft.folders?.length ? draft.folders : [{ field: 'vehicle_type' }], split: { train: 100, valid: 0, test: 0 } })}
+                      onChange={() => change({ layout: 'folders', folders: draft.folders?.length ? draft.folders : [{ field: firstFolderField }], split: { train: 100, valid: 0, test: 0 } })}
                       type="radio"
                     />
                     <strong>Por pastas (metadados)</strong>
@@ -366,7 +444,7 @@ export function ExportPage() {
                 </div>
                 {isFolders && (
                   <FolderLevels
-                    fields={folderFields.items}
+                    fields={folderFields.fields}
                     levels={draft.folders ?? []}
                     onChange={(folders) => {
                       // Pôs o nível "Divisão" com tudo em treino: começa em 70/15/15.
@@ -408,7 +486,7 @@ export function ExportPage() {
             <h3>Nome dos arquivos</h3>
             <FileNameTemplate
               key={selected ?? 'novo'}
-              fields={folderFields.name_fields}
+              fields={folderFields.fields}
               legacy={folderFields.legacy_template}
               onChange={(fileName) => change({ file_name: fileName || undefined })}
               value={draft.file_name ?? ''}
@@ -421,29 +499,46 @@ export function ExportPage() {
                 Todos
               </label>
               {packages.map((name) => (
-                <label className="export-check" key={name}>
+                <label className="export-check" key={name} title={otherProfile(name) ? `perfil de anotação ${packageProfiles[name]}` : undefined}>
                   <input checked={draft.packages?.includes(name) ?? false} onChange={() => togglePackage(name)} type="checkbox" />
                   {name}
+                  {otherProfile(name) && <small className="export-check__profile">({packageProfiles[name]})</small>}
                 </label>
               ))}
             </div>
 
             <h3>Filtros</h3>
-            <div className="profile-form-grid export-filters">
-              {filterSelect('day_time', 'Período', annotationOptions.day_time)}
-              {filterSelect('weather', 'Clima', annotationOptions.weather)}
-              {filterSelect('direction', 'Direção', annotationOptions.direction)}
-              {filterSelect('vehicle_type', 'Tipo de veículo', annotationOptions.type)}
-              {filterSelect('vehicle_color', 'Cor do veículo', annotationOptions.color)}
-              <label className="form-field">
-                <span>Equipamento</span>
-                <input onChange={(event) => changeFilter('equipment', event.target.value.trim())} placeholder="Qualquer" value={draft.filters.equipment ?? ''} />
-              </label>
-              <label className="form-field">
-                <span>Câmera</span>
-                <input onChange={(event) => changeFilter('camera', event.target.value.trim())} placeholder="Qualquer" value={draft.filters.camera ?? ''} />
-              </label>
-            </div>
+            {!annotationProfile ? (
+              <p className="profile-name-hint">Carregando os campos do perfil de anotação…</p>
+            ) : (
+              <>
+                <div className="profile-form-grid export-filters">
+                  {annotationProfile.fields.map((field) => (
+                    <FilterField
+                      field={field}
+                      key={field.key}
+                      onChange={(value) => changeFilter('', field.key, value)}
+                      value={draft.filters.fields?.[field.key] ?? ''}
+                    />
+                  ))}
+                </div>
+                {annotationProfile.objects.filter((object) => !object.box).map((object) => (
+                  <div key={object.key}>
+                    <h4 className="export-filters__object">{label(object)} <small>(todos no mesmo objeto)</small></h4>
+                    <div className="profile-form-grid export-filters">
+                      {object.fields.map((field) => (
+                        <FilterField
+                          field={field}
+                          key={field.key}
+                          onChange={(value) => changeFilter(object.key, field.key, value)}
+                          value={draft.filters.objects?.[object.key]?.[field.key] ?? ''}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
 
             <h3>Labels</h3>
             {!draft.task ? (

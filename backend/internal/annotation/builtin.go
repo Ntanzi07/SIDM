@@ -84,7 +84,7 @@ func Vehicles() Profile {
 		Objects: []ObjectType{{
 			Key: "vehicle", Label: "Veículo",
 			Fields: []Field{
-				{Key: "plate", Label: "Placa", Type: TypeText, Pattern: "[A-Z0-9]{7}", Upper: true,
+				{Key: "plate", Label: "Placa", Type: TypeText, Pattern: "[A-Z0-9]{7}", MaxLen: 7, Upper: true,
 					Help: "ABC1234 (BR) ou ABC1D23 (Mercosul); vazio se ilegível"},
 				choice("plate_type", "Tipo de placa", "plate_type", "mercosul"),
 				choice("plate_category", "Categoria da placa", "plate_category", "private"),

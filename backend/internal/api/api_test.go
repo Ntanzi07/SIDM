@@ -65,9 +65,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	bx := boxes.New(box, imgSvc, fs, svc)
 	svc.Listen(bx)
 	imgSvc.Listen(bx)
-	impSvc := imports.New(imp, imgSvc, svc)
+	impSvc := imports.New(imp, imgSvc, svc, annSvc)
 	exp := exports.NewMemory()
-	expSvc := exports.New(exp, imgSvc, bx, svc, fs)
+	expSvc := exports.New(exp, imgSvc, bx, svc, fs, annSvc)
 	bx.Listen(expSvc)
 	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, files: fs, root: root}
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,

@@ -192,7 +192,7 @@ func (m *Memory) ListImages(ctx context.Context, f ImageFilter) ([]Image, int64,
 	out := []Image{}
 	for _, img := range m.Images {
 		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
-			matchFields(img.Fields, f.Fields) && matchObject(img.Objects, f.Object) {
+			matchFields(img.Fields, f.Fields) && matchObject(img.Objects, "", f.Object) && matchObjects(img.Objects, f.Objects) {
 			img.ensureValues()
 			out = append(out, img)
 		}
@@ -245,35 +245,45 @@ func (m *Memory) FindImagesByKeys(ctx context.Context, pkg, by string, keys []st
 }
 
 // matchFields: igual ao Mongo, numa lista basta conter o valor.
-func matchFields(have map[string]any, want map[string]string) bool {
+func matchFields(have map[string]any, want map[string]any) bool {
 	for k, v := range want {
 		switch x := have[k].(type) {
-		case string:
+		case []string:
+			if s, ok := v.(string); !ok || !slices.Contains(x, s) {
+				return false
+			}
+		case nil:
+			return false
+		default:
 			if x != v {
 				return false
 			}
-		case []string:
-			if !slices.Contains(x, v) {
-				return false
-			}
-		default:
-			return false
 		}
 	}
 	return true
 }
 
-// matchObject: algum objeto tem TODOS os valores ($elemMatch).
-func matchObject(objs []annotation.Object, want map[string]string) bool {
-	if len(want) == 0 {
+// matchObject: algum objeto (do tipo, se typ não é vazio) tem TODOS os
+// valores ($elemMatch).
+func matchObject(objs []annotation.Object, typ string, want map[string]any) bool {
+	if len(want) == 0 && typ == "" {
 		return true
 	}
 	for _, o := range objs {
-		if matchFields(o.Fields, want) {
+		if (typ == "" || o.Type == typ) && matchFields(o.Fields, want) {
 			return true
 		}
 	}
 	return false
+}
+
+func matchObjects(objs []annotation.Object, want []ObjectFilter) bool {
+	for _, w := range want {
+		if !matchObject(objs, w.Type, w.Fields) {
+			return false
+		}
+	}
+	return true
 }
 
 func (m *Memory) CountUsing(ctx context.Context, reg catalog.Registry, name string) (int64, error) {

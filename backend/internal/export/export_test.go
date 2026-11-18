@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"strings"
 	"testing"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/boxes"
 )
 
@@ -73,35 +75,58 @@ func TestLabels(t *testing.T) {
 	}
 }
 
+// vehicles é o perfil de anotação padrão, o dos perfis daqui.
+var vehicles = annotation.Vehicles()
+
+// motos: um perfil de anotação diferente (número, sim/não, objeto sem caixa
+// "rider" e um com caixa).
+var motos = annotation.Profile{
+	Name: "motos",
+	Fields: []annotation.Field{
+		{Key: "day_time", Type: annotation.TypeChoice, Options: []annotation.Option{{Value: "day", Code: "D"}, {Value: "night", Code: "N"}}},
+		{Key: "riders", Type: annotation.TypeNumber, Integer: true},
+		{Key: "rain", Label: "Chuva", Type: annotation.TypeBool},
+	},
+	Objects: []annotation.ObjectType{
+		{Key: "rider", Label: "Pessoa", Fields: []annotation.Field{
+			{Key: "helmet", Label: "Capacete", Type: annotation.TypeChoice, Options: []annotation.Option{{Value: "yes", Label: "Com"}, {Value: "no", Label: "Sem"}}},
+		}},
+		{Key: "helmet_box", Box: true, Fields: []annotation.Field{{Key: "color", Type: annotation.TypeText}}},
+	},
+}
+
 func TestValidate(t *testing.T) {
 	ok := Profile{Name: "yolo-noite", Format: FormatYOLO, Split: Split{80, 20, 0}, Filters: Filters{DayTime: "night"}}
 	ok.Normalize()
-	if err := ok.Validate(); err != nil {
+	if err := ok.Validate(&vehicles); err != nil {
 		t.Fatalf("válido deu erro: %v", err)
 	}
 	cases := map[string]Profile{
-		"nome com espaço":     {Name: "meu perfil", Format: FormatCOCO, Split: Split{70, 15, 15}},
-		"nome de padrão":      {Name: "rf-detr", Format: FormatCOCO, Split: Split{70, 15, 15}},
-		"formato":             {Name: "x", Format: "pascal", Split: Split{70, 15, 15}},
-		"pastas fora do voc":  {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}}},
-		"pastas sem nível":    {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders},
-		"layout desconhecido": {Name: "x", Format: FormatVOC, Split: Split{70, 15, 15}, Layout: "arvore"},
-		"campo desconhecido":  {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "cor"}}},
-		"campo repetido":      {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}, {Field: "day_time"}}},
-		"nome de pasta ruim":  {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time", Names: map[string]string{"day": "a/b"}}}},
-		"valor desconhecido":  {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time", Names: map[string]string{"D": "Dia"}}}},
-		"split com pasta":     {Name: "x", Format: FormatVOC, Split: Split{0, 50, 50}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "split"}}},
-		"não soma 100":        {Name: "x", Format: FormatCOCO, Split: Split{70, 20, 15}},
-		"train zero":          {Name: "x", Format: FormatCOCO, Split: Split{0, 50, 50}},
-		"negativo":            {Name: "x", Format: FormatCOCO, Split: Split{110, -10, 0}},
-		"yolo sem valid":      {Name: "x", Format: FormatYOLO, Split: Split{90, 0, 10}},
-		"filtro desconhecido": {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Filters: Filters{DayTime: "N"}},
+		"nome com espaço":                       {Name: "meu perfil", Format: FormatCOCO, Split: Split{70, 15, 15}},
+		"nome de padrão":                        {Name: "rf-detr", Format: FormatCOCO, Split: Split{70, 15, 15}},
+		"formato":                               {Name: "x", Format: "pascal", Split: Split{70, 15, 15}},
+		"pastas fora do voc":                    {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}}},
+		"pastas sem nível":                      {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders},
+		"layout desconhecido":                   {Name: "x", Format: FormatVOC, Split: Split{70, 15, 15}, Layout: "arvore"},
+		"campo desconhecido":                    {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "cor"}}},
+		"campo repetido":                        {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}, {Field: "day_time"}}},
+		"nome de pasta ruim":                    {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time", Names: map[string]string{"day": "a/b"}}}},
+		"valor desconhecido":                    {Name: "x", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time", Names: map[string]string{"D": "Dia"}}}},
+		"split com pasta":                       {Name: "x", Format: FormatVOC, Split: Split{0, 50, 50}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "split"}}},
+		"não soma 100":                          {Name: "x", Format: FormatCOCO, Split: Split{70, 20, 15}},
+		"train zero":                            {Name: "x", Format: FormatCOCO, Split: Split{0, 50, 50}},
+		"negativo":                              {Name: "x", Format: FormatCOCO, Split: Split{110, -10, 0}},
+		"yolo sem valid":                        {Name: "x", Format: FormatYOLO, Split: Split{90, 0, 10}},
+		"filtro desconhecido":                   {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Filters: Filters{DayTime: "N"}},
+		"filtro de campo que o perfil não tem":  {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Filters: Filters{Fields: map[string]string{"riders": "2"}}},
+		"filtro de objeto que o perfil não tem": {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Filters: Filters{Objects: map[string]map[string]string{"rider": {"helmet": "yes"}}}},
+		"filtro por data":                       {Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, Filters: Filters{Fields: map[string]string{"captured_at": "2026"}}},
 	}
 	for name, p := range cases {
 		t.Run(name, func(t *testing.T) {
 			p.Normalize()
 			var ve *ValidationError
-			if err := p.Validate(); !errors.As(err, &ve) {
+			if err := p.Validate(&vehicles); !errors.As(err, &ve) {
 				t.Errorf("esperava erro de validação, veio %v", err)
 			}
 		})
@@ -109,13 +134,86 @@ func TestValidate(t *testing.T) {
 	// pastas sem nível "split": a divisão não importa (só tem que somar 100)
 	pastas := Profile{Name: "x", Format: FormatVOC, Split: Split{0, 0, 100}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "equipment"}}}
 	pastas.Normalize()
-	if err := pastas.Validate(); err != nil {
+	if err := pastas.Validate(&vehicles); err != nil {
 		t.Errorf("pastas sem split: %v", err)
 	}
 	for _, b := range Builtins() {
-		if err := b.Validate(); err != nil {
+		if err := b.Validate(&vehicles); err != nil {
 			t.Errorf("perfil padrão %s inválido: %v", b.Name, err)
 		}
+	}
+	// os filtros antigos viram fields/objects
+	if f := ok.Filters; f.DayTime != "" || f.Fields["day_time"] != "night" {
+		t.Errorf("filtros = %+v", f)
+	}
+	old := Profile{Filters: Filters{VehicleType: "truck", VehicleColor: "white", Equipment: " "}}
+	old.Normalize()
+	if fmt.Sprint(old.Filters.Objects) != "map[vehicle:map[color:white type:truck]]" || old.Filters.Fields != nil {
+		t.Errorf("filtros antigos = %+v", old.Filters)
+	}
+}
+
+// Num perfil de anotação que não é o de veículos: os filtros, as pastas e o
+// nome usam os campos dele.
+func TestPerfilDeAnotacaoProprio(t *testing.T) {
+	p := Profile{
+		Name: "motos-voc", Format: FormatVOC, Split: Split{100, 0, 0}, Layout: LayoutFolders, AnnotationProfile: "motos",
+		Folders:  []FolderLevel{{Field: "rider_helmet", Names: map[string]string{"yes": "ComCapacete"}}, {Field: "riders"}, {Field: "rain"}},
+		FileName: "{sha1}{day_time}-{riders}",
+		Filters:  Filters{Fields: map[string]string{"riders": "2", "rain": "false"}, Objects: map[string]map[string]string{"rider": {"helmet": "yes"}}},
+	}
+	p.Normalize()
+	if err := p.Validate(&motos); err != nil {
+		t.Fatal(err)
+	}
+	if got := p.Dir(Meta{"rider_helmet": "yes", "riders": "2"}, SplitTrain); got != "ComCapacete/2/Desconhecido" {
+		t.Errorf("Dir = %q", got)
+	}
+	if got := p.FileNameOf(Meta{"sha1": "abc", "day_time": "night", "riders": "2"}, ".jpg"); got != "abcN-2.jpg" {
+		t.Errorf("nome = %q", got)
+	}
+	fields, objects := p.FilterValues()
+	if fields["riders"] != 2.0 || fields["rain"] != false || objects["rider"]["helmet"] != "yes" {
+		t.Errorf("filtros com tipo: %v %v", fields, objects)
+	}
+
+	for name, mod := range map[string]func(p *Profile){
+		"pasta de veículo":    func(p *Profile) { p.Folders = []FolderLevel{{Field: "vehicle_type"}} },
+		"objeto com caixa":    func(p *Profile) { p.Folders = []FolderLevel{{Field: "helmet_box_color"}} },
+		"nome de veículo":     func(p *Profile) { p.FileName = "{sha1}{plate}" },
+		"número inválido":     func(p *Profile) { p.Filters.Fields["riders"] = "dois" },
+		"sim/não inválido":    func(p *Profile) { p.Filters.Fields["rain"] = "talvez" },
+		"opção inexistente":   func(p *Profile) { p.Filters.Objects["rider"]["helmet"] = "talvez" },
+		"perfil trocado":      func(p *Profile) { p.AnnotationProfile = "veiculos" },
+		"valor de pasta ruim": func(p *Profile) { p.Folders[0].Names = map[string]string{"talvez": "X"} },
+	} {
+		t.Run(name, func(t *testing.T) {
+			q := p
+			q.Folders = append([]FolderLevel(nil), p.Folders...)
+			q.Filters = Filters{Fields: maps.Clone(p.Filters.Fields), Objects: map[string]map[string]string{"rider": maps.Clone(p.Filters.Objects["rider"])}}
+			mod(&q)
+			if err := q.Validate(&motos); err == nil {
+				t.Error("deveria ser inválido")
+			}
+		})
+	}
+
+	// os metadados do perfil: sem os de veículo, com os dele
+	byKey := map[string]MetaField{}
+	for _, m := range MetaFields(&motos) {
+		byKey[m.Key] = m
+	}
+	if _, ok := byKey["vehicle_type"]; ok {
+		t.Error("vehicle_type não existe neste perfil")
+	}
+	if m := byKey["rider_helmet"]; !m.Folder || m.Labels["yes"] != "Com" || m.Label != "Pessoa: Capacete" {
+		t.Errorf("rider_helmet = %+v", m)
+	}
+	if m := byKey["helmet"]; !m.Alias {
+		t.Errorf("helmet (sem o tipo) deveria ser atalho: %+v", m)
+	}
+	if _, ok := byKey["helmet_box_color"]; ok {
+		t.Error("objeto com caixa não vira metadado da imagem")
 	}
 }
 
@@ -263,6 +361,7 @@ func keys(m map[string]string) []string {
 
 func TestDir(t *testing.T) {
 	p, _ := Builtin("voc-pastas")
+	p.Bind(&vehicles)
 	m := Meta{"vehicle_type": "motorcycle", "resolution": "752x480", "plate_type": "mercosul", "direction": "rear", "day_time": "night"}
 	if got := p.Dir(m, SplitTrain); got != "motorCycle/02-752x480/Mercosul/Traseiro/Noturno" {
 		t.Errorf("Dir = %q", got)
@@ -273,11 +372,18 @@ func TestDir(t *testing.T) {
 	if got := p.Dir(m, SplitValid); got != "Desconhecido/sem-clima/EQ_1_A/valid/999x1" {
 		t.Errorf("Dir = %q", got)
 	}
-	if v := FolderValues("resolution"); v["640x480"] != "01-640x480" {
-		t.Errorf("FolderValues(resolution) = %v", v)
+	specs := fieldSpecs(&vehicles)
+	if v := specs["resolution"].Values; v["640x480"] != "01-640x480" {
+		t.Errorf("valores da resolução = %v", v)
 	}
-	if FolderValues("equipment") != nil || len(FolderValues("split")) != 3 {
-		t.Error("FolderValues de campo aberto deveria ser nil; split tem 3")
+	if specs["equipment"].Values != nil || len(specs["split"].Values) != 3 {
+		t.Error("campo aberto deveria ter valores nil; split tem 3")
+	}
+	// os nomes de antes dos perfis continuam valendo
+	for _, k := range []string{"vehicle_type", "vehicle_color", "plate_type", "plate_category", "direction", "equipment", "package"} {
+		if !specs[k].Folder {
+			t.Errorf("%s deveria servir de pasta", k)
+		}
 	}
 }
 
@@ -370,6 +476,7 @@ func TestWriteVOC(t *testing.T) {
 
 func TestFileNameOf(t *testing.T) {
 	p := &Profile{FileName: TemplateLegacy}
+	p.Bind(&vehicles)
 	sha := "02d9314a6112e8b95f97415dc96e5bf0682f3a3f"
 	m := NameMeta(sha, sha+"_v2_x.jpg", "IMG_1.JPG", Meta{
 		"direction": "front", "resolution": "640x480", "capture_angle": "lateral", "day_time": "day",
@@ -403,13 +510,13 @@ func TestFileNameOf(t *testing.T) {
 	} {
 		pr := Profile{Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, FileName: tmpl}
 		pr.Normalize()
-		if err := pr.Validate(); err == nil {
+		if err := pr.Validate(&vehicles); err == nil {
 			t.Errorf("%s: deveria ser inválido", name)
 		}
 	}
 	ok := Profile{Name: "x", Format: FormatCOCO, Split: Split{70, 15, 15}, FileName: " {name}-{date} "}
 	ok.Normalize()
-	if err := ok.Validate(); err != nil || ok.FileName != "{name}-{date}" {
+	if err := ok.Validate(&vehicles); err != nil || ok.FileName != "{name}-{date}" {
 		t.Errorf("válido: %v %q", err, ok.FileName)
 	}
 }

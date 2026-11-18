@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"SIDM/internal/images"
+	"SIDM/internal/importer"
 	"SIDM/internal/platform"
 )
 
@@ -161,5 +162,80 @@ func TestImportForaDoPerfil(t *testing.T) {
 	joined := strings.Join(rep.OutsideProfile, " | ")
 	if rep.OutsideProfileCount < 3 || !strings.Contains(joined, "weather") || !strings.Contains(joined, "vehicle") {
 		t.Errorf("fora do perfil (%d) = %s", rep.OutsideProfileCount, joined)
+	}
+}
+
+// Um perfil de import feito para o capacete-moto: os destinos são os campos
+// dele (riders é número; plate é um objeto sem caixa, com o campo text).
+const capaceteImport = `{
+  "name": "csv-motos",
+  "annotation_profile": "capacete-moto",
+  "reader": {"type": "csv", "delimiter": ";"},
+  "match": {"column": "Arquivo", "by": "original_name"},
+  "fields": {
+    "day_time": {"column": "Turno", "map": {"D": "day", "N": "night"}},
+    "riders": {"column": "Pessoas"}
+  },
+  "objects": {"plate": {"mode": "row", "key": "text", "fields": {"text": {"column": "Placa"}}}}
+}`
+
+func TestImportComPerfilProprio(t *testing.T) {
+	env := newTestEnv(t)
+	env.withCapacete(t)
+	assertStatus(t, env.doJSON("POST", "/import-profiles", capaceteImport), http.StatusCreated)
+	sha := env.uploadTo(t, "motos", upFile{"a.jpg", "a"})[0].SHA1
+
+	csv := "Arquivo;Turno;Pessoas;Placa\na.jpg;N;2;abc-1d23\n"
+	rep := decodeImport(t, env.postFile(t, "/packages/motos/import?profile=csv-motos&dry_run=false", "file", csv))
+	img := env.img.Images[sha]
+	if rep.Applied != 1 || rep.OutsideProfileCount != 0 {
+		t.Fatalf("applied=%d fora=%v", rep.Applied, rep.OutsideProfile)
+	}
+	if fv(img.Fields, "day_time") != "night" || img.Fields["riders"] != 2.0 {
+		t.Errorf("fields = %v", img.Fields)
+	}
+	if len(img.Objects) != 1 || img.Objects[0].Type != "plate" || img.Objects[0].Fields["text"] != "ABC1D23" {
+		t.Errorf("objects = %+v", img.Objects)
+	}
+
+	// número inválido: erro no relatório, o resto entra
+	sha2 := env.uploadTo(t, "motos", upFile{"b.jpg", "b"})[0].SHA1
+	rep = decodeImport(t, env.postFile(t, "/packages/motos/import?profile=csv-motos&dry_run=false", "file",
+		"Arquivo;Turno;Pessoas;Placa\nb.jpg;D;duas;\n"))
+	if rep.ErrorCount != 1 || fv(env.img.Images[sha2].Fields, "day_time") != "day" || len(env.img.Images[sha2].Objects) != 0 {
+		t.Errorf("erros=%+v fields=%v objects=%v", rep.Errors, env.img.Images[sha2].Fields, env.img.Images[sha2].Objects)
+	}
+}
+
+func TestPerfilDeImportValidaContraOPerfilDeAnotacao(t *testing.T) {
+	env := newTestEnv(t)
+	env.withCapacete(t)
+	cases := map[string]struct{ from, to, want string }{
+		"campo que o perfil não tem": {`"riders": {"column": "Pessoas"}`, `"weather": {"column": "Clima"}`, "fields.weather"},
+		"valor do map fora da lista": {`{"D": "day", "N": "night"}`, `{"D": "dia"}`, `map["D"]`},
+		"objeto com caixa":           {`"objects": {"plate"`, `"objects": {"helmet"`, "objects.helmet"},
+		"perfil que não existe":      {`"capacete-moto"`, `"nao-existe"`, "annotation_profile"},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := env.doJSON("POST", "/import-profiles", strings.Replace(capaceteImport, tc.from, tc.to, 1))
+			assertStatus(t, rec, http.StatusBadRequest)
+			if !strings.Contains(errorMsg(t, rec), tc.want) {
+				t.Errorf("erro %q não menciona %q", errorMsg(t, rec), tc.want)
+			}
+		})
+	}
+}
+
+// Perfil salvo no formato antigo (vehicles): volta como objects.vehicle.
+func TestPerfilDeImportAntigoViraObjects(t *testing.T) {
+	env := newTestEnv(t)
+	env.withProfile(t)
+	rec := env.do("GET", "/import-profiles/csv-teste", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var p importer.Profile
+	decode(t, rec, &p)
+	if p.Vehicles != nil || p.Objects["vehicle"] == nil || p.Objects["vehicle"].Key != "plate" || p.AnnotationProfile != "veiculos" {
+		t.Errorf("perfil = %+v (objects=%+v)", p, p.Objects)
 	}
 }

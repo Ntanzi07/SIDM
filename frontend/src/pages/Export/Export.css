@@ -326,3 +326,25 @@
   overflow-wrap: anywhere;
   font-size: 12px;
 }
+
+/* filtros de um tipo de objeto do perfil de anotação */
+.export-filters__object {
+  margin: 10px 0 4px;
+  color: #384257;
+  font-size: 13px;
+}
+
+.export-filters__object small,
+.export-check__profile {
+  color: #7a8499;
+  font-weight: normal;
+}
+
+.export-check__profile {
+  margin-left: 4px;
+}
+
+.folder-level__missing {
+  margin: 0 0 0 8px;
+  font-size: 11px;
+}

@@ -521,13 +521,21 @@ paths:
   /export-folder-fields:
     get:
       tags: [export]
-      summary: Metadados que podem virar pasta (layout por pastas, VOC)
+      summary: Metadados que podem virar pasta ou parte do nome (de um perfil de anotação)
       description: |
-        Para montar os níveis de pasta de um perfil `layout: folders`. `values`
-        traz cada valor possível e o nome padrão da pasta (na resolução,
-        `01-640x480`); `null` = campo aberto (equipamento, câmera, pacote): a
-        pasta é o próprio valor. Os campos do veículo vêm do primeiro veículo
-        da imagem; `split` é o grupo da divisão (train/valid/test).
+        Os metadados que um perfil de anotação dá às imagens, para os níveis de
+        pasta (`layout: folders`) e o modelo de nome (`file_name`) de um perfil
+        de export. Além de `sha1`, `name`, `original`, `package` e `split`
+        (o grupo da divisão), cada campo da imagem vale pela chave
+        (`day_time`) e cada campo de objeto sem caixa como `<tipo>_<campo>`
+        (`vehicle_type`, do primeiro objeto do tipo). `values` traz cada valor
+        possível e o nome padrão da pasta (na resolução, `01-640x480`); `null`
+        = campo aberto (equipamento, número, texto): a pasta é o próprio valor.
+      parameters:
+        - name: annotation_profile
+          in: query
+          schema: { type: string, default: veiculos }
+          description: O perfil de anotação (o `annotation_profile` do perfil de export).
       responses:
         "200":
           description: Os campos.
@@ -536,12 +544,33 @@ paths:
               schema:
                 type: object
                 properties:
+                  annotation_profile: { type: string, example: veiculos }
                   unknown: { type: string, example: Desconhecido, description: Pasta padrão das imagens sem o metadado. }
                   name_fields:
                     type: array
                     items: { type: string }
                     description: Campos aceitos no modelo de nome dos arquivos (file_name).
-                  legacy_template: { type: string, description: O padrão antigo (hash + características + placa). }
+                  legacy_template: { type: string, description: "O padrão antigo (hash + características + placa). Vazio fora do perfil veiculos." }
+                  fields:
+                    type: array
+                    description: Todos os metadados, com o nome na tela.
+                    items:
+                      type: object
+                      properties:
+                        field: { type: string, example: vehicle_type }
+                        label: { type: string, example: "Veículo: Tipo de veículo" }
+                        group: { type: string, description: "file, image ou o tipo do objeto (ex.: vehicle)." }
+                        values:
+                          type: object
+                          nullable: true
+                          additionalProperties: { type: string }
+                        labels:
+                          type: object
+                          additionalProperties: { type: string }
+                          description: Valor -> nome na tela.
+                        folder: { type: boolean, description: Serve de nível de pasta. }
+                        name: { type: boolean, description: Serve no modelo de nome. }
+                        alias: { type: boolean, description: "Nome antigo ou atalho de outro campo (ex.: plate = vehicle_plate). Aceito, mas a tela não oferece." }
                   items:
                     type: array
                     items:
@@ -1517,9 +1546,10 @@ components:
           description: |
             Modelo do nome dos arquivos de saída (a extensão é a do arquivo guardado);
             vazio = o nome do SIDM (v2). Campos entre chaves (ver name_fields em
-            GET /export-folder-fields); os de código saem com o código do nome v2
-            (direção F/T, resolução 01…10, …). Campo sem valor vira "_" na largura
-            dele. Tem que ter {sha1} ou {name}.
+            GET /export-folder-fields?annotation_profile=...); os de lista com código
+            saem com o código (no perfil veiculos, o do nome v2: direção F/T,
+            resolução 01…10, …). Campo sem valor vira "_" na largura dele. Tem que
+            ter {sha1} ou {name}.
         layout:
           type: string
           enum: [split, folders]
@@ -1540,6 +1570,13 @@ components:
                 example: { front: Dianteiro, rear: Traseiro }
               unknown: { type: string, description: "Pasta das imagens sem o metadado (padrão: Desconhecido)." }
         task: { type: string, description: "Tarefa de anotação (vazio = escolher na hora de exportar)." }
+        annotation_profile:
+          type: string
+          default: veiculos
+          description: |
+            O perfil de anotação cujos campos os filtros, as pastas e o modelo de
+            nome usam. Não limita os pacotes: imagem de pacote de outro perfil só
+            não tem os campos (não passa nos filtros; vai para "Desconhecido").
         split:
           type: object
           description: Porcentagens, somam 100. No YOLO, valid > 0.
@@ -1553,8 +1590,23 @@ components:
           description: Pacotes que entram (vazio = todos).
         filters:
           type: object
-          description: Mesmos valores da anotação (vazio = qualquer).
+          description: |
+            Nos campos do perfil de anotação, com os mesmos valores da anotação
+            (vazio = qualquer). Os nomes antigos (equipment, day_time,
+            vehicle_type...) ainda são aceitos e viram fields/objects.
           properties:
+            fields:
+              type: object
+              additionalProperties: { type: string }
+              description: "Campo da imagem -> valor (numa lista, basta conter; número e sim/não como texto: \"2\", \"true\")."
+              example: { day_time: night, riders: "2" }
+            objects:
+              type: object
+              description: Tipo de objeto -> campo -> valor. Os campos de um tipo valem para o MESMO objeto.
+              additionalProperties:
+                type: object
+                additionalProperties: { type: string }
+              example: { vehicle: { type: truck, color: white } }
             equipment: { type: string }
             camera: { type: string }
             direction: { type: string, example: rear }
@@ -1894,10 +1946,14 @@ components:
           example: "{Metrologico.Data} {Metrologico.Hora}.{Metrologico.Milisegundo}"
         map:
           type: object
-          description: Valor de origem → nosso valor. Ignora maiúscula.
+          description: |
+            Valor de origem → nosso valor (um valor aceito pelo campo). Ignora
+            maiúscula. Sem map, um campo de lista aceita o valor, o código ou o
+            nome da opção na tela; número aceita vírgula decimal; sim/não aceita
+            true/false, sim/não, 1/0.
           additionalProperties: { type: string }
-        split: { type: string, description: Só em conditions. }
-        date_format: { type: string, description: "Só em captured_at. Layout do Go, ex. 2006-01-02 15:04:05.000" }
+        split: { type: string, description: "Só em campo de vários valores (multi), como conditions." }
+        date_format: { type: string, description: "Só em campo de data e hora (como captured_at). Layout do Go, ex. 2006-01-02 15:04:05.000" }
         timezone: { type: string, example: America/Sao_Paulo }
 
     Profile:
@@ -1906,6 +1962,14 @@ components:
       properties:
         name: { type: string, example: csv-pg-veiculos }
         description: { type: string }
+        annotation_profile:
+          type: string
+          default: veiculos
+          description: |
+            O perfil de anotação que este perfil preenche: as chaves de fields e
+            de objects são as dele, e os valores dos map são conferidos contra
+            ele. Num pacote de outro perfil, o que ele não tem fica de fora e é
+            listado (outside_profile).
         reader:
           type: object
           properties:
@@ -1920,17 +1984,26 @@ components:
             by: { type: string, enum: [original_name, sha1] }
         fields:
           type: object
-          description: "Campos: equipment, camera, direction, resolution, capture_angle, day_time, image_range, weather, conditions, captured_at."
+          description: "Campos da imagem do perfil de anotação (no veiculos: equipment, camera, direction, resolution, capture_angle, day_time, image_range, weather, conditions, captured_at)."
           additionalProperties: { $ref: "#/components/schemas/FieldRule" }
+        objects:
+          type: object
+          description: Tipo de objeto sem caixa do perfil de anotação (ex. vehicle) -> como achar os objetos dele.
+          additionalProperties:
+            type: object
+            required: [mode, fields]
+            properties:
+              mode: { type: string, enum: [single, row, columns], description: "single: um objeto por imagem (o caso do INI); row: um por linha; columns: colunas numeradas." }
+              max: { type: integer, description: Só no modo columns. }
+              key: { type: string, example: plate, description: "O campo que diz que o objeto existe (sem valor nele, não há objeto). Vazio: existe se algum campo de coluna tem valor." }
+              fields:
+                type: object
+                description: "Campos do tipo de objeto (no vehicle: plate, plate_type, plate_category, type, color). No modo columns, use {n} no nome da coluna."
+                additionalProperties: { $ref: "#/components/schemas/FieldRule" }
         vehicles:
           type: object
-          properties:
-            mode: { type: string, enum: [single, row, columns], description: "single: um veículo por imagem (o caso do INI)." }
-            max: { type: integer, description: Só no modo columns. }
-            fields:
-              type: object
-              description: "Campos: plate (obrigatório), plate_type, plate_category, type, color. No modo columns, use {n} no nome da coluna."
-              additionalProperties: { $ref: "#/components/schemas/FieldRule" }
+          deprecated: true
+          description: "Formato antigo: o mesmo que objects.vehicle com key plate. Aceito na entrada; volta como objects."
         created_by: { type: string, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 

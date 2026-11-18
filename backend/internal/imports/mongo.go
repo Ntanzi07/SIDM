@@ -50,6 +50,7 @@ func (sp storedProfile) profile() (*importer.Profile, error) {
 		return nil, fmt.Errorf("perfil %s corrompido no banco: %w", sp.Name, err)
 	}
 	p.Name, p.CreatedBy, p.UpdatedAt = sp.Name, sp.CreatedBy, sp.UpdatedAt
+	p.Normalize() // os salvos antes dos perfis de anotação têm "vehicles"
 	return &p, nil
 }
 
