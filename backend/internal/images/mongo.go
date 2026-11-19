@@ -98,7 +98,14 @@ func (f ImageFilter) toBSON() bson.D {
 			filter = append(filter, bson.E{Key: field, Value: value})
 		}
 	}
-	add("package", f.Package)
+	switch {
+	case len(f.Packages) == 0:
+		add("package", f.Package)
+	case f.Package == "":
+		add("package", bson.D{{Key: "$in", Value: f.Packages}})
+	default: // os dois: uma chave só (duas "package" no filtro, uma apagaria a outra)
+		add("package", bson.D{{Key: "$eq", Value: f.Package}, {Key: "$in", Value: f.Packages}})
+	}
 	add("status", f.Status)
 	for _, k := range sortedKeys(f.Fields) {
 		add("fields."+k, f.Fields[k]) // numa lista, o Mongo casa se ela contém o valor
@@ -559,4 +566,112 @@ func (m *MongoRepo) FindImagesByKeys(ctx context.Context, pkg, by string, keys [
 		out = append(out, imgs...)
 	}
 	return out, nil
+}
+
+// Stats conta tudo num aggregate só: um ramo do $facet por contagem. Os nomes
+// dos ramos são posições (f0, o0, o0_1...), porque a chave de um campo pode
+// ter caracteres que um nome de ramo não aceita.
+//
+// $unwind num valor que não é lista trata ele como uma lista de um, então o
+// mesmo ramo conta choice, bool e multi; imagem sem o campo não entra.
+func (m *MongoRepo) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Stats, error) {
+	group := func(by string) bson.D {
+		return bson.D{{Key: "$group", Value: bson.D{{Key: "_id", Value: by}, {Key: "n", Value: bson.D{{Key: "$sum", Value: 1}}}}}}
+	}
+	unwind := func(path string) bson.D { return bson.D{{Key: "$unwind", Value: "$" + path}} }
+	facet := bson.D{
+		{Key: "total", Value: bson.A{bson.D{{Key: "$count", Value: "n"}}}},
+		{Key: "packages", Value: bson.A{group("$package")}},
+		{Key: "status", Value: bson.A{group("$status")}},
+	}
+	for i, k := range spec.Fields {
+		facet = append(facet, bson.E{Key: fmt.Sprintf("f%d", i), Value: bson.A{unwind("fields." + k), group("$fields." + k)}})
+	}
+	types := sortedKeys(spec.Objects)
+	for i, t := range types {
+		ofType := bson.D{{Key: "$match", Value: bson.D{{Key: "objects.type", Value: t}}}}
+		// por imagem (quantos do tipo ela tem), depois o total: imagens e objetos
+		facet = append(facet, bson.E{Key: fmt.Sprintf("o%d", i), Value: bson.A{
+			unwind("objects"), ofType,
+			bson.D{{Key: "$group", Value: bson.D{{Key: "_id", Value: "$_id"}, {Key: "n", Value: bson.D{{Key: "$sum", Value: 1}}}}}},
+			bson.D{{Key: "$group", Value: bson.D{{Key: "_id", Value: nil}, {Key: "images", Value: bson.D{{Key: "$sum", Value: 1}}}, {Key: "count", Value: bson.D{{Key: "$sum", Value: "$n"}}}}}},
+		}})
+		for j, k := range spec.Objects[t] {
+			facet = append(facet, bson.E{Key: fmt.Sprintf("o%d_%d", i, j), Value: bson.A{
+				unwind("objects"), ofType, unwind("objects.fields." + k), group("$objects.fields." + k),
+			}})
+		}
+	}
+	pipeline := bson.A{bson.D{{Key: "$match", Value: f.toBSON()}}, bson.D{{Key: "$facet", Value: facet}}}
+
+	cur, err := m.db.Collection("images").Aggregate(ctx, pipeline)
+	if err != nil {
+		return nil, err
+	}
+	var out []bson.M
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, err
+	}
+	st := emptyStats(spec)
+	if len(out) == 0 {
+		return st, nil
+	}
+	res := out[0]
+	// Os documentos de dentro do resultado vêm como bson.D no driver v2 (só o
+	// de fora é bson.M, porque foi o pedido): aceita os dois.
+	rows := func(name string) []bson.M {
+		arr, _ := res[name].(bson.A)
+		list := make([]bson.M, 0, len(arr))
+		for _, e := range arr {
+			switch d := e.(type) {
+			case bson.M:
+				list = append(list, d)
+			case bson.D:
+				m := bson.M{}
+				for _, kv := range d {
+					m[kv.Key] = kv.Value
+				}
+				list = append(list, m)
+			}
+		}
+		return list
+	}
+	fill := func(c Counts, name string) {
+		for _, r := range rows(name) {
+			if r["_id"] != nil {
+				c[countKey(bsonValue(r["_id"]))] += toInt(r["n"])
+			}
+		}
+	}
+	if t := rows("total"); len(t) > 0 {
+		st.Total = toInt(t[0]["n"])
+	}
+	fill(st.Packages, "packages")
+	fill(st.Status, "status")
+	for i, k := range spec.Fields {
+		fill(st.Fields[k], fmt.Sprintf("f%d", i))
+	}
+	for i, t := range types {
+		o := st.Objects[t]
+		if r := rows(fmt.Sprintf("o%d", i)); len(r) > 0 {
+			o.Images, o.Count = toInt(r[0]["images"]), toInt(r[0]["count"])
+		}
+		for j, k := range spec.Objects[t] {
+			fill(o.Fields[k], fmt.Sprintf("o%d_%d", i, j))
+		}
+	}
+	return st, nil
+}
+
+// toInt: as contagens do aggregate vêm como int32 ou int64.
+func toInt(v any) int64 {
+	switch x := v.(type) {
+	case int32:
+		return int64(x)
+	case int64:
+		return x
+	case float64:
+		return int64(x)
+	}
+	return 0
 }

@@ -275,3 +275,19 @@ func TestPerfilDoPacote(t *testing.T) {
 		t.Errorf("pacote inexistente: %v", err)
 	}
 }
+
+// Os pacotes de antes dos perfis (sem o campo) contam como o padrão: a
+// pesquisa de "veiculos" precisa achar as imagens deles.
+func TestPacotesDoPerfilPadrao(t *testing.T) {
+	s, mem, _, _, _ := newTestService()
+	ctx := context.Background()
+	mem.Packages["antigo"] = Package{Name: "antigo"}
+	mem.Packages["novo"] = Package{Name: "novo", Profile: annotation.DefaultProfile}
+	mem.Packages["moto"] = Package{Name: "moto", Profile: "capacete"}
+	if got, err := s.PackagesWithProfile(ctx, annotation.DefaultProfile); err != nil || strings.Join(got, ",") != "antigo,novo" {
+		t.Errorf("padrão = %v, %v", got, err)
+	}
+	if got, _ := s.PackagesWithProfile(ctx, "capacete"); strings.Join(got, ",") != "moto" {
+		t.Errorf("capacete = %v", got)
+	}
+}

@@ -239,6 +239,13 @@ func TestMongoPerfilDoPacote(t *testing.T) {
 	if err != nil || strings.Join(got, ",") != "a,b" {
 		t.Errorf("PackagesWithProfile = %v, %v", got, err)
 	}
+	// sem perfil no banco: o campo ausente (omitempty) ou "" (direto no banco)
+	if _, err := r.packages().InsertOne(ctx, bson.D{{Key: "name", Value: "vazio"}, {Key: "profile", Value: ""}}); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := r.PackagesWithProfile(ctx, ""); err != nil || strings.Join(got, ",") != "antigo,vazio" {
+		t.Errorf("sem perfil = %v, %v", got, err)
+	}
 	if err := r.SetPackageProfile(ctx, "antigo", "capacete"); err != nil {
 		t.Fatal(err)
 	}

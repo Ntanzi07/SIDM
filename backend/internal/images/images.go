@@ -104,7 +104,10 @@ var ErrConflict = errors.New("alterado por outra pessoa")
 // ImageFilter: campos vazios são ignorados.
 type ImageFilter struct {
 	Package string
-	Status  string
+	// Packages: a imagem está em um destes pacotes (vazio = sem filtro). Junto
+	// com Package, valem os dois.
+	Packages []string
+	Status   string
 	// Fields: campo da imagem = valor (numa lista, basta conter o valor). O
 	// valor no tipo do campo: texto, float64 (número) ou bool.
 	Fields map[string]any
@@ -156,6 +159,10 @@ type Repo interface {
 	ReleaseClaim(ctx context.Context, sha1, user string) error
 	VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error)
 
+	// Stats conta as imagens do filtro (Limit e Skip não valem) pelo que o
+	// spec pede: ver stats.go.
+	Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Stats, error)
+
 	PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error)
 	RenamePackageImages(ctx context.Context, oldName, newName string) (int64, error)
 	DeletePackageImages(ctx context.Context, name string) (int64, error)
@@ -170,6 +177,7 @@ type Catalog interface {
 	CameraExists(ctx context.Context, name string) (bool, error)
 	CreateEquipment(ctx context.Context, name string) error
 	CreateCamera(ctx context.Context, name string) error
+	PackagesWithProfile(ctx context.Context, profile string) ([]string, error)
 }
 
 // ImportProfiles busca o perfil de IMPORT de INI usado no upload.

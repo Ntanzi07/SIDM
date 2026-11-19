@@ -191,8 +191,7 @@ func (m *Memory) ListImages(ctx context.Context, f ImageFilter) ([]Image, int64,
 	}
 	out := []Image{}
 	for _, img := range m.Images {
-		if (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
-			matchFields(img.Fields, f.Fields) && matchObject(img.Objects, "", f.Object) && matchObjects(img.Objects, f.Objects) {
+		if f.match(&img) {
 			img.ensureValues()
 			out = append(out, img)
 		}
@@ -245,6 +244,13 @@ func (m *Memory) FindImagesByKeys(ctx context.Context, pkg, by string, keys []st
 }
 
 // matchFields: igual ao Mongo, numa lista basta conter o valor.
+// match: a imagem passa no filtro (o mesmo que o toBSON do MongoRepo).
+func (f ImageFilter) match(img *Image) bool {
+	return (f.Status == "" || img.Status == f.Status) && (f.Package == "" || img.Package == f.Package) &&
+		(len(f.Packages) == 0 || slices.Contains(f.Packages, img.Package)) &&
+		matchFields(img.Fields, f.Fields) && matchObject(img.Objects, "", f.Object) && matchObjects(img.Objects, f.Objects)
+}
+
 func matchFields(have map[string]any, want map[string]any) bool {
 	for k, v := range want {
 		switch x := have[k].(type) {
@@ -376,4 +382,58 @@ func (m *Memory) oldestFree(pkg string, now time.Time, except string) *Image {
 		}
 	}
 	return best
+}
+
+// Stats faz a mesma conta do MongoRepo.Stats, imagem por imagem.
+func (m *Memory) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Stats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	st := emptyStats(spec)
+	// cada valor de uma lista conta; um valor solto conta uma vez ($unwind)
+	add := func(c Counts, v any) {
+		switch x := v.(type) {
+		case nil:
+		case []string:
+			for _, s := range x {
+				c[s]++
+			}
+		case []any:
+			for _, e := range x {
+				c[countKey(e)]++
+			}
+		default:
+			c[countKey(x)]++
+		}
+	}
+	for _, img := range m.Images {
+		if !f.match(&img) {
+			continue
+		}
+		st.Total++
+		st.Packages[img.Package]++
+		st.Status[img.Status]++
+		for _, k := range spec.Fields {
+			add(st.Fields[k], img.Fields[k])
+		}
+		for t, keys := range spec.Objects {
+			o, n := st.Objects[t], int64(0)
+			for _, obj := range img.Objects {
+				if obj.Type != t {
+					continue
+				}
+				n++
+				for _, k := range keys {
+					add(o.Fields[k], obj.Fields[k])
+				}
+			}
+			o.Count += n
+			if n > 0 {
+				o.Images++
+			}
+		}
+	}
+	return st, nil
 }

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"sort"
 	"strings"
 	"time"
 
@@ -85,10 +87,21 @@ func (p *Package) normalize() {
 }
 
 // PackagesWithProfile: os pacotes que usam o perfil de anotação (o módulo
-// annotation pergunta antes de apagar um perfil). Os pacotes de antes dos
-// perfis (sem o campo) usam o padrão, que não pode ser apagado.
+// annotation pergunta antes de apagar um perfil; a pesquisa conta as imagens
+// deles). Os pacotes de antes dos perfis (sem o campo no banco) usam o
+// padrão: entram quando o pedido é o padrão.
 func (s *Service) PackagesWithProfile(ctx context.Context, profile string) ([]string, error) {
-	return s.repo.PackagesWithProfile(ctx, profile)
+	names, err := s.repo.PackagesWithProfile(ctx, profile)
+	if err != nil || profile != annotation.DefaultProfile {
+		return names, err
+	}
+	old, err := s.repo.PackagesWithProfile(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	names = append(names, old...)
+	sort.Strings(names)
+	return slices.Compact(names), nil
 }
 
 // SetPackageProfile troca o perfil de anotação do pacote. Só enquanto não

@@ -1,6 +1,6 @@
 # Estado atual
 
-Atualizado em 2026-11-18. Branch de trabalho: `feat/moduloConfigs`.
+Atualizado em 2026-11-19. Branch de trabalho: `feat/filter`.
 
 ## Pronto
 
@@ -27,8 +27,13 @@ Atualizado em 2026-11-18. Branch de trabalho: `feat/moduloConfigs`.
 
 ## Próximos passos (em ordem)
 
-Nenhum grande passo definido; ver as pendências abaixo. Candidatos: levar os atributos
-das caixas para o export; histórico das edições de atributo.
+- **Pesquisa/dashboard (Nathan, em andamento):** o backend está pronto
+  (`GET /images/stats`, `images/stats.go`, `ImageFilter.Packages`); falta a tela
+  `/pesquisa` (escolher o perfil, filtros montados dos campos dele, contagens e barras;
+  clicar num número abre a lista em `GET /images` com os mesmos filtros).
+- **Export sem caixas (colega da equipe, em andamento):** só os dados anotados de cada
+  imagem, sem as caixas do CVAT, no módulo `exports`.
+- Depois: levar os atributos das caixas para o export; histórico das edições de atributo.
 
 ## Pendências menores
 

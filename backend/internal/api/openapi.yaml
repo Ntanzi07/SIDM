@@ -1008,6 +1008,61 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /images/stats:
+    get:
+      tags: [imagens]
+      summary: Contagens de um perfil de anotação (pesquisa/dashboard)
+      description: |
+        Quantas imagens dos pacotes que usam o perfil passam no filtro, e quantas
+        têm cada valor de cada campo de lista ou sim/não (choice, multi, bool),
+        por pacote e por status. Sempre de **um** perfil.
+
+        Filtros pelos campos do perfil: `fields.<campo>=valor` e
+        `objects.<tipo>.<campo>=valor` (os de um mesmo tipo valem para o
+        **mesmo** objeto). O valor pode ser o valor, o código ou o nome da
+        opção; sim/não é `true`/`false`. Campo ou opção que o perfil não tem: 400.
+
+        Num campo `multi` a imagem conta em cada valor que tem: a soma passa do
+        total. Em `objects`, `images` conta imagens com o tipo e `count` conta
+        objetos; os `fields` de um objeto contam objetos. Tipos de objeto com
+        caixa (CVAT) não entram: as caixas ficam no módulo de caixas.
+      parameters:
+        - { name: profile, in: query, required: true, schema: { type: string, example: veiculos } }
+        - { name: status, in: query, schema: { type: string, enum: [verified, pending, all], default: verified } }
+        - { name: package, in: query, description: "Só este pacote (de outro perfil: tudo zero).", schema: { type: string } }
+        - { name: fields.weather, in: query, description: "Exemplo de fields.<campo>.", schema: { type: string, example: rain } }
+        - { name: objects.vehicle.type, in: query, description: "Exemplo de objects.<tipo>.<campo>.", schema: { type: string, example: truck } }
+      responses:
+        "200":
+          description: As contagens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profile: { type: string }
+                  total: { type: integer }
+                  packages: { $ref: "#/components/schemas/Counts" }
+                  status: { $ref: "#/components/schemas/Counts" }
+                  fields:
+                    type: object
+                    description: Campo → valor → imagens.
+                    additionalProperties: { $ref: "#/components/schemas/Counts" }
+                    example: { day_time: { day: 100, night: 50 }, conditions: { no_damage: 140, dirty: 12 } }
+                  objects:
+                    type: object
+                    description: Tipo de objeto → imagens, objetos e campo → valor → objetos.
+                    additionalProperties:
+                      type: object
+                      properties:
+                        images: { type: integer }
+                        count: { type: integer }
+                        fields:
+                          type: object
+                          additionalProperties: { $ref: "#/components/schemas/Counts" }
+                    example: { vehicle: { images: 140, count: 210, fields: { type: { car: 160, truck: 50 } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /images/exists:
     post:
       tags: [imagens]
@@ -1515,6 +1570,11 @@ components:
                     name: { type: string }
 
   schemas:
+    Counts:
+      type: object
+      description: Valor → quantidade.
+      additionalProperties: { type: integer }
+      example: { rain: 30, clear: 120 }
     Error:
       type: object
       properties:

@@ -754,3 +754,30 @@ func TestMigrate(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// O Mongo conta igual à memória (o $facet com $unwind nas listas e nos
+// objetos), e o filtro com Package + Packages usa os dois.
+func TestMongoStats(t *testing.T) {
+	r := testRepo(t)
+	ctx := context.Background()
+	for _, img := range statsImages() {
+		if err := r.InsertImage(ctx, img); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := r.Stats(ctx, ImageFilter{Packages: []string{"p1", "p2"}, Status: StatusVerified}, statsSpec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := wantStats(); !reflect.DeepEqual(got, want) {
+		t.Errorf("stats =\n%+v\nquer\n%+v", got, want)
+	}
+	got, _ = r.Stats(ctx, ImageFilter{Package: "p2", Packages: []string{"p1", "p2"}}, statsSpec)
+	if got.Total != 2 || got.Status["pending"] != 1 || got.Fields["night"]["true"] != 1 {
+		t.Errorf("p2: %+v", got)
+	}
+	got, _ = r.Stats(ctx, ImageFilter{Package: "p2", Packages: []string{"p1"}}, statsSpec)
+	if got.Total != 0 {
+		t.Errorf("p2 fora da lista: %+v", got)
+	}
+}

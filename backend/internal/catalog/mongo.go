@@ -85,8 +85,16 @@ func (m *MongoRepo) RenamePackage(ctx context.Context, oldName, newName string) 
 	return nil
 }
 
+// PackagesWithProfile: com profile vazio, os pacotes sem perfil no banco (o
+// campo ausente, null ou "").
 func (m *MongoRepo) PackagesWithProfile(ctx context.Context, profile string) ([]string, error) {
-	cur, err := m.packages().Find(ctx, bson.D{{Key: "profile", Value: profile}},
+	var filter bson.D
+	if profile == "" {
+		filter = bson.D{{Key: "profile", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}}}
+	} else {
+		filter = bson.D{{Key: "profile", Value: profile}}
+	}
+	cur, err := m.packages().Find(ctx, filter,
 		options.Find().SetProjection(bson.D{{Key: "name", Value: 1}}).SetSort(bson.D{{Key: "name", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("pacotes com o perfil %s: %w", profile, err)
