@@ -23,6 +23,7 @@ import (
 //	GET    /images                   busca com filtros, paginado
 //	POST   /images?package=X         upload para o pacote X (pending)
 //	GET    /images/stats             contagens de um perfil (pesquisa/dashboard)
+//	GET    /images/search            as imagens da pesquisa, paginadas
 //	POST   /images/exists            checa hashes antes do upload
 //	GET    /images/{sha1}            detalhe
 //	GET    /images/{sha1}/file       o arquivo
@@ -36,6 +37,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "GET", Path: "/codes", Handler: handleCodes},
 		{Method: "GET", Path: "/images", Handler: s.handleListImages},
 		{Method: "GET", Path: "/images/stats", Handler: s.handleStats},
+		{Method: "GET", Path: "/images/search", Handler: s.handleSearch},
 		{Method: "POST", Path: "/images", Handler: s.handleUpload},
 		{Method: "POST", Path: "/images/exists", Handler: s.handleExists},
 		{Method: "GET", Path: "/images/{sha1}", Handler: s.handleGetImage},

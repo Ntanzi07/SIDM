@@ -219,28 +219,12 @@ func (s *Service) SearchIDs(ctx context.Context, q url.Values) ([]string, error)
 // ou nome da opção (sim/não: true/false). Os objects.<tipo>.<campo> de um mesmo
 // tipo valem para o MESMO objeto, como no filtro do export.
 func (s *Service) handleStats(w http.ResponseWriter, r *http.Request) {
-	q := r.URL.Query()
-	name := q.Get("profile")
-	if strings.TrimSpace(name) == "" {
-		platform.WriteError(w, http.StatusBadRequest, "informe o perfil de anotação (?profile=)")
-		return
-	}
-	p, err := s.profileNamed(r.Context(), name)
-	if errors.Is(err, platform.ErrNotFound) {
-		platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("perfil de anotação %q não encontrado", name))
-		return
-	}
-	if err != nil {
-		platform.ServerError(w, err)
-		return
-	}
-	f, err := statsFilter(q, p)
-	var bad *StatsError
-	if errors.As(err, &bad) {
-		platform.WriteError(w, http.StatusBadRequest, bad.Msg)
+	p, f, ok := s.searchRequest(w, r)
+	if !ok {
 		return
 	}
 	st, err := s.Stats(r.Context(), p.Name, f)
+	var bad *StatsError
 	switch {
 	case errors.As(err, &bad):
 		platform.WriteError(w, http.StatusBadRequest, bad.Msg)
@@ -249,6 +233,58 @@ func (s *Service) handleStats(w http.ResponseWriter, r *http.Request) {
 	default:
 		platform.WriteJSON(w, http.StatusOK, st)
 	}
+}
+
+// GET /images/search?<os mesmos parâmetros do /images/stats>&limit=50&skip=0
+//
+// As imagens da pesquisa, paginadas (na ordem da fila, como o GET /images).
+func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request) {
+	p, f, ok := s.searchRequest(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	_, f, none, err := s.searchFilter(r.Context(), p.Name, f)
+	if err != nil {
+		platform.ServerError(w, err)
+		return
+	}
+	page := platform.Page[Image]{Items: []Image{}}
+	if !none {
+		f.Limit, f.Skip = platform.IntParam(q, "limit", 50, 1, 500), platform.IntParam(q, "skip", 0, 0, 1<<31)
+		if page.Items, page.Total, err = s.repo.ListImages(r.Context(), f); err != nil {
+			platform.ServerError(w, err)
+			return
+		}
+	}
+	platform.WriteJSON(w, http.StatusOK, page)
+}
+
+// searchRequest lê o perfil e o filtro de uma pesquisa; responde o erro
+// (400/404) e devolve ok=false quando não dá.
+func (s *Service) searchRequest(w http.ResponseWriter, r *http.Request) (*annotation.Profile, ImageFilter, bool) {
+	q := r.URL.Query()
+	name := q.Get("profile")
+	if strings.TrimSpace(name) == "" {
+		platform.WriteError(w, http.StatusBadRequest, "informe o perfil de anotação (?profile=)")
+		return nil, ImageFilter{}, false
+	}
+	p, err := s.profileNamed(r.Context(), name)
+	if errors.Is(err, platform.ErrNotFound) {
+		platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("perfil de anotação %q não encontrado", name))
+		return nil, ImageFilter{}, false
+	}
+	if err != nil {
+		platform.ServerError(w, err)
+		return nil, ImageFilter{}, false
+	}
+	f, err := statsFilter(q, p)
+	var bad *StatsError
+	if errors.As(err, &bad) {
+		platform.WriteError(w, http.StatusBadRequest, bad.Msg)
+		return nil, ImageFilter{}, false
+	}
+	return p, f, true
 }
 
 // statsFilter lê o filtro da query pelos campos do perfil: um campo que o

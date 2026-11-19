@@ -1077,6 +1077,39 @@ paths:
                     example: { vehicle: { images: 140, count: 210, fields: { type: { car: 160, truck: 50 } } } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /images/search:
+    get:
+      tags: [imagens]
+      summary: As imagens de uma pesquisa (paginadas)
+      description: |
+        As mesmas imagens que o `GET /images/stats` conta, com os mesmos
+        parâmetros, numa página (para a tela de pesquisa listar e abrir cada uma).
+      parameters:
+        - { name: profile, in: query, required: true, schema: { type: string, example: veiculos } }
+        - { name: status, in: query, schema: { type: string, enum: [verified, pending, all], default: verified } }
+        - name: package
+          in: query
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - { name: fields.weather, in: query, description: "Exemplo de fields.<campo>.", schema: { type: string, example: rain } }
+        - { name: objects.vehicle.type, in: query, description: "Exemplo de objects.<tipo>.<campo>.", schema: { type: string, example: truck } }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200":
+          description: Página de imagens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Image" } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /boxes/stats:
     get:
       tags: [caixas]

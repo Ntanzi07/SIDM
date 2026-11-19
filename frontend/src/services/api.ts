@@ -935,3 +935,13 @@ export async function listPackagesOfProfile(profile: string): Promise<string[]> 
   const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
   return response.items.filter((item) => item.profile === profile).map((item) => item.name)
 }
+
+export type SearchImage = ImageSummary & { package: string }
+
+// GET /images/search: as imagens da pesquisa, uma página.
+export async function searchImages(search: StatsQuery, limit = 50, skip = 0): Promise<PageResponse<SearchImage>> {
+  const query = statsParams(search)
+  query.set('limit', String(limit))
+  query.set('skip', String(skip))
+  return request<PageResponse<SearchImage>>(`/images/search?${query.toString()}`)
+}

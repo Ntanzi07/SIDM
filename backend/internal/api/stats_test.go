@@ -6,6 +6,7 @@ import (
 
 	"SIDM/internal/boxes"
 	"SIDM/internal/images"
+	"SIDM/internal/platform"
 )
 
 // A pesquisa conta só as imagens do perfil pedido: uma imagem do pacote de
@@ -62,6 +63,29 @@ func TestPesquisaPorPerfil(t *testing.T) {
 	if st = stats("&status=all&package=" + testPkg); st.Total != 0 || st.Fields["day_time"] == nil {
 		t.Errorf("outro pacote: %+v", st)
 	}
+
+	// as imagens da pesquisa, com os mesmos filtros
+	search := func(query string) platform.Page[images.Image] {
+		t.Helper()
+		rec := env.do("GET", "/images/search?profile=capacete-moto"+query, nil, nil)
+		assertStatus(t, rec, http.StatusOK)
+		var page platform.Page[images.Image]
+		decode(t, rec, &page)
+		return page
+	}
+	if page := search(""); page.Total != 2 || len(page.Items) != 2 {
+		t.Errorf("busca: %+v", page)
+	}
+	if page := search("&fields.day_time=night"); page.Total != 1 || len(page.Items) != 1 || page.Items[0].SHA1 != res[0].SHA1 {
+		t.Errorf("busca à noite: %+v", page)
+	}
+	if page := search("&limit=1"); page.Total != 2 || len(page.Items) != 1 {
+		t.Errorf("página: %+v", page)
+	}
+	if page := search("&package=" + testPkg); page.Total != 0 || page.Items == nil {
+		t.Errorf("outro perfil: %+v", page)
+	}
+	assertStatus(t, env.do("GET", "/images/search?profile=capacete-moto&fields.weather=rain", nil, nil), http.StatusBadRequest)
 
 	// erros
 	assertStatus(t, env.do("GET", "/images/stats", nil, nil), http.StatusBadRequest)

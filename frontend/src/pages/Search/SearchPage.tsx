@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   getImageStats,
   getLabelStats,
   listAnnotationProfiles,
   listPackagesOfProfile,
   listTasks,
+  searchImages,
   type Counts,
+  type SearchImage,
+  type StatsQuery,
   type ImageStats,
   type LabelStats,
   type StatsStatus,
@@ -61,6 +65,7 @@ export function SearchPage() {
   const [allTasks, setAllTasks] = useState(true)
   const [chosenTasks, setChosenTasks] = useState<string[]>([])
   const [labels, setLabels] = useState<LabelStats | null>(null)
+  const [showImages, setShowImages] = useState(false) // a lista de imagens fica aberta entre as pesquisas
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [stats, setStats] = useState<ImageStats | null>(null)
   const [error, setError] = useState('')
@@ -233,20 +238,7 @@ export function SearchPage() {
             <>
               <h2 className="search-section">Labels do CVAT</h2>
               <div className="search-grid">
-                {labels.tasks.map((task) => (
-                  <CountCard
-                    key={task.task}
-                    note={`${fmt(task.images)} de ${fmt(labels.images)} imagem(ns) anotada(s) nesta tarefa · ${fmt(task.boxes)} caixa(s). A % é das caixas.`}
-                    of={task.boxes}
-                    rows={Object.keys(task.labels).sort().map((label) => ({
-                      value: label,
-                      label,
-                      count: task.labels[label].boxes,
-                      detail: `em ${fmt(task.labels[label].images)} img`,
-                    }))}
-                    title={`Tarefa ${task.task}`}
-                  />
-                ))}
+                {labels.tasks.map((task) => <LabelCard key={task.task} searchImages={labels.images} task={task} />)}
               </div>
               <h2 className="search-section">Campos da anotação</h2>
             </>
@@ -301,9 +293,147 @@ export function SearchPage() {
             })}
           </div>
 
+
+          <ImageList
+            key={requestKey}
+            onOpen={() => setShowImages(true)}
+            open={showImages}
+            search={{ profile: profileName, status, packages: chosenPackages, filters }}
+            total={stats.total}
+          />
         </div>
       )}
     </section>
+  )
+}
+
+const IMAGES_PAGE = 50
+
+// As imagens da pesquisa, como na tela do pacote: o nome abre a anotação
+// (verificada: o visualizador). Fechada até pedir, para não buscar à toa;
+// depois de aberta, fica aberta. A key muda com a pesquisa: a lista recomeça.
+function ImageList({ search, total, open, onOpen }: { search: StatsQuery; total: number; open: boolean; onOpen: () => void }) {
+  const navigate = useNavigate()
+  const [items, setItems] = useState<SearchImage[]>([])
+  const [count, setCount] = useState(0)
+  const [loaded, setLoaded] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const searchKey = JSON.stringify(search)
+
+  // a primeira página, quando a lista está aberta
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    searchImages(JSON.parse(searchKey) as StatsQuery, IMAGES_PAGE, 0)
+      .then((page) => {
+        if (!active) return
+        setItems(page.items)
+        setCount(page.total)
+        setError('')
+      })
+      .catch((requestError: unknown) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível buscar as imagens.')
+      })
+      .finally(() => { if (active) setLoaded(true) })
+    return () => { active = false }
+  }, [open, searchKey])
+
+  async function loadMore() {
+    setBusy(true)
+    try {
+      const page = await searchImages(search, IMAGES_PAGE, items.length)
+      setItems((current) => [...current, ...page.items])
+      setCount(page.total)
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível buscar as imagens.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function openImage(image: SearchImage) {
+    const pkg = encodeURIComponent(image.package)
+    navigate(image.status === 'verified' ? `/pacotes/${pkg}/verificadas?sha1=${image.sha1}` : `/pacotes/${pkg}/anotacao?imagem=${image.sha1}`)
+  }
+
+  return (
+    <div className="search-images">
+      <h2 className="search-section">Imagens</h2>
+      {!open ? (
+        <button className="button button--secondary" disabled={total === 0} onClick={onOpen} type="button">
+          Ver as {fmt(total)} imagem(ns) desta pesquisa
+        </button>
+      ) : (
+        <div className="create-card search-images__card">
+          {error && <p className="form-error">{error}</p>}
+          {!loaded && <p className="profile-name-hint">Carregando...</p>}
+          {loaded && items.length === 0 && !error && <p className="profile-name-hint">Nenhuma imagem nesta pesquisa.</p>}
+          {items.length > 0 && (
+            <div className="image-list">
+              {items.map((image) => (
+                <div className="image-list__item" key={image.sha1}>
+                  <button
+                    className="image-list__name image-list__open"
+                    onClick={() => openImage(image)}
+                    title={image.status === 'verified' ? 'Ver a anotação' : 'Abrir na anotação'}
+                    type="button"
+                  >
+                    {image.original_name}
+                  </button>
+                  <div className="image-list__actions">
+                    <span className="search-images__package">{image.package}</span>
+                    <span className={image.status === 'verified' ? 'image-status image-status--verified' : 'image-status'}>
+                      <i className={image.status === 'verified' ? 'status-dot status-dot--verified' : 'status-dot status-dot--pending'} />
+                      {image.status === 'verified' ? 'Analisada' : 'Pendente'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+              {items.length < count && (
+                <button className="button button--secondary image-list__more" disabled={busy} onClick={() => void loadMore()} type="button">
+                  {busy ? 'Carregando...' : `Carregar mais (${fmt(items.length)} de ${fmt(count)})`}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// Uma tarefa do CVAT: para cada label, em quantas imagens ela aparece e qual
+// parte de todas as caixas da tarefa é dela.
+function LabelCard({ task, searchImages }: { task: LabelStats['tasks'][number]; searchImages: number }) {
+  const names = Object.keys(task.labels).sort()
+  return (
+    <div className="search-card">
+      <h2>Tarefa {task.task}</h2>
+      <p className="profile-name-hint">
+        {fmt(task.images)} de {fmt(searchImages)} imagens da pesquisa foram anotadas nesta tarefa ({fmt(task.boxes)} caixas). Por label: em quantas dessas imagens ela aparece, e quanto das caixas é dela.
+      </p>
+      <ul className="search-labels">
+        {names.map((name) => {
+          const item = task.labels[name]
+          return (
+            <li key={name}>
+              <strong>{name}</strong>
+              <div className="search-labels__line">
+                <span>Em {fmt(item.images)} de {fmt(task.images)} imagens</span>
+                <span className="search-bar__track"><span className="search-bar__fill" style={{ width: pct(item.images, task.images) }} /></span>
+                <small>{pct(item.images, task.images)}</small>
+              </div>
+              <div className="search-labels__line">
+                <span>{fmt(item.boxes)} de {fmt(task.boxes)} caixas da tarefa</span>
+                <span className="search-bar__track"><span className="search-bar__fill search-bar__fill--boxes" style={{ width: pct(item.boxes, task.boxes) }} /></span>
+                <small>{pct(item.boxes, task.boxes)}</small>
+              </div>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 
@@ -348,7 +478,7 @@ function Chips({ title, items, chosen, all, allLabel, empty, onAll, onToggle }: 
 // "Não informado" no fim.
 function CountCard({ title, rows, of, missing, note, active, onPick }: {
   title: string
-  rows: Array<{ value: string; label: string; count: number; detail?: string }>
+  rows: Array<{ value: string; label: string; count: number }>
   of: number
   missing?: number
   note?: string
@@ -374,10 +504,7 @@ function CountCard({ title, rows, of, missing, note, active, onPick }: {
             <>
               <span className="search-bar__label">{row.label}</span>
               <span className="search-bar__track"><span className="search-bar__fill" style={{ width: pct(row.count, of) }} /></span>
-              <span className="search-bar__count">
-                {fmt(row.count)} <small>{pct(row.count, of)}</small>
-                {'detail' in row && row.detail && <small className="search-bar__detail">{row.detail}</small>}
-              </span>
+              <span className="search-bar__count">{fmt(row.count)} <small>{pct(row.count, of)}</small></span>
             </>
           )
           return (
