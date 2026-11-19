@@ -736,7 +736,10 @@ export type ExportProfile = {
   layout?: 'split' | 'folders' // split = train/valid/test (padrão)
   folders?: FolderLevel[]
   file_name?: string // modelo do nome dos arquivos; vazio = o nome do SIDM (v2)
-  task?: string // tarefa de anotação (os padrões não têm: escolhe na hora)
+  // tarefas de anotação cujas caixas entram, juntas (os padrões não têm: escolhe na hora)
+  tasks?: string[]
+  // só as imagens anotadas em TODAS as tarefas (sem isso, o objeto não marcado vira fundo)
+  all_tasks?: boolean
   // perfil de anotação dos campos dos filtros, das pastas e do nome (vazio = veiculos)
   annotation_profile?: string
   split: ExportSplit
@@ -750,7 +753,9 @@ export type ExportProfile = {
 
 export type ExportPreview = {
   profile: string
-  task: string
+  task: string // as tarefas juntas, para mostrar ("parabrisa + placa")
+  tasks: string[]
+  all_tasks: boolean
   format: string
   layout: string
   folders: Record<string, number> // imagens por pasta (layout por pastas)
@@ -761,7 +766,8 @@ export type ExportPreview = {
   negatives: number // das imagens do dataset, as sem nenhuma caixa
   images: Record<string, number>
   boxes: Record<string, number>
-  skipped: { not_annotated: number; without_labels: number }
+  // not_annotated: em nenhuma das tarefas; missing_tasks: com all_tasks, em só parte delas
+  skipped: { not_annotated: number; missing_tasks: number; without_labels: number }
   packages: string[]
 }
 

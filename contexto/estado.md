@@ -20,11 +20,15 @@ Atualizado em 2026-11-18. Branch de trabalho: `feat/moduloConfigs`.
   encaixa os atributos no tipo (`ObjectType.FitFields`, relatório com
   `attribute_problems`/`missing_required`/`untyped_labels`/`edited_replaced`); a tela de
   anotação mostra e edita (`PUT /images/{sha1}/boxes/{tarefa}`, com versão).
+- Export de várias tarefas: o perfil de export tem `tasks` (o `task` antigo vira `tasks`)
+  e `all_tasks` (só as imagens anotadas em todas); as caixas das tarefas são juntadas
+  na mesma imagem (`exports.mergeSets`, que também ajusta a escala se o tamanho no CVAT
+  diferir).
 
 ## Próximos passos (em ordem)
 
-1. **Export de várias tarefas** (ex.: para-brisa + placa num dataset), com a opção "só
-   imagens anotadas em todas as tarefas" para não ensinar que a placa não marcada é fundo.
+Nenhum grande passo definido; ver as pendências abaixo. Candidatos: levar os atributos
+das caixas para o export; histórico das edições de atributo.
 
 ## Pendências menores
 

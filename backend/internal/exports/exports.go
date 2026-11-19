@@ -63,7 +63,9 @@ type Files interface {
 // Preview é o resumo do que vai sair.
 type Preview struct {
 	Profile   string         `json:"profile"`
-	Task      string         `json:"task"`
+	Task      string         `json:"task"`      // as tarefas, juntas para mostrar ("parabrisa + placa")
+	Tasks     []string       `json:"tasks"`     //
+	AllTasks  bool           `json:"all_tasks"` // só as anotadas em todas
 	Format    string         `json:"format"`
 	Layout    string         `json:"layout"`
 	Split     export.Split   `json:"split"`
@@ -80,7 +82,8 @@ type Preview struct {
 
 // Skipped são as imagens verificadas que ficaram de fora.
 type Skipped struct {
-	NotAnnotated  int `json:"not_annotated"`  // verificadas, mas não anotadas na tarefa
+	NotAnnotated  int `json:"not_annotated"`  // verificadas, mas não anotadas em nenhuma das tarefas
+	MissingTasks  int `json:"missing_tasks"`  // com all_tasks: anotadas em só parte das tarefas
 	WithoutLabels int `json:"without_labels"` // com caixas, mas nenhuma das labels escolhidas
 }
 

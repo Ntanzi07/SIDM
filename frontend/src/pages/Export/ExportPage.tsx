@@ -76,7 +76,7 @@ function newProfile(): ExportProfile {
 
 // Perfil sem tarefa (os padrões) e só uma tarefa no sistema: já vem escolhida.
 function withDefaultTask(profile: ExportProfile, tasks: AnnotationTask[]): ExportProfile {
-  if (!profile.task && tasks.length === 1) return { ...profile, task: tasks[0].name }
+  if (!profile.tasks?.length && tasks.length === 1) return { ...profile, tasks: [tasks[0].name] }
   return profile
 }
 
@@ -87,6 +87,18 @@ function taskLabels(task: AnnotationTask | undefined): Record<string, number> {
   const out: Record<string, number> = {}
   for (const label of task.labels) out[label] = 0
   return { ...out, ...(task.stats?.labels ?? {}) }
+}
+
+// As labels de várias tarefas, somadas: a mesma label em duas tarefas vira
+// uma classe só (renomeie para separar).
+function tasksLabels(all: AnnotationTask[], names: string[] | undefined): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const name of names ?? []) {
+    for (const [label, n] of Object.entries(taskLabels(all.find((task) => task.name === name)))) {
+      out[label] = (out[label] ?? 0) + n
+    }
+  }
+  return out
 }
 
 // Linhas da tabela de labels a partir do perfil: cada label da tarefa, se
@@ -155,7 +167,7 @@ export function ExportPage() {
           const next = withDefaultTask(structuredClone(first), taskList)
           setSelected(first.name)
           setDraft(next)
-          setRows(rowsFrom(next, taskLabels(taskList.find((task) => task.name === next.task))))
+          setRows(rowsFrom(next, tasksLabels(taskList, next.tasks)))
         }
       })
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o export.') })
@@ -181,7 +193,8 @@ export function ExportPage() {
   const splitMatters = usesSplit(draft)
   const fileNameOk = !draft.file_name || /\{(sha1|name)\}/.test(draft.file_name)
   const foldersOk = (!isFolders || (draft.folders ?? []).length > 0) && fileNameOk
-  const canRun = splitSum === 100 && Boolean(draft.task) && foldersOk
+  const hasTasks = (draft.tasks?.length ?? 0) > 0
+  const canRun = splitSum === 100 && hasTasks && foldersOk
 
   // O perfil como está na tela (com as labels da tabela).
   const current = useMemo<ExportProfile>(
@@ -190,13 +203,13 @@ export function ExportPage() {
   )
   const dirty = useMemo(() => !original || JSON.stringify(original) !== JSON.stringify({ ...original, ...current }), [original, current])
 
-  const labelsOf = (name: string | undefined) => taskLabels(tasks.find((task) => task.name === name))
+  const labelsOf = (names: string[] | undefined) => tasksLabels(tasks, names)
 
   function open(profile: ExportProfile | null) {
     const next = withDefaultTask(profile ? structuredClone(profile) : newProfile(), tasks)
     setSelected(profile?.name ?? null)
     setDraft(next)
-    setRows(rowsFrom(next, labelsOf(next.task)))
+    setRows(rowsFrom(next, labelsOf(next.tasks)))
     setPreview(null)
     setError('')
     setMessage('')
@@ -207,11 +220,16 @@ export function ExportPage() {
     setPreview(null)
   }
 
-  // Trocar a tarefa troca a tabela de labels (cada tarefa tem as suas).
-  function changeTask(name: string) {
-    const next = { ...draft, task: name || undefined }
+  // Pôr/tirar uma tarefa troca a tabela de labels (cada tarefa tem as suas).
+  // Ao passar a ter duas, "só as anotadas em todas" já vem marcado.
+  function toggleTask(name: string) {
+    const current = draft.tasks ?? []
+    const list = current.includes(name) ? current.filter((t) => t !== name) : [...current, name]
+    const next: ExportProfile = { ...draft, tasks: list.length > 0 ? list : undefined }
+    if (current.length < 2 && list.length >= 2 && draft.all_tasks === undefined) next.all_tasks = true
+    if (list.length < 2) next.all_tasks = undefined
     setDraft(next)
-    setRows(rowsFrom(next, labelsOf(name)))
+    setRows(rowsFrom(next, labelsOf(next.tasks)))
     setPreview(null)
   }
 
@@ -285,7 +303,7 @@ export function ExportPage() {
       setProfiles(list)
       setSelected(saved.name)
       setDraft(structuredClone(saved))
-      setRows(rowsFrom(saved, labelsOf(saved.task)))
+      setRows(rowsFrom(saved, labelsOf(saved.tasks)))
       setMessage(`Perfil "${saved.name}" salvo.`)
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o perfil.')
@@ -372,22 +390,37 @@ export function ExportPage() {
                 Nenhuma tarefa ainda: crie uma em <Link to="/tarefas">Tarefas</Link> e importe as caixas do CVAT.
               </p>
             ) : (
-              <div className="profile-form-grid">
-                <label className="form-field">
-                  <span>As caixas de qual tarefa entram</span>
-                  <select onChange={(event) => changeTask(event.target.value)} value={draft.task ?? ''}>
-                    <option value="">Escolha a tarefa…</option>
-                    {tasks.map((task) => (
-                      <option key={task.name} value={task.name}>
-                        {task.name} ({fmt(task.stats?.verified ?? 0)} verificadas)
-                      </option>
-                    ))}
-                    {draft.task && !tasks.some((task) => task.name === draft.task) && (
-                      <option value={draft.task}>{draft.task} (não existe mais)</option>
-                    )}
-                  </select>
-                </label>
-              </div>
+              <>
+                <p className="profile-name-hint">As caixas de quais tarefas entram (várias juntam as caixas num dataset só, ex.: para-brisa + placa).</p>
+                <div className="export-packages">
+                  {tasks.map((task) => (
+                    <label className="export-check" key={task.name}>
+                      <input checked={draft.tasks?.includes(task.name) ?? false} onChange={() => toggleTask(task.name)} type="checkbox" />
+                      {task.name} <small className="export-check__profile">({fmt(task.stats?.verified ?? 0)} verificadas)</small>
+                    </label>
+                  ))}
+                  {(draft.tasks ?? []).filter((name) => !tasks.some((task) => task.name === name)).map((name) => (
+                    <label className="export-check" key={name}>
+                      <input checked onChange={() => toggleTask(name)} type="checkbox" />
+                      {name} <small className="form-error">(não existe mais)</small>
+                    </label>
+                  ))}
+                </div>
+                {(draft.tasks?.length ?? 0) > 1 && (
+                  <>
+                    <label className="export-check export-all-tasks">
+                      <input checked={Boolean(draft.all_tasks)} onChange={(event) => change({ all_tasks: event.target.checked || undefined })} type="checkbox" />
+                      Só as imagens anotadas em todas as tarefas
+                    </label>
+                    <p className={draft.all_tasks ? 'profile-name-hint' : 'profile-name-hint export-warning'}>
+                      {draft.all_tasks
+                        ? 'Uma imagem anotada só em parte das tarefas fica de fora.'
+                        : 'Atenção: uma imagem anotada só numa tarefa entra sem as caixas das outras, e o modelo aprende que o objeto não marcado é fundo.'}
+                      {' '}A mesma label em duas tarefas vira uma classe só (renomeie abaixo para separar).
+                    </p>
+                  </>
+                )}
+              </>
             )}
             {isBuiltin && <p className="profile-name-hint">Os perfis padrão servem para qualquer tarefa: escolha na hora.</p>}
 
@@ -541,10 +574,10 @@ export function ExportPage() {
             )}
 
             <h3>Labels</h3>
-            {!draft.task ? (
+            {!hasTasks ? (
               <p className="profile-name-hint">Escolha a tarefa para ver as labels dela.</p>
             ) : rows.length === 0 ? (
-              <p className="profile-name-hint">Esta tarefa ainda não tem labels nem caixas.</p>
+              <p className="profile-name-hint">{(draft.tasks?.length ?? 0) > 1 ? 'Estas tarefas ainda não têm' : 'Esta tarefa ainda não tem'} labels nem caixas.</p>
             ) : (
               <table className="export-labels">
                 <thead>
@@ -577,7 +610,7 @@ export function ExportPage() {
                 className="button button--secondary"
                 disabled={busy !== '' || !canRun}
                 onClick={() => void runPreview()}
-                title={!draft.task ? 'Escolha a tarefa antes' : !foldersOk ? 'Escolha pelo menos um nível de pasta' : undefined}
+                title={!hasTasks ? 'Escolha a tarefa antes' : !foldersOk ? 'Escolha pelo menos um nível de pasta' : undefined}
                 type="button"
               >
                 {busy === 'preview' ? 'Calculando...' : 'Prévia'}
@@ -608,7 +641,9 @@ export function ExportPage() {
             <div className="create-card settings-card export-preview">
               <h2>Prévia</h2>
               {preview.total === 0 ? (
-                <p className="form-error">Nenhuma imagem verificada e anotada na tarefa "{preview.task}" passa nestes filtros.</p>
+                <p className="form-error">
+                  Nenhuma imagem verificada e anotada {preview.tasks.length > 1 ? `${preview.all_tasks ? 'em todas as tarefas' : 'nas tarefas'} "${preview.task}"` : `na tarefa "${preview.task}"`} passa nestes filtros.
+                </p>
               ) : (
                 <>
                   <div className="import-report__stats">
@@ -650,9 +685,10 @@ export function ExportPage() {
                   </table>
                 </>
               )}
-              {(preview.skipped.not_annotated > 0 || preview.skipped.without_labels > 0) && (
+              {(preview.skipped.not_annotated > 0 || preview.skipped.missing_tasks > 0 || preview.skipped.without_labels > 0) && (
                 <p className="profile-name-hint">
-                  Ficaram de fora: {fmt(preview.skipped.not_annotated)} verificada(s) que não estão na tarefa "{preview.task}"
+                  Ficaram de fora: {fmt(preview.skipped.not_annotated)} verificada(s) que não estão {preview.tasks.length > 1 ? `em nenhuma das tarefas "${preview.task}"` : `na tarefa "${preview.task}"`}
+                  {preview.skipped.missing_tasks > 0 && `, ${fmt(preview.skipped.missing_tasks)} anotada(s) em só parte das tarefas`}
                   {preview.skipped.without_labels > 0 && ` e ${fmt(preview.skipped.without_labels)} sem nenhuma das labels escolhidas`}.
                   Imagens pendentes não entram.
                 </p>

@@ -44,8 +44,15 @@ type Profile struct {
 	// FileName: modelo do nome dos arquivos de saída (ver rename.go). Vazio =
 	// o nome guardado no SIDM (v2).
 	FileName string `json:"file_name,omitempty" bson:"file_name,omitempty"`
-	// Task: a tarefa de anotação cujas caixas entram. Vazio = escolher na
-	// hora de exportar (os perfis padrão servem para qualquer tarefa).
+	// Tasks: as tarefas de anotação cujas caixas entram, juntas num dataset
+	// só (ex.: para-brisa + placa). Vazio = escolher na hora de exportar (os
+	// perfis padrão servem para qualquer tarefa).
+	Tasks []string `json:"tasks,omitempty" bson:"tasks,omitempty"`
+	// AllTasks: só entram as imagens anotadas em TODAS as tarefas. Sem isso,
+	// uma imagem anotada só na tarefa do para-brisa entraria sem as caixas de
+	// placa, e o modelo aprenderia que a placa não marcada é fundo.
+	AllTasks bool `json:"all_tasks,omitempty" bson:"all_tasks,omitempty"`
+	// Task é o formato de antes (uma tarefa só): o Normalize passa para Tasks.
 	Task string `json:"task,omitempty" bson:"task,omitempty"`
 	// AnnotationProfile: o perfil de anotação cujos campos os filtros, as
 	// pastas e o modelo de nome usam (vazio = o padrão, "veiculos"). Não
@@ -336,7 +343,8 @@ func (p *Profile) Normalize() {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Description = strings.TrimSpace(p.Description)
 	p.Format = strings.ToLower(strings.TrimSpace(p.Format))
-	p.Task = strings.TrimSpace(p.Task)
+	p.Tasks = cleanTasks(append([]string{p.Task}, p.Tasks...))
+	p.Task = ""
 	p.AnnotationProfile = strings.TrimSpace(p.AnnotationProfile)
 	p.Filters.normalize()
 	p.normalizeFolders()
@@ -369,6 +377,26 @@ func (p *Profile) Normalize() {
 	p.Labels.Include = include
 }
 
+// MaxTasks: tarefas num dataset só.
+const MaxTasks = 10
+
+// cleanTasks: sem espaços, sem vazias, sem repetidas, na ordem.
+func cleanTasks(in []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, t := range in {
+		if t = strings.TrimSpace(t); t != "" && !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// SetTasks troca as tarefas (as do pedido de export valem mais que as do
+// perfil), já limpas.
+func (p *Profile) SetTasks(tasks []string) { p.Tasks, p.Task = cleanTasks(tasks), "" }
+
 // Validate confere o perfil (depois do Normalize) contra ap, o perfil de
 // anotação dele (o de AnnotationProfile, ou o padrão).
 func (p *Profile) Validate(ap *annotation.Profile) error {
@@ -390,6 +418,9 @@ func (p *Profile) Validate(ap *annotation.Profile) error {
 	}
 	p.validateFolders(add)
 	p.validateFileName(add)
+	if len(p.Tasks) > MaxTasks {
+		add("tasks: no máximo %d tarefas num dataset", MaxTasks)
+	}
 	s := p.Split
 	if s.Train < 0 || s.Valid < 0 || s.Test < 0 || s.Train+s.Valid+s.Test != 100 {
 		add("split: as porcentagens têm que ser positivas e somar 100 (veio %d/%d/%d)", s.Train, s.Valid, s.Test)

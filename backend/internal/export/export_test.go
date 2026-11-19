@@ -142,6 +142,12 @@ func TestValidate(t *testing.T) {
 			t.Errorf("perfil padrão %s inválido: %v", b.Name, err)
 		}
 	}
+	// "task" (o formato antigo) vira "tasks"
+	one := Profile{Task: " placa ", Tasks: []string{"parabrisa", "placa", ""}}
+	one.Normalize()
+	if one.Task != "" || strings.Join(one.Tasks, ",") != "placa,parabrisa" {
+		t.Errorf("tarefas = %q %v", one.Task, one.Tasks)
+	}
 	// os filtros antigos viram fields/objects
 	if f := ok.Filters; f.DayTime != "" || f.Fields["day_time"] != "night" {
 		t.Errorf("filtros = %+v", f)

@@ -25,8 +25,15 @@ func (m *Memory) TaskRenamed(ctx context.Context, oldName, newName string) error
 	for name, p := range m.Profiles {
 		if p.Task == oldName {
 			p.Task = newName
-			m.Profiles[name] = p
 		}
+		tasks := append([]string(nil), p.Tasks...)
+		for i, t := range tasks {
+			if t == oldName {
+				tasks[i] = newName
+			}
+		}
+		p.Tasks = tasks
+		m.Profiles[name] = p
 	}
 	return nil
 }

@@ -408,3 +408,47 @@ func TestExportComPerfilProprio(t *testing.T) {
 		t.Errorf("perfil salvo = %s", rec.Body.String())
 	}
 }
+
+// Várias tarefas num dataset só (para-brisa + placa). a: nas duas; b: só no
+// para-brisa; c: só na placa.
+func TestExportVariasTarefas(t *testing.T) {
+	env := newTestEnv(t)
+	env.box.Tasks["parabrisa"] = boxes.Task{Name: "parabrisa"}
+	env.box.Tasks["placa"] = boxes.Task{Name: "placa"}
+	verify := func(content string) string {
+		sha := env.seedPending(t, content)
+		assertStatus(t, env.doJSON("PUT", "/images/"+sha, completeBody()), http.StatusOK)
+		return sha
+	}
+	a, b, c := verify("a"), verify("b"), verify("c")
+	putTask(env, "parabrisa", a, "parabrisa")
+	putTask(env, "placa", a, "placa", "placa")
+	putTask(env, "parabrisa", b, "parabrisa")
+	putTask(env, "placa", c, "placa")
+
+	// qualquer uma das tarefas: as três, com as caixas juntas
+	p, code, msg := preview(t, env, `{"profile":"yolo","tasks":["parabrisa","placa"]}`)
+	if code != http.StatusOK || p.Total != 3 || p.Boxes["parabrisa"] != 2 || p.Boxes["placa"] != 3 ||
+		strings.Join(p.Classes, ",") != "parabrisa,placa" || p.Task != "parabrisa + placa" {
+		t.Fatalf("%d %s %+v", code, msg, p)
+	}
+
+	// só as anotadas em todas: a; b e c ficam de fora (ensinariam que a
+	// caixa da outra tarefa é fundo)
+	prof := `{"name":"x","format":"coco","split":{"train":70,"valid":15,"test":15},"tasks":["parabrisa","placa"],"all_tasks":true}`
+	p, code, msg = preview(t, env, `{"profile":`+prof+`}`)
+	if code != http.StatusOK || p.Total != 1 || p.Skipped.MissingTasks != 2 || p.Boxes["placa"] != 2 || !p.AllTasks {
+		t.Fatalf("all_tasks: %d %s %+v", code, msg, p)
+	}
+
+	// salvo com as tarefas; renomear uma tarefa leva junto
+	assertStatus(t, env.doJSON("POST", "/export-profiles", strings.Replace(prof, `"name":"x"`, `"name":"vidro-placa"`, 1)), http.StatusCreated)
+	assertStatus(t, env.doJSON("PUT", "/tasks/placa", `{"name":"placa-br"}`), http.StatusOK)
+	if got := env.exp.Profiles["vidro-placa"].Tasks; len(got) != 2 || got[1] != "placa-br" {
+		t.Errorf("tarefas do perfil = %v", got)
+	}
+	// tarefa inexistente no meio: 400
+	if _, code, _ := preview(t, env, `{"profile":"yolo","tasks":["parabrisa","sumiu"]}`); code != http.StatusBadRequest {
+		t.Errorf("tarefa inexistente: %d", code)
+	}
+}

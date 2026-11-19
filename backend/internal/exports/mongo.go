@@ -91,10 +91,16 @@ func (m *MongoRepo) ListExportProfiles(ctx context.Context) ([]export.Profile, e
 	return out, nil
 }
 
-// TaskRenamed: os perfis de export guardam a tarefa (boxes.TaskListener).
+// TaskRenamed: os perfis de export guardam as tarefas (boxes.TaskListener):
+// na lista "tasks" e, nos salvos antes das várias tarefas, em "task".
 func (m *MongoRepo) TaskRenamed(ctx context.Context, oldName, newName string) error {
 	if _, err := m.coll().UpdateMany(ctx, bson.D{{Key: "task", Value: oldName}},
 		bson.D{{Key: "$set", Value: bson.D{{Key: "task", Value: newName}}}}); err != nil {
+		return fmt.Errorf("renomear a tarefa nos perfis de export: %w", err)
+	}
+	if _, err := m.coll().UpdateMany(ctx, bson.D{{Key: "tasks", Value: oldName}},
+		bson.D{{Key: "$set", Value: bson.D{{Key: "tasks.$[t]", Value: newName}}}},
+		options.UpdateMany().SetArrayFilters([]any{bson.D{{Key: "t", Value: oldName}}})); err != nil {
 		return fmt.Errorf("renomear a tarefa nos perfis de export: %w", err)
 	}
 	return nil

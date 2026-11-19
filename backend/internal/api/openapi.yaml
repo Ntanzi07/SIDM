@@ -1624,7 +1624,15 @@ components:
                 description: Valor -> nome da pasta (os que faltam usam o nome padrão).
                 example: { front: Dianteiro, rear: Traseiro }
               unknown: { type: string, description: "Pasta das imagens sem o metadado (padrão: Desconhecido)." }
-        task: { type: string, description: "Tarefa de anotação (vazio = escolher na hora de exportar)." }
+        tasks:
+          type: array
+          items: { type: string }
+          example: [parabrisa, placa]
+          description: "Tarefas cujas caixas entram, juntas num dataset só (vazio = escolher na hora de exportar). A mesma label em duas tarefas vira uma classe só (use labels.rename para separar)."
+        all_tasks:
+          type: boolean
+          description: "Só as imagens anotadas em TODAS as tarefas. Sem isso, uma imagem anotada só numa tarefa entra sem as caixas das outras (e o modelo aprende que o objeto não marcado é fundo)."
+        task: { type: string, deprecated: true, description: "Formato antigo (uma tarefa): vira tasks." }
         annotation_profile:
           type: string
           default: veiculos
@@ -1695,16 +1703,25 @@ components:
           oneOf:
             - { type: string, example: rf-detr }
             - { $ref: "#/components/schemas/ExportProfile" }
+        tasks:
+          type: array
+          items: { type: string }
+          example: [parabrisa, placa]
+          description: Tarefas cujas caixas entram. Valem mais que as do perfil; um dos dois é obrigatório.
         task:
           type: string
           example: capacete
-          description: Tarefa cujas caixas entram. Vale mais que a do perfil; um dos dois é obrigatório.
+          description: "Uma tarefa só (o formato de antes): o mesmo que tasks com um item."
 
     ExportPreview:
       type: object
       properties:
         profile: { type: string }
-        task: { type: string }
+        task: { type: string, example: "parabrisa + placa", description: As tarefas juntas, para mostrar. }
+        tasks:
+          type: array
+          items: { type: string }
+        all_tasks: { type: boolean }
         format: { type: string }
         layout: { type: string }
         split:
@@ -1738,7 +1755,8 @@ components:
         skipped:
           type: object
           properties:
-            not_annotated: { type: integer, description: Verificadas, mas não anotadas na tarefa. }
+            not_annotated: { type: integer, description: Verificadas, mas não anotadas em nenhuma das tarefas. }
+            missing_tasks: { type: integer, description: "Com all_tasks: anotadas em só parte das tarefas." }
             without_labels: { type: integer, description: "Com caixas, mas nenhuma das classes escolhidas." }
         packages:
           type: array

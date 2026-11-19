@@ -185,88 +185,102 @@ func (s *Service) handleFolderFields(w http.ResponseWriter, r *http.Request) {
 
 // ---------- dataset ----------
 
-// request: {"profile": "rf-detr", "task": "capacete"} (um perfil
-// salvo/padrão) ou {"profile": {...}, "task": ...} (um perfil montado na
-// tela, sem salvar). "task" vale mais que a tarefa do perfil; se nenhum dos
-// dois tem tarefa, é erro.
+// request: {"profile": "rf-detr", "tasks": ["parabrisa", "placa"]} (um
+// perfil salvo/padrão) ou {"profile": {...}, "tasks": [...]} (um perfil
+// montado na tela, sem salvar). As tarefas do pedido valem mais que as do
+// perfil; se nenhum dos dois tem tarefa, é erro. "task" (uma só) é o formato
+// de antes e ainda vale.
 type request struct {
 	Profile json.RawMessage `json:"profile"`
+	Tasks   []string        `json:"tasks"`
 	Task    string          `json:"task"`
+}
+
+// tasks: as tarefas do pedido (vazio = as do perfil).
+func (r request) tasks() []string {
+	if len(r.Tasks) > 0 {
+		return r.Tasks
+	}
+	if strings.TrimSpace(r.Task) != "" {
+		return []string{r.Task}
+	}
+	return nil
 }
 
 // profileFromRequest resolve e confere o perfil do pedido. O download também
 // aceita o pedido num campo de formulário "request" (assim o navegador baixa
 // o zip direto para o disco, sem segurar tudo na memória).
 func (s *Service) profileFromRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, bool) {
-	p, task, ok := s.parseRequest(w, r)
+	p, tasks, ok := s.parseRequest(w, r)
 	if !ok {
 		return nil, false
 	}
-	if err := s.Prepare(r.Context(), p, task); err != nil {
+	if err := s.Prepare(r.Context(), p, tasks); err != nil {
 		writeErr(w, err, "")
 		return nil, false
 	}
 	return p, true
 }
 
-func (s *Service) parseRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, string, bool) {
+func (s *Service) parseRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, []string, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxExportProfileBytes)
 	var raw []byte
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 		if err := r.ParseForm(); err != nil {
 			platform.WriteError(w, http.StatusBadRequest, "formulário inválido: "+err.Error())
-			return nil, "", false
+			return nil, nil, false
 		}
 		raw = []byte(r.PostForm.Get("request"))
 	} else {
 		var err error
 		if raw, err = io.ReadAll(r.Body); err != nil {
 			platform.WriteError(w, http.StatusBadRequest, "erro lendo o pedido: "+err.Error())
-			return nil, "", false
+			return nil, nil, false
 		}
 	}
 	var req request
 	if err := json.Unmarshal(raw, &req); err != nil || len(req.Profile) == 0 {
 		platform.WriteError(w, http.StatusBadRequest, `esperado {"profile": "nome", "task": "tarefa"} ou {"profile": {...}, "task": "tarefa"}`)
-		return nil, "", false
+		return nil, nil, false
 	}
 	var name string
 	if json.Unmarshal(req.Profile, &name) == nil {
 		p, err := s.FindProfile(r.Context(), name)
 		if err != nil {
 			writeErr(w, err, notFoundMsg(name))
-			return nil, "", false
+			return nil, nil, false
 		}
-		return p, req.Task, true
+		return p, req.tasks(), true
 	}
 	var p export.Profile
 	dec := json.NewDecoder(bytes.NewReader(req.Profile))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
 		platform.WriteError(w, http.StatusBadRequest, "perfil inválido: "+err.Error())
-		return nil, "", false
+		return nil, nil, false
 	}
+	p.Normalize() // "task" (uma tarefa, o formato antigo) vira "tasks"
 	// Perfil montado na tela e ainda não salvo: o nome só vai no nome do zip.
 	// Um padrão sem mudanças (só a tarefa escolhida) é o próprio padrão.
 	if b, builtin := export.Builtin(p.Name); builtin && sameProfile(p, b) {
-		b.Task = p.Task
-		return &b, req.Task, true
+		b.Tasks, b.AllTasks = p.Tasks, p.AllTasks
+		return &b, req.tasks(), true
 	} else if builtin || p.Name == "" {
 		p.Name = "personalizado"
 	}
 	if err := s.Validate(r.Context(), &p); err != nil {
 		writeErr(w, err, "")
-		return nil, "", false
+		return nil, nil, false
 	}
-	return &p, req.Task, true
+	return &p, req.tasks(), true
 }
 
-// sameProfile: os dois perfis geram o mesmo dataset (a tarefa não conta: os
-// padrões não têm tarefa).
+// sameProfile: os dois perfis geram o mesmo dataset (as tarefas não contam:
+// os padrões não têm tarefa).
 func sameProfile(a, b export.Profile) bool {
 	for _, p := range []*export.Profile{&a, &b} {
-		p.Builtin, p.Task, p.CreatedBy, p.UpdatedAt = false, "", "", time.Time{}
 		p.Normalize()
+		p.Builtin, p.Tasks, p.AllTasks, p.CreatedBy, p.UpdatedAt = false, nil, false, "", time.Time{}
 	}
 	ja, _ := json.Marshal(a)
 	jb, _ := json.Marshal(b)
@@ -300,7 +314,7 @@ func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(items) == 0 {
-		platform.WriteError(w, http.StatusBadRequest, fmt.Sprintf("nenhuma imagem verificada e anotada na tarefa %q passa nos filtros deste perfil", p.Task))
+		platform.WriteError(w, http.StatusBadRequest, fmt.Sprintf("nenhuma imagem verificada e anotada em %s passa nos filtros deste perfil", tasksText(p)))
 		return
 	}
 
@@ -318,4 +332,19 @@ func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
 	if err := zw.Close(); err != nil {
 		platform.LogError(fmt.Errorf("export %s: %w", p.Name, err))
 	}
+}
+
+// tasksText: "na tarefa \"placa\"" ou "nas tarefas \"a\" e \"b\"" (todas, com all_tasks).
+func tasksText(p *export.Profile) string {
+	if len(p.Tasks) == 1 {
+		return fmt.Sprintf("tarefa %q", p.Tasks[0])
+	}
+	quoted := make([]string, len(p.Tasks))
+	for i, t := range p.Tasks {
+		quoted[i] = fmt.Sprintf("%q", t)
+	}
+	if p.AllTasks {
+		return "todas as tarefas " + strings.Join(quoted, ", ")
+	}
+	return "alguma das tarefas " + strings.Join(quoted, ", ")
 }

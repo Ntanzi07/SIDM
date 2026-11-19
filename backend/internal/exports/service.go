@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"SIDM/internal/annotation"
+	"SIDM/internal/boxes"
 	"SIDM/internal/export"
 	"SIDM/internal/images"
 	"SIDM/internal/platform"
@@ -134,25 +135,31 @@ func (s *Service) DeleteProfile(ctx context.Context, name string) error {
 
 // ---------- dataset ----------
 
-// Prepare confere o pedido antes de montar o dataset: task (se vier) vale
-// mais que a tarefa do perfil, a tarefa tem que existir, e os pacotes do
-// perfil também (provavelmente foram renomeados ou apagados).
-func (s *Service) Prepare(ctx context.Context, p *export.Profile, task string) error {
-	if task = strings.TrimSpace(task); task != "" {
-		p.Task = task
+// Prepare confere o pedido antes de montar o dataset: as tarefas do pedido
+// (se vierem) valem mais que as do perfil, cada tarefa tem que existir, e os
+// pacotes do perfil também (provavelmente foram renomeados ou apagados).
+func (s *Service) Prepare(ctx context.Context, p *export.Profile, tasks []string) error {
+	p.Normalize() // um perfil salvo antes das várias tarefas tem só "task"
+	if len(tasks) > 0 {
+		p.SetTasks(tasks)
+	}
+	if len(p.Tasks) > export.MaxTasks {
+		return &InvalidError{fmt.Sprintf("no máximo %d tarefas num dataset", export.MaxTasks)}
 	}
 	ap, err := s.AnnotationProfile(ctx, p.AnnotationProfile)
 	if err != nil {
 		return err
 	}
 	p.Bind(ap)
-	if p.Task == "" {
+	if len(p.Tasks) == 0 {
 		return &InvalidError{"escolha a tarefa de anotação (as caixas de qual tarefa entram no dataset)"}
 	}
-	if _, err := s.boxes.FindTask(ctx, p.Task); errors.Is(err, platform.ErrNotFound) {
-		return &InvalidError{fmt.Sprintf("a tarefa %q não existe (foi renomeada ou apagada?)", p.Task)}
-	} else if err != nil {
-		return err
+	for _, task := range p.Tasks {
+		if _, err := s.boxes.FindTask(ctx, task); errors.Is(err, platform.ErrNotFound) {
+			return &InvalidError{fmt.Sprintf("a tarefa %q não existe (foi renomeada ou apagada?)", task)}
+		} else if err != nil {
+			return err
+		}
 	}
 	for _, name := range p.Packages {
 		if _, err := s.catalog.FindPackage(ctx, name); errors.Is(err, platform.ErrNotFound) {
@@ -168,7 +175,7 @@ func (s *Service) Prepare(ctx context.Context, p *export.Profile, task string) e
 // resumo. Os arquivos só são abertos na hora de escrever o zip.
 func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item, *Preview, error) {
 	prev := &Preview{
-		Profile: p.Name, Task: p.Task, Format: p.Format, Layout: p.Layout, Split: p.Split,
+		Profile: p.Name, Task: strings.Join(p.Tasks, " + "), Tasks: p.Tasks, AllTasks: p.AllTasks, Format: p.Format, Layout: p.Layout, Split: p.Split,
 		Images: map[string]int{}, Folders: map[string]int{}, Examples: []string{}, Boxes: map[string]int{}, Packages: p.Packages,
 	}
 	if prev.Packages == nil {
@@ -202,14 +209,21 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 			for i, img := range imgs {
 				ids[i] = img.SHA1
 			}
-			sets, err := s.boxes.FindSets(ctx, p.Task, ids)
-			if err != nil {
-				return nil, nil, err
+			// As caixas de cada tarefa (uma busca por tarefa e página).
+			byTask := make([]map[string]boxes.Set, len(p.Tasks))
+			for i, task := range p.Tasks {
+				if byTask[i], err = s.boxes.FindSets(ctx, task, ids); err != nil {
+					return nil, nil, err
+				}
 			}
 			for _, img := range imgs {
-				set, ok := sets[img.SHA1]
-				if !ok {
+				set, found := mergeSets(img.SHA1, byTask)
+				switch {
+				case found == 0:
 					prev.Skipped.NotAnnotated++
+					continue
+				case p.AllTasks && found < len(p.Tasks):
+					prev.Skipped.MissingTasks++
 					continue
 				}
 				// O "nome" da imagem: o v2 (file_name) se ela tem, senão o do
@@ -262,6 +276,36 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 	prev.Total = len(items)
 	prev.Classes = labels.Classes(seen)
 	return items, prev, nil
+}
+
+// mergeSets junta as caixas de uma imagem nas tarefas (na ordem do perfil)
+// e diz em quantas ela está anotada. O tamanho é o da primeira tarefa; as
+// caixas de uma tarefa com outro tamanho são levadas para ele (o CVAT pode ter
+// recebido a imagem redimensionada).
+func mergeSets(sha string, byTask []map[string]boxes.Set) (boxes.Set, int) {
+	var out boxes.Set
+	found := 0
+	for _, sets := range byTask {
+		set, ok := sets[sha]
+		if !ok {
+			continue
+		}
+		found++
+		if found == 1 {
+			out.Width, out.Height = set.Width, set.Height
+			out.Boxes = append([]boxes.Box{}, set.Boxes...)
+			continue
+		}
+		sx, sy := 1.0, 1.0
+		if set.Width > 0 && set.Height > 0 && out.Width > 0 && out.Height > 0 {
+			sx, sy = float64(out.Width)/float64(set.Width), float64(out.Height)/float64(set.Height)
+		}
+		for _, b := range set.Boxes {
+			b.X, b.W, b.Y, b.H = b.X*sx, b.W*sx, b.Y*sy, b.H*sy
+			out.Boxes = append(out.Boxes, b)
+		}
+	}
+	return out, found
 }
 
 func sortedKeys[V any](m map[string]V) []string {

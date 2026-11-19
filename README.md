@@ -209,7 +209,7 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `GET /export-profiles` | perfis de export: os padrões (`rf-detr`, `yolo`) e os salvos |
 | `POST /export-profiles` | cria um perfil de export |
 | `GET`/`PUT`/`DELETE /export-profiles/{name}` | um perfil de export (os padrões não mudam) |
-| `POST /exports/preview` | prévia do dataset: imagens por grupo, caixas por classe |
+| `POST /exports/preview` | prévia do dataset (uma ou várias tarefas): imagens por grupo, caixas por classe |
 | `POST /exports/download` | o zip do dataset |
 | `GET /annotation-profiles` | perfis de anotação: o padrão (`veiculos`) e os salvos |
 | `POST /annotation-profiles` | cria um perfil de anotação (os erros voltam todos juntos, em `problems`) |
@@ -683,13 +683,22 @@ e ela é tentada de novo na próxima subida.
 
 ## Export para treino (RF-DETR, YOLO, Pascal VOC)
 
-Na tela **Exportar**: escolha um perfil e a **tarefa**, veja a **prévia** e baixe
-o zip.
+Na tela **Exportar**: escolha um perfil e a **tarefa** (ou várias), veja a
+**prévia** e baixe o zip.
 
 **O que entra:** imagens **verificadas** e **anotadas na tarefa** escolhida que
 passam nos filtros do perfil. As anotadas como "sem objetos" entram sem caixas
 (negativas). Imagens pendentes não entram. Os perfis padrão servem para qualquer
-tarefa; um perfil próprio guarda a tarefa junto.
+tarefa; um perfil próprio guarda as tarefas junto.
+
+**Várias tarefas num dataset só** (ex.: `parabrisa` + `placa`): as caixas de cada
+tarefa entram juntas na mesma imagem (`"tasks": ["parabrisa", "placa"]` no perfil ou
+no pedido). Com **`all_tasks`** ("só as imagens anotadas em todas as tarefas", que a
+tela já marca ao escolher a segunda), uma imagem anotada só no para-brisa fica de
+fora: sem isso, ela entraria sem as caixas de placa, e o modelo aprenderia que a placa
+não marcada é fundo. A prévia conta essas imagens em `skipped.missing_tasks`. A mesma
+label em duas tarefas vira uma classe só (use o renomear das labels para separar).
+O formato de antes (`"task": "placa"`) continua valendo.
 
 **Perfis padrão** (não podem ser alterados; para mudar algo, salve com outro nome):
 
@@ -701,7 +710,7 @@ tarefa; um perfil próprio guarda a tarefa junto.
 | `voc-pastas` | Pascal VOC em pastas pelos metadados: `Car/01-640x480/Br/Traseiro/Noturno/` (tipo de veículo / resolução / tipo de placa / direção / período), com o nome no **padrão antigo** | sem divisão |
 
 **Um perfil próprio controla:**
-- **tarefa** (as caixas de qual tarefa entram);
+- **tarefas** (as caixas de quais tarefas entram, e se só as imagens anotadas em todas);
 - **formato e divisão** (porcentagens que somam 100; no YOLO a validação não pode ser 0);
 - **nome dos arquivos**: o do SIDM (v2), o **padrão antigo** (hash +
   características + placa, ex.: `02d9…3a3fF01LDBEB1S01KOY7386.jpg`) ou um modelo

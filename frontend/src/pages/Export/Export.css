@@ -348,3 +348,12 @@
   margin: 0 0 0 8px;
   font-size: 11px;
 }
+
+.export-all-tasks {
+  margin-top: 8px;
+  font-weight: 600;
+}
+
+.export-warning {
+  color: #b45309;
+}

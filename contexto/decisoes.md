@@ -12,7 +12,7 @@ apagada: marque "**substituída por** <data>".
 | — | Sem login: `X-User` | rede interna; login próprio fica para depois |
 | — | Perfis de import como dados (JSON no Mongo) | formato novo de CSV é configuração, não código |
 | — | Caixas por **tarefa** (projeto do CVAT); import na página da tarefa casando com o banco todo; label desconhecida entra na tarefa | vários projetos (placa, letras, capacete) nas mesmas imagens |
-| — | Export escolhe uma tarefa; "negativas" é opção (padrão: não) | o dataset é de um projeto só |
+| — | Export escolhe uma tarefa; "negativas" é opção (padrão: não) | o dataset é de um projeto só (**substituída por** 2026-11: várias tarefas) |
 | — | Export Pascal VOC e layout por pastas (níveis de metadados com nomes por valor), além do train/valid/test | o dataset antigo da equipe é organizado por tipo/resolução/placa/direção/período |
 | — | Modelo de nome de saída configurável no export (v2, padrão antigo, personalizado; precisa ter `{sha1}` ou `{name}`) | cada treino pede um nome |
 | 2026-11 | Microsserviços **não**; **monólito modular** | o problema era organização, não escala; um binário é mais simples de manter |
@@ -32,3 +32,4 @@ apagada: marque "**substituída por** <data>".
 | 2026-11 | O reimport do CVAT sobrescreve os atributos editados no SIDM (o ensaio avisa) | o CVAT é a fonte das caixas; casar caixa a caixa seria frágil |
 | 2026-11 | Atributo obrigatório de caixa faltando não bloqueia a verificação da imagem | as caixas são por tarefa, com ciclo próprio |
 | 2026-11 | Campo de objeto no export/pasta/nome é `<tipo>_<campo>` (do primeiro objeto do tipo); o nome sem o tipo (`plate`) fica como atalho | no `veiculos` os nomes de sempre (`vehicle_type`, `plate_type`) continuam valendo |
+| 2026-11 | Export de **várias tarefas** (`tasks`), com as caixas juntas na imagem; `all_tasks` (só as anotadas em todas) é opção, marcada pela tela ao escolher a segunda tarefa; a mesma label em duas tarefas vira uma classe | datasets como para-brisa + placa; sem `all_tasks`, o objeto não marcado viraria fundo |

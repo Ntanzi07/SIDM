@@ -72,6 +72,7 @@ func TestTaskRenamed(t *testing.T) {
 	for _, p := range []export.Profile{
 		{Name: "a", Format: export.FormatYOLO, Task: "capacete"},
 		{Name: "b", Format: export.FormatYOLO, Task: "outra"},
+		{Name: "c", Format: export.FormatYOLO, Tasks: []string{"parabrisa", "capacete"}},
 	} {
 		if err := s.CreateExportProfile(ctx, &p); err != nil {
 			t.Fatal(err)
@@ -85,5 +86,8 @@ func TestTaskRenamed(t *testing.T) {
 	}
 	if p, _ := s.FindExportProfile(ctx, "b"); p.Task != "outra" {
 		t.Errorf("o perfil de outra tarefa mudou: %q", p.Task)
+	}
+	if p, _ := s.FindExportProfile(ctx, "c"); len(p.Tasks) != 2 || p.Tasks[0] != "parabrisa" || p.Tasks[1] != "moto-capacete" {
+		t.Errorf("várias tarefas: %v", p.Tasks)
 	}
 }
