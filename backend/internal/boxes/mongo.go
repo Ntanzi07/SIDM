@@ -369,3 +369,70 @@ func (m *MongoRepo) DeletePackageSets(ctx context.Context, pkg string) error {
 	}
 	return nil
 }
+
+// LabelStats: por tarefa (imagens e caixas) e por tarefa + label (caixas e
+// imagens distintas), num aggregate com $facet. Lido em structs: os
+// documentos de dentro do resultado não são bson.M.
+func (m *MongoRepo) LabelStats(ctx context.Context, tasks []string, ids []string) (map[string]*TaskStats, error) {
+	match := bson.D{{Key: "$match", Value: bson.D{
+		{Key: "task", Value: bson.D{{Key: "$in", Value: tasks}}},
+		{Key: "image", Value: bson.D{{Key: "$in", Value: ids}}},
+	}}}
+	boxesOf := bson.D{{Key: "$ifNull", Value: bson.A{"$boxes", bson.A{}}}}
+	perTask := bson.A{bson.D{{Key: "$group", Value: bson.D{
+		{Key: "_id", Value: "$task"},
+		{Key: "images", Value: bson.D{{Key: "$sum", Value: 1}}},
+		{Key: "boxes", Value: bson.D{{Key: "$sum", Value: bson.D{{Key: "$size", Value: boxesOf}}}}},
+	}}}}
+	perLabel := bson.A{
+		bson.D{{Key: "$unwind", Value: "$boxes"}},
+		// uma linha por tarefa + label + imagem: depois, imagens = linhas
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: bson.D{{Key: "t", Value: "$task"}, {Key: "l", Value: "$boxes.label"}, {Key: "i", Value: "$image"}}},
+			{Key: "n", Value: bson.D{{Key: "$sum", Value: 1}}},
+		}}},
+		bson.D{{Key: "$group", Value: bson.D{
+			{Key: "_id", Value: bson.D{{Key: "t", Value: "$_id.t"}, {Key: "l", Value: "$_id.l"}}},
+			{Key: "images", Value: bson.D{{Key: "$sum", Value: 1}}},
+			{Key: "boxes", Value: bson.D{{Key: "$sum", Value: "$n"}}},
+		}}},
+	}
+	cur, err := m.sets().Aggregate(ctx, mongo.Pipeline{
+		match,
+		{{Key: "$facet", Value: bson.D{{Key: "per_task", Value: perTask}, {Key: "per_label", Value: perLabel}}}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("contar as labels: %w", err)
+	}
+	var out []struct {
+		PerTask []struct {
+			Task   string `bson:"_id"`
+			Images int64  `bson:"images"`
+			Boxes  int64  `bson:"boxes"`
+		} `bson:"per_task"`
+		PerLabel []struct {
+			ID struct {
+				Task  string `bson:"t"`
+				Label string `bson:"l"`
+			} `bson:"_id"`
+			Images int64 `bson:"images"`
+			Boxes  int64 `bson:"boxes"`
+		} `bson:"per_label"`
+	}
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("ler a contagem das labels: %w", err)
+	}
+	res := map[string]*TaskStats{}
+	if len(out) == 0 {
+		return res, nil
+	}
+	for _, t := range out[0].PerTask {
+		res[t.Task] = &TaskStats{Task: t.Task, Images: t.Images, Boxes: t.Boxes, Labels: map[string]LabelCount{}}
+	}
+	for _, l := range out[0].PerLabel {
+		if ts := res[l.ID.Task]; ts != nil {
+			ts.Labels[l.ID.Label] = LabelCount{Images: l.Images, Boxes: l.Boxes}
+		}
+	}
+	return res, nil
+}

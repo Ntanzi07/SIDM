@@ -1023,13 +1023,19 @@ paths:
         opção; sim/não é `true`/`false`. Campo ou opção que o perfil não tem: 400.
 
         Num campo `multi` a imagem conta em cada valor que tem: a soma passa do
-        total. Em `objects`, `images` conta imagens com o tipo e `count` conta
-        objetos; os `fields` de um objeto contam objetos. Tipos de objeto com
+        total. `missing` traz, por campo, quantas ficaram sem valor ("Não
+        informado"). Em `objects`, `images` conta imagens com o tipo e `count`
+        conta objetos; os `fields` e o `missing` de um objeto contam objetos. Tipos de objeto com
         caixa (CVAT) não entram: as caixas ficam no módulo de caixas.
       parameters:
         - { name: profile, in: query, required: true, schema: { type: string, example: veiculos } }
         - { name: status, in: query, schema: { type: string, enum: [verified, pending, all], default: verified } }
-        - { name: package, in: query, description: "Só este pacote (de outro perfil: tudo zero).", schema: { type: string } }
+        - name: package
+          in: query
+          description: "Os pacotes (repetido para vários: package=a&package=b). Sem nenhum: todos os do perfil; um de outro perfil não conta."
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
         - { name: fields.weather, in: query, description: "Exemplo de fields.<campo>.", schema: { type: string, example: rain } }
         - { name: objects.vehicle.type, in: query, description: "Exemplo de objects.<tipo>.<campo>.", schema: { type: string, example: truck } }
       responses:
@@ -1049,6 +1055,10 @@ paths:
                     description: Campo → valor → imagens.
                     additionalProperties: { $ref: "#/components/schemas/Counts" }
                     example: { day_time: { day: 100, night: 50 }, conditions: { no_damage: 140, dirty: 12 } }
+                  missing:
+                    type: object
+                    additionalProperties: { type: integer }
+                    description: Campo → imagens sem valor ("Não informado").
                   objects:
                     type: object
                     description: Tipo de objeto → imagens, objetos e campo → valor → objetos.
@@ -1060,7 +1070,66 @@ paths:
                         fields:
                           type: object
                           additionalProperties: { $ref: "#/components/schemas/Counts" }
+                        missing:
+                          type: object
+                          description: Campo → objetos sem valor ("Não informado").
+                          additionalProperties: { type: integer }
                     example: { vehicle: { images: 140, count: 210, fields: { type: { car: 160, truck: 50 } } } }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /boxes/stats:
+    get:
+      tags: [caixas]
+      summary: Labels das tarefas nas imagens de uma pesquisa
+      description: |
+        Conta as caixas de cada label, por tarefa, nas imagens que passam nos
+        mesmos filtros do `GET /images/stats` (`profile` obrigatório, `status`,
+        `package`, `fields.*`, `objects.*`). `task` repetido para várias; sem
+        nenhuma, todas as tarefas.
+
+        `images` (no topo) = imagens da pesquisa; numa tarefa, `images` =
+        imagens anotadas nela (com ou sem caixas). Numa label, `boxes` conta
+        caixas e `images` conta imagens com pelo menos uma. As labels da tarefa
+        que não aparecem vêm com zero.
+      parameters:
+        - name: task
+          in: query
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - { name: profile, in: query, required: true, schema: { type: string, example: veiculos } }
+        - { name: status, in: query, schema: { type: string, enum: [verified, pending, all], default: verified } }
+        - name: package
+          in: query
+          style: form
+          explode: true
+          schema: { type: array, items: { type: string } }
+        - { name: fields.weather, in: query, description: "Exemplo de fields.<campo>.", schema: { type: string, example: rain } }
+      responses:
+        "200":
+          description: As contagens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  images: { type: integer }
+                  tasks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        task: { type: string }
+                        images: { type: integer }
+                        boxes: { type: integer }
+                        labels:
+                          type: object
+                          additionalProperties:
+                            type: object
+                            properties:
+                              images: { type: integer }
+                              boxes: { type: integer }
+                          example: { helmet: { images: 120, boxes: 180 }, no_helmet: { images: 30, boxes: 34 } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
   /images/exists:

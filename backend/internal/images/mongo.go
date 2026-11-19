@@ -584,8 +584,16 @@ func (m *MongoRepo) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*
 		{Key: "packages", Value: bson.A{group("$package")}},
 		{Key: "status", Value: bson.A{group("$status")}},
 	}
+	// com valor: nem ausente, nem null, nem "", nem lista vazia (o resto é o
+	// "Não informado", que sai por diferença do total)
+	present := func(path string) bson.D {
+		return bson.D{{Key: "$match", Value: bson.D{{Key: path, Value: bson.D{{Key: "$nin", Value: bson.A{nil, "", bson.A{}}}}}}}}
+	}
+	count := bson.D{{Key: "$count", Value: "n"}}
 	for i, k := range spec.Fields {
-		facet = append(facet, bson.E{Key: fmt.Sprintf("f%d", i), Value: bson.A{unwind("fields." + k), group("$fields." + k)}})
+		facet = append(facet,
+			bson.E{Key: fmt.Sprintf("f%d", i), Value: bson.A{unwind("fields." + k), group("$fields." + k)}},
+			bson.E{Key: fmt.Sprintf("f%dp", i), Value: bson.A{present("fields." + k), count}})
 	}
 	types := sortedKeys(spec.Objects)
 	for i, t := range types {
@@ -597,9 +605,11 @@ func (m *MongoRepo) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*
 			bson.D{{Key: "$group", Value: bson.D{{Key: "_id", Value: nil}, {Key: "images", Value: bson.D{{Key: "$sum", Value: 1}}}, {Key: "count", Value: bson.D{{Key: "$sum", Value: "$n"}}}}}},
 		}})
 		for j, k := range spec.Objects[t] {
-			facet = append(facet, bson.E{Key: fmt.Sprintf("o%d_%d", i, j), Value: bson.A{
-				unwind("objects"), ofType, unwind("objects.fields." + k), group("$objects.fields." + k),
-			}})
+			facet = append(facet,
+				bson.E{Key: fmt.Sprintf("o%d_%d", i, j), Value: bson.A{
+					unwind("objects"), ofType, unwind("objects.fields." + k), group("$objects.fields." + k),
+				}},
+				bson.E{Key: fmt.Sprintf("o%d_%dp", i, j), Value: bson.A{unwind("objects"), ofType, present("objects.fields." + k), count}})
 		}
 	}
 	pipeline := bson.A{bson.D{{Key: "$match", Value: f.toBSON()}}, bson.D{{Key: "$facet", Value: facet}}}
@@ -648,8 +658,15 @@ func (m *MongoRepo) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*
 	}
 	fill(st.Packages, "packages")
 	fill(st.Status, "status")
+	counted := func(name string) int64 {
+		if r := rows(name); len(r) > 0 {
+			return toInt(r[0]["n"])
+		}
+		return 0
+	}
 	for i, k := range spec.Fields {
 		fill(st.Fields[k], fmt.Sprintf("f%d", i))
+		st.Missing[k] = st.Total - counted(fmt.Sprintf("f%dp", i))
 	}
 	for i, t := range types {
 		o := st.Objects[t]
@@ -658,6 +675,7 @@ func (m *MongoRepo) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*
 		}
 		for j, k := range spec.Objects[t] {
 			fill(o.Fields[k], fmt.Sprintf("o%d_%d", i, j))
+			o.Missing[k] = o.Count - counted(fmt.Sprintf("o%d_%dp", i, j))
 		}
 	}
 	return st, nil
@@ -674,4 +692,23 @@ func toInt(v any) int64 {
 		return int64(x)
 	}
 	return 0
+}
+
+func (m *MongoRepo) MatchingIDs(ctx context.Context, f ImageFilter) ([]string, error) {
+	cur, err := m.db.Collection("images").Find(ctx, f.toBSON(),
+		options.Find().SetProjection(bson.D{{Key: "_id", Value: 1}}).SetSort(bson.D{{Key: "_id", Value: 1}}))
+	if err != nil {
+		return nil, err
+	}
+	var docs []struct {
+		ID string `bson:"_id"`
+	}
+	if err := cur.All(ctx, &docs); err != nil {
+		return nil, err
+	}
+	ids := make([]string, len(docs))
+	for i, d := range docs {
+		ids[i] = d.ID
+	}
+	return ids, nil
 }

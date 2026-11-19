@@ -17,10 +17,13 @@ import (
 )
 
 // Erros comuns, para os módulos e os handlers conversarem sem conhecer o
-// banco: errors.Is(err, platform.ErrNotFound) vira 404, ErrDuplicate vira 409.
+// banco: errors.Is(err, platform.ErrNotFound) vira 404, ErrDuplicate vira 409,
+// ErrInvalid vira 400 (um erro de módulo que embrulha o ErrInvalid leva a
+// mensagem dele: assim um módulo trata o 400 de outro sem importar ele).
 var (
 	ErrNotFound  = errors.New("não encontrado")
 	ErrDuplicate = errors.New("já cadastrado")
+	ErrInvalid   = errors.New("pedido inválido")
 )
 
 // Route é uma rota: o módulo declara as suas, e o servidor registra todas

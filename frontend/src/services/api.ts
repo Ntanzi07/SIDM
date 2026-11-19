@@ -873,3 +873,65 @@ export async function listPackageNames(): Promise<string[]> {
   const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
   return response.items.map((item) => item.name)
 }
+
+// ---------- pesquisa ----------
+
+export type Counts = Record<string, number>
+
+// GET /images/stats: as contagens de um perfil de anotação. Num campo multi a
+// imagem conta em cada valor (a soma passa do total); missing = "Não
+// informado". Nos objetos, fields e missing contam OBJETOS.
+export type ImageStats = {
+  profile: string
+  total: number
+  packages: Counts
+  status: Counts
+  fields: Record<string, Counts>
+  missing: Counts
+  objects: Record<string, { images: number; count: number; fields: Record<string, Counts>; missing: Counts }>
+}
+
+export type StatsStatus = 'verified' | 'pending' | 'all'
+
+// A pesquisa: o perfil, o status, os pacotes (vazio = todos os do perfil) e
+// os filtros ("fields.<campo>" ou "objects.<tipo>.<campo>" → valor).
+export type StatsQuery = {
+  profile: string
+  status: StatsStatus
+  packages: string[]
+  filters: Record<string, string>
+}
+
+function statsParams(search: StatsQuery): URLSearchParams {
+  const query = new URLSearchParams({ profile: search.profile, status: search.status })
+  for (const name of search.packages) query.append('package', name)
+  for (const [key, value] of Object.entries(search.filters)) {
+    if (value) query.set(key, value)
+  }
+  return query
+}
+
+export async function getImageStats(search: StatsQuery): Promise<ImageStats> {
+  return request<ImageStats>(`/images/stats?${statsParams(search).toString()}`)
+}
+
+// GET /boxes/stats: as labels das tarefas nas imagens da pesquisa. Numa
+// tarefa, images = imagens anotadas nela; numa label, boxes = caixas e
+// images = imagens com pelo menos uma.
+export type LabelStats = {
+  images: number
+  tasks: Array<{ task: string; images: number; boxes: number; labels: Record<string, { images: number; boxes: number }> }>
+}
+
+// tasks vazio = todas as tarefas.
+export async function getLabelStats(search: StatsQuery, tasks: string[]): Promise<LabelStats> {
+  const query = statsParams(search)
+  for (const name of tasks) query.append('task', name)
+  return request<LabelStats>(`/boxes/stats?${query.toString()}`)
+}
+
+// Os pacotes de um perfil (para o filtro de pacote da pesquisa).
+export async function listPackagesOfProfile(profile: string): Promise<string[]> {
+  const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
+  return response.items.filter((item) => item.profile === profile).map((item) => item.name)
+}

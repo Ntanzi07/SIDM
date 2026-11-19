@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"time"
 
 	"SIDM/internal/annotation"
@@ -128,6 +129,9 @@ type Repo interface {
 	// versão prev (senão ErrConflict; platform.ErrNotFound se sumiu).
 	UpdateSet(ctx context.Context, set *Set, prev time.Time) error
 	PackageCounts(ctx context.Context, pkg string) ([]PackageCount, error)
+	// LabelStats conta, nas tarefas, as caixas das imagens ids: por tarefa e
+	// por label (ver stats.go).
+	LabelStats(ctx context.Context, tasks []string, ids []string) (map[string]*TaskStats, error)
 	// RenameTaskSets / DeleteTaskSets: as caixas de uma tarefa.
 	RenameTaskSets(ctx context.Context, oldName, newName string) error
 	DeleteTaskSets(ctx context.Context, task string) (int64, error)
@@ -153,6 +157,10 @@ type Images interface {
 	Exists(ctx context.Context, sha1 string) (bool, error)
 	// InPackage: uma página das imagens do pacote (para o cvat.zip).
 	InPackage(ctx context.Context, pkg string, limit, skip int64) ([]ImageRef, int64, error)
+	// SearchIDs: os sha1 das imagens que passam na pesquisa da query (os
+	// parâmetros do GET /images/stats: profile, status, package, fields.*,
+	// objects.*). Erro que embrulha platform.ErrInvalid = pedido inválido.
+	SearchIDs(ctx context.Context, q url.Values) ([]string, error)
 	// Verified: quais destes sha1 estão verificados.
 	Verified(ctx context.Context, ids []string) (map[string]bool, error)
 }

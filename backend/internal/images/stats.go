@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
 	"strings"
@@ -24,10 +25,15 @@ type Counts map[string]int64
 
 // ObjectStats: um tipo de objeto. Images = imagens com pelo menos um; Count =
 // objetos ao todo; Fields conta OBJETOS (160 carros, não 160 imagens).
+//
+// Missing: por campo, quantos ficaram sem valor ("Não informado"): imagens
+// em Stats.Missing, objetos em ObjectStats.Missing. Vem pronto porque num
+// campo multi a conta "total − soma" não funciona.
 type ObjectStats struct {
-	Images int64             `json:"images"`
-	Count  int64             `json:"count"`
-	Fields map[string]Counts `json:"fields"`
+	Images  int64             `json:"images"`
+	Count   int64             `json:"count"`
+	Fields  map[string]Counts `json:"fields"`
+	Missing Counts            `json:"missing"`
 }
 
 // Stats é a resposta do GET /images/stats.
@@ -37,6 +43,7 @@ type Stats struct {
 	Packages Counts                  `json:"packages"`
 	Status   Counts                  `json:"status"`
 	Fields   map[string]Counts       `json:"fields"`
+	Missing  Counts                  `json:"missing"`
 	Objects  map[string]*ObjectStats `json:"objects"`
 }
 
@@ -80,18 +87,35 @@ func SpecOf(p *annotation.Profile) StatsSpec {
 // emptyStats: tudo zerado, com as chaves do spec (a tela mostra os campos
 // mesmo sem imagem nenhuma).
 func emptyStats(spec StatsSpec) *Stats {
-	st := &Stats{Packages: Counts{}, Status: Counts{}, Fields: map[string]Counts{}, Objects: map[string]*ObjectStats{}}
+	st := &Stats{Packages: Counts{}, Status: Counts{}, Fields: map[string]Counts{}, Missing: Counts{}, Objects: map[string]*ObjectStats{}}
 	for _, k := range spec.Fields {
 		st.Fields[k] = Counts{}
+		st.Missing[k] = 0
 	}
 	for t, keys := range spec.Objects {
-		o := &ObjectStats{Fields: map[string]Counts{}}
+		o := &ObjectStats{Fields: map[string]Counts{}, Missing: Counts{}}
 		for _, k := range keys {
 			o.Fields[k] = Counts{}
+			o.Missing[k] = 0
 		}
 		st.Objects[t] = o
 	}
 	return st
+}
+
+// hasValue: o campo tem valor (nem ausente, nem vazio, nem lista vazia).
+func hasValue(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case string:
+		return x != ""
+	case []string:
+		return len(x) > 0
+	case []any:
+		return len(x) > 0
+	}
+	return true
 }
 
 // countKey: o valor como chave do Counts.
@@ -114,45 +138,82 @@ type StatsError struct{ Msg string }
 
 func (e *StatsError) Error() string { return e.Msg }
 
-// Stats conta as imagens do perfil que passam no filtro. O filtro chega sem
-// pacotes do perfil: o serviço põe (e um Package de outro perfil dá zero).
-func (s *Service) Stats(ctx context.Context, profile string, f ImageFilter) (*Stats, error) {
+// Unwrap: para o boxes (que não importa este módulo) reconhecer o 400.
+func (e *StatsError) Unwrap() error { return platform.ErrInvalid }
+
+// searchFilter prepara o filtro de uma pesquisa no perfil: Package/Packages
+// do filtro são os pacotes PEDIDOS, cruzados com os do perfil (vazio = todos
+// os do perfil; um pacote de outro perfil não conta nada). none = nenhum
+// pacote sobrou: não há o que buscar.
+func (s *Service) searchFilter(ctx context.Context, profile string, f ImageFilter) (p *annotation.Profile, out ImageFilter, none bool, err error) {
 	if strings.TrimSpace(profile) == "" {
-		return nil, &StatsError{"informe o perfil de anotação (?profile=)"}
+		return nil, f, false, &StatsError{"informe o perfil de anotação (?profile=)"}
 	}
-	p, err := s.profileNamed(ctx, profile)
+	if p, err = s.profileNamed(ctx, profile); err != nil {
+		return nil, f, false, err
+	}
+	pkgs, err := s.catalog.PackagesWithProfile(ctx, p.Name)
+	if err != nil {
+		return nil, f, false, err
+	}
+	asked := f.Packages
+	if f.Package != "" {
+		asked = append(slices.Clone(asked), f.Package)
+	}
+	if len(asked) > 0 {
+		pkgs = slices.DeleteFunc(slices.Clone(pkgs), func(p string) bool { return !slices.Contains(asked, p) })
+	}
+	f.Package, f.Packages, f.Limit, f.Skip = "", pkgs, 0, 0
+	return p, f, len(pkgs) == 0, nil
+}
+
+// Stats conta as imagens do perfil que passam no filtro (ver searchFilter).
+func (s *Service) Stats(ctx context.Context, profile string, f ImageFilter) (*Stats, error) {
+	p, f, none, err := s.searchFilter(ctx, profile, f)
 	if err != nil {
 		return nil, err
 	}
 	spec := SpecOf(p)
-	pkgs, err := s.catalog.PackagesWithProfile(ctx, p.Name)
-	if err != nil {
-		return nil, err
-	}
-	if f.Package != "" {
-		if !slices.Contains(pkgs, f.Package) {
-			pkgs = nil // pacote de outro perfil (ou que não existe): nada a contar
-		} else {
-			pkgs = []string{f.Package}
+	st := emptyStats(spec)
+	if !none {
+		if st, err = s.repo.Stats(ctx, f, spec); err != nil {
+			return nil, err
 		}
-		f.Package = ""
-	}
-	if len(pkgs) == 0 {
-		st := emptyStats(spec)
-		st.Profile = p.Name
-		return st, nil
-	}
-	f.Packages, f.Limit, f.Skip = pkgs, 0, 0
-	st, err := s.repo.Stats(ctx, f, spec)
-	if err != nil {
-		return nil, err
 	}
 	st.Profile = p.Name
 	return st, nil
 }
 
-// GET /images/stats?profile=veiculos&status=verified&package=...&fields.<campo>=...&objects.<tipo>.<campo>=...
+// SearchIDs: os sha1 das imagens que passam na pesquisa da query (os mesmos
+// parâmetros do GET /images/stats). É o que o boxes usa para contar as labels
+// com os mesmos filtros. Erros: *StatsError (pedido inválido) ou
+// platform.ErrNotFound (perfil que não existe).
+func (s *Service) SearchIDs(ctx context.Context, q url.Values) ([]string, error) {
+	name := strings.TrimSpace(q.Get("profile"))
+	if name == "" {
+		return nil, &StatsError{"informe o perfil de anotação (?profile=)"}
+	}
+	p, err := s.profileNamed(ctx, name)
+	if errors.Is(err, platform.ErrNotFound) {
+		return nil, fmt.Errorf("perfil de anotação %q: %w", name, err)
+	}
+	if err != nil {
+		return nil, err
+	}
+	f, err := statsFilter(q, p)
+	if err != nil {
+		return nil, err
+	}
+	_, f, none, err := s.searchFilter(ctx, p.Name, f)
+	if err != nil || none {
+		return []string{}, err
+	}
+	return s.repo.MatchingIDs(ctx, f)
+}
+
+// GET /images/stats?profile=veiculos&status=verified&package=a&package=b&fields.<campo>=...&objects.<tipo>.<campo>=...
 //
+// package: repetido para vários (sem nenhum: todos os pacotes do perfil).
 // status: verified (padrão), pending ou all. fields.<campo> e
 // objects.<tipo>.<campo> são os campos do perfil, com o valor pelo valor, código
 // ou nome da opção (sim/não: true/false). Os objects.<tipo>.<campo> de um mesmo
@@ -194,7 +255,12 @@ func (s *Service) handleStats(w http.ResponseWriter, r *http.Request) {
 // perfil não tem, ou um valor fora das opções, é erro (melhor que um zero
 // que parece resposta).
 func statsFilter(q map[string][]string, p *annotation.Profile) (ImageFilter, error) {
-	f := ImageFilter{Package: strings.TrimSpace(first(q, "package")), Fields: map[string]any{}}
+	f := ImageFilter{Fields: map[string]any{}}
+	for _, p := range q["package"] { // package=a&package=b
+		if p = strings.TrimSpace(p); p != "" && !slices.Contains(f.Packages, p) {
+			f.Packages = append(f.Packages, p)
+		}
+	}
 	switch st := strings.TrimSpace(first(q, "status")); st {
 	case "", StatusVerified:
 		f.Status = StatusVerified

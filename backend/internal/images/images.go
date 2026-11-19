@@ -162,6 +162,8 @@ type Repo interface {
 	// Stats conta as imagens do filtro (Limit e Skip não valem) pelo que o
 	// spec pede: ver stats.go.
 	Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Stats, error)
+	// MatchingIDs: os sha1 de todas as imagens do filtro (sem página), em ordem.
+	MatchingIDs(ctx context.Context, f ImageFilter) ([]string, error)
 
 	PackageProgress(ctx context.Context, names []string) (map[string]catalog.Progress, error)
 	RenamePackageImages(ctx context.Context, oldName, newName string) (int64, error)

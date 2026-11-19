@@ -28,6 +28,7 @@ import (
 //	GET    /images/{sha1}/boxes       as caixas de uma imagem, em todas as tarefas
 //	GET    /packages/{name}/boxes     por tarefa: imagens do pacote anotadas nela
 //	GET    /packages/{name}/cvat.zip  as imagens do pacote, para criar a task no CVAT
+//	GET    /boxes/stats               labels das tarefas nas imagens de uma pesquisa (GET /images/stats)
 func (s *Service) Routes() []platform.Route {
 	return []platform.Route{
 		{Method: "GET", Path: "/tasks", Handler: s.handleListTasks},
@@ -39,6 +40,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "GET", Path: "/images/{sha1}/boxes", Handler: s.handleImageBoxes},
 		{Method: "PUT", Path: "/images/{sha1}/boxes/{task}", Handler: s.handleUpdateAttributes},
 		{Method: "GET", Path: "/packages/{name}/boxes", Handler: s.handlePackageBoxes},
+		{Method: "GET", Path: "/boxes/stats", Handler: s.handleLabelStats},
 		{Method: "GET", Path: "/packages/{name}/cvat.zip", Handler: s.handleCVATZip},
 	}
 }

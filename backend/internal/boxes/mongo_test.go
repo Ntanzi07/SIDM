@@ -5,6 +5,7 @@ package boxes
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -288,4 +289,44 @@ func TestMongoDuasEdicoesSeguidas(t *testing.T) {
 		}
 		version = set.Version()
 	}
+}
+
+// O Mongo conta as labels igual à memória.
+func TestMongoContarLabels(t *testing.T) {
+	r := testRepo(t)
+	ctx := context.Background()
+	sets := []Set{
+		boxSet("capacete", "a", "p1", "helmet", "helmet", "rider"),
+		boxSet("capacete", "b", "p1", "helmet"),
+		boxSet("capacete", "c", "p1"),
+		boxSet("placa", "a", "p1", "placa"),
+		boxSet("capacete", "fora", "p1", "helmet"),
+	}
+	if err := r.ReplaceSets(ctx, sets); err != nil {
+		t.Fatal(err)
+	}
+	mem := NewMemory()
+	for _, set := range sets {
+		mem.Put(set)
+	}
+	ids := []string{"a", "b", "c", "d"}
+	got, err := r.LabelStats(ctx, []string{"capacete", "placa"}, ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, _ := mem.LabelStats(ctx, []string{"capacete", "placa"}, ids)
+	if fmt.Sprint(deref(got)) != fmt.Sprint(deref(want)) {
+		t.Errorf("mongo  = %v\nmemória = %v", deref(got), deref(want))
+	}
+	if c := got["capacete"]; c == nil || c.Images != 3 || c.Boxes != 4 || c.Labels["helmet"] != (LabelCount{Images: 2, Boxes: 3}) {
+		t.Errorf("capacete: %+v", c)
+	}
+}
+
+func deref(m map[string]*TaskStats) map[string]TaskStats {
+	out := map[string]TaskStats{}
+	for k, v := range m {
+		out[k] = *v
+	}
+	return out
 }

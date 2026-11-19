@@ -8,6 +8,7 @@ import { AnnotationPage } from '../pages/Annotation/AnnotationPage'
 import { SettingsPage } from '../pages/Settings/SettingsPage'
 import { ImageViewerPage } from '../pages/Viewer/ImageViewerPage'
 import { TasksPage } from '../pages/Tasks/TasksPage'
+import { SearchPage } from '../pages/Search/SearchPage'
 
 export function Router() {
   return (
@@ -24,6 +25,7 @@ export function Router() {
           <Route path="/tarefas" element={<TasksPage />} />
           <Route path="/tarefas/:name" element={<TasksPage />} />
           <Route path="/exportar" element={<ExportPage />} />
+          <Route path="/pesquisa" element={<SearchPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

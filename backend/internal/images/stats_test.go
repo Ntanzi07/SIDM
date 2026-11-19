@@ -26,7 +26,8 @@ func statsImages() []*Image {
 			veh("AAA1A11", "car", "white"), veh("BBB2B22", "truck", "white")),
 		mk("b", "p1", StatusVerified, map[string]any{"weather": "clear", "conditions": []string{"no_damage"}, "night": false},
 			veh("CCC3C33", "car", "black")),
-		mk("c", "p2", StatusVerified, map[string]any{"weather": "rain"}),
+		mk("c", "p2", StatusVerified, map[string]any{"weather": "rain", "conditions": []string{}},
+			annotation.Object{Type: "vehicle", Fields: map[string]any{"type": "car"}}), // sem cor
 		mk("d", "p2", StatusPending, map[string]any{"weather": "rain", "night": true}),
 	}
 }
@@ -44,10 +45,11 @@ func wantStats() *Stats {
 			"conditions": {"dirty": 1, "no_damage": 2}, // a soma (3) não é o total de imagens com o campo (2)
 			"night":      {"true": 1, "false": 1},
 		},
-		Objects: map[string]*ObjectStats{"vehicle": {Images: 2, Count: 3, Fields: map[string]Counts{
-			"type":  {"car": 2, "truck": 1},
+		Missing: Counts{"weather": 0, "conditions": 1, "night": 1}, // c: lista vazia e sem night
+		Objects: map[string]*ObjectStats{"vehicle": {Images: 3, Count: 4, Fields: map[string]Counts{
+			"type":  {"car": 3, "truck": 1},
 			"color": {"white": 2, "black": 1},
-		}}},
+		}, Missing: Counts{"type": 0, "color": 1}}},
 	}
 }
 
@@ -79,7 +81,7 @@ func TestStatsNaMemoria(t *testing.T) {
 	}
 	// sem nada: as chaves do spec aparecem zeradas
 	got, _ = m.Stats(ctx, ImageFilter{Packages: []string{"outro"}}, statsSpec)
-	if got.Total != 0 || got.Fields["weather"] == nil || got.Objects["vehicle"].Fields["type"] == nil {
+	if got.Total != 0 || got.Fields["weather"] == nil || got.Objects["vehicle"].Fields["type"] == nil || got.Missing["weather"] != 0 {
 		t.Errorf("vazio: %+v", got)
 	}
 }

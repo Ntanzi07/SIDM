@@ -79,6 +79,14 @@ export function Header() {
           className={({ isActive }) =>
             isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
           }
+          to="/pesquisa"
+        >
+          Pesquisa
+        </NavLink>
+        <NavLink
+          className={({ isActive }) =>
+            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
+          }
           to="/configurar"
         >
           Configurar
@@ -87,4 +95,4 @@ export function Header() {
       <UserName />
     </header>
   )
-}
+}

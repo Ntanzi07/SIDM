@@ -27,10 +27,12 @@ Atualizado em 2026-11-19. Branch de trabalho: `feat/filter`.
 
 ## Próximos passos (em ordem)
 
-- **Pesquisa/dashboard (Nathan, em andamento):** o backend está pronto
-  (`GET /images/stats`, `images/stats.go`, `ImageFilter.Packages`); falta a tela
-  `/pesquisa` (escolher o perfil, filtros montados dos campos dele, contagens e barras;
-  clicar num número abre a lista em `GET /images` com os mesmos filtros).
+- **Pesquisa/dashboard (Nathan):** pronta a primeira versão. Backend:
+  `GET /images/stats` (contagens por campo, com `missing` = "Não informado") e
+  `GET /boxes/stats` (labels das tarefas nas mesmas imagens). Tela `/pesquisa`
+  (`pages/Search`): perfil, status, vários pacotes, tarefas (todas ou algumas), filtros
+  dos campos, cartões com barras (clicar num valor filtra). O front vai ser refeito;
+  falta abrir a lista das imagens de um número.
 - **Export sem caixas (colega da equipe, em andamento):** só os dados anotados de cada
   imagem, sem as caixas do CVAT, no módulo `exports`.
 - Depois: levar os atributos das caixas para o export; histórico das edições de atributo.

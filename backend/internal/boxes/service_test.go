@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +28,16 @@ func (f fakeImages) InPackage(ctx context.Context, pkg string, limit, skip int64
 }
 func (f fakeImages) Verified(ctx context.Context, ids []string) (map[string]bool, error) {
 	return f.verified, nil
+}
+
+// SearchIDs: as imagens de verified, todas (o filtro é testado na API).
+func (f fakeImages) SearchIDs(ctx context.Context, q url.Values) ([]string, error) {
+	ids := []string{}
+	for id := range f.verified {
+		ids = append(ids, id)
+	}
+	slices.Sort(ids)
+	return ids, nil
 }
 
 type fakeListener struct {
@@ -200,5 +212,40 @@ func TestEdicoesNoMesmoMilissegundo(t *testing.T) {
 		if _, err := edit(old); !errors.Is(err, ErrConflict) {
 			t.Errorf("versão velha %s: %v", old.Format(time.RFC3339Nano), err)
 		}
+	}
+}
+
+// As labels das tarefas pedidas, só nas imagens da pesquisa: caixas e
+// imagens por label, e as labels da tarefa que não aparecem com zero.
+func TestContarLabels(t *testing.T) {
+	ctx := context.Background()
+	mem := NewMemory()
+	mem.Tasks["capacete"] = Task{Name: "capacete", Labels: []string{"helmet", "no_helmet", "rider"}}
+	mem.Tasks["placa"] = Task{Name: "placa", Labels: []string{"placa"}}
+	mem.Put(Set{Task: "capacete", ImageID: "a", Boxes: []Box{{Label: "helmet"}, {Label: "helmet"}, {Label: "rider"}}})
+	mem.Put(Set{Task: "capacete", ImageID: "b", Boxes: []Box{{Label: "helmet"}}})
+	mem.Put(Set{Task: "capacete", ImageID: "c"}) // anotada sem caixas (negativa)
+	mem.Put(Set{Task: "placa", ImageID: "a", Boxes: []Box{{Label: "placa"}}})
+	mem.Put(Set{Task: "capacete", ImageID: "fora", Boxes: []Box{{Label: "helmet"}}}) // fora da pesquisa
+	s := New(mem, fakeImages{verified: map[string]bool{"a": true, "b": true, "c": true, "d": true}}, nil, nil, nil)
+
+	st, err := s.LabelStats(ctx, nil, []string{"capacete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Images != 4 || len(st.Tasks) != 1 {
+		t.Fatalf("%+v", st)
+	}
+	c := st.Tasks[0]
+	if c.Images != 3 || c.Boxes != 4 || c.Labels["helmet"] != (LabelCount{Images: 2, Boxes: 3}) ||
+		c.Labels["rider"] != (LabelCount{Images: 1, Boxes: 1}) || c.Labels["no_helmet"] != (LabelCount{}) {
+		t.Errorf("capacete: %+v", c)
+	}
+	// sem tarefa: todas, em ordem
+	if st, _ = s.LabelStats(ctx, nil, nil); len(st.Tasks) != 2 || st.Tasks[1].Task != "placa" || st.Tasks[1].Labels["placa"].Boxes != 1 {
+		t.Errorf("todas: %+v", st.Tasks)
+	}
+	if _, err := s.LabelStats(ctx, nil, []string{"nao-existe"}); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("tarefa inexistente: %v", err)
 	}
 }

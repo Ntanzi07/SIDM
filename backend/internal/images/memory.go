@@ -417,6 +417,9 @@ func (m *Memory) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Sta
 		st.Status[img.Status]++
 		for _, k := range spec.Fields {
 			add(st.Fields[k], img.Fields[k])
+			if !hasValue(img.Fields[k]) {
+				st.Missing[k]++
+			}
 		}
 		for t, keys := range spec.Objects {
 			o, n := st.Objects[t], int64(0)
@@ -427,6 +430,9 @@ func (m *Memory) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Sta
 				n++
 				for _, k := range keys {
 					add(o.Fields[k], obj.Fields[k])
+					if !hasValue(obj.Fields[k]) {
+						o.Missing[k]++
+					}
 				}
 			}
 			o.Count += n
@@ -436,4 +442,20 @@ func (m *Memory) Stats(ctx context.Context, f ImageFilter, spec StatsSpec) (*Sta
 		}
 	}
 	return st, nil
+}
+
+func (m *Memory) MatchingIDs(ctx context.Context, f ImageFilter) ([]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	ids := []string{}
+	for _, img := range m.Images {
+		if f.match(&img) {
+			ids = append(ids, img.SHA1)
+		}
+	}
+	sort.Strings(ids)
+	return ids, nil
 }

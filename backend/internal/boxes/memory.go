@@ -265,3 +265,32 @@ func (m *Memory) DeletePackageSets(ctx context.Context, pkg string) error {
 	}
 	return nil
 }
+
+func (m *Memory) LabelStats(ctx context.Context, tasks []string, ids []string) (map[string]*TaskStats, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	res := map[string]*TaskStats{}
+	for _, set := range m.Sets {
+		if !slices.Contains(tasks, set.Task) || !slices.Contains(ids, set.ImageID) {
+			continue
+		}
+		ts := res[set.Task]
+		if ts == nil {
+			ts = &TaskStats{Task: set.Task, Labels: map[string]LabelCount{}}
+			res[set.Task] = ts
+		}
+		ts.Images++
+		ts.Boxes += int64(len(set.Boxes))
+		seen := map[string]bool{}
+		for _, b := range set.Boxes {
+			c := ts.Labels[b.Label]
+			c.Boxes++
+			if !seen[b.Label] {
+				seen[b.Label] = true
+				c.Images++
+			}
+			ts.Labels[b.Label] = c
+		}
+	}
+	return res, nil
+}
