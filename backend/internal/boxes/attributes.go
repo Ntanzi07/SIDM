@@ -77,8 +77,14 @@ func (s *Service) UpdateAttributes(ctx context.Context, sha1, task string, in At
 		return nil, &annotation.InvalidError{Msg: msg, Problems: all}
 	}
 
+	// A versão é uma data em milissegundos: duas gravações no mesmo
+	// milissegundo teriam a mesma versão, e a versão velha passaria. Por isso
+	// a nova é sempre maior que a anterior.
 	prev := set.Version()
 	now := s.now()
+	if !now.After(prev) {
+		now = prev.Add(time.Millisecond)
+	}
 	set.Boxes, set.UpdatedBy, set.UpdatedAt = boxes, user, &now
 	if err := s.repo.UpdateSet(ctx, &set, prev); err != nil {
 		return nil, err

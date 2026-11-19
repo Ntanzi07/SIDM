@@ -566,8 +566,9 @@ atributos seguem os campos dele:
   as caixas com obrigatório vazio; `untyped_labels` lista as labels sem tipo no perfil
   (essas guardam os atributos como vieram);
 - **na tela de anotação**, clique na caixa para ver e editar os atributos
-  (`PUT /images/{sha1}/boxes/{tarefa}`, com a `version` lida: 409 se as caixas
-  mudaram). A posição e a label continuam vindo só do CVAT;
+  (`PUT /images/{sha1}/boxes/{tarefa}`, com `X-User` e a `version` lida: 409 se as
+  caixas mudaram; o `updated_at` da resposta já serve de `version` para a próxima
+  edição). A posição e a label continuam vindo só do CVAT;
 - **um novo import da tarefa sobrescreve** o que foi editado no SIDM (o CVAT é a
   fonte); o ensaio avisa em `edited_replaced`;
 - atributo obrigatório faltando **não impede** de verificar a imagem: a tela mostra a

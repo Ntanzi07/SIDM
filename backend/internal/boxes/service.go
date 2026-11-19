@@ -24,9 +24,12 @@ type Service struct {
 	now       func() time.Time
 }
 
+// O relógio corta em milissegundos, a precisão de um Date no Mongo: assim a
+// data que a resposta devolve (o updated_at, que é a versão da edição) é
+// igual à gravada, e pode ser mandada de volta na próxima edição sem 409.
 func New(repo Repo, images Images, files Files, packages Packages, profiles Profiles, listeners ...TaskListener) *Service {
 	return &Service{repo: repo, images: images, files: files, packages: packages, profiles: profiles, listeners: listeners,
-		now: func() time.Time { return time.Now().UTC() }}
+		now: func() time.Time { return time.Now().UTC().Truncate(time.Millisecond) }}
 }
 
 // Listen inscreve mais um interessado na renomeação de tarefas (para quem é

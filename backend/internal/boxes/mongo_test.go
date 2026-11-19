@@ -263,3 +263,29 @@ func TestMongoEditarAtributos(t *testing.T) {
 		t.Error("o reimport deveria zerar updated_at")
 	}
 }
+
+// Duas edições seguidas pelo serviço, a segunda com a versão que a primeira
+// devolveu: o Mongo guarda o Date em milissegundos, então a versão devolvida
+// tem de ser a gravada (senão a segunda edição dá 409).
+func TestMongoDuasEdicoesSeguidas(t *testing.T) {
+	r := testRepo(t)
+	ctx := context.Background()
+	if err := r.ReplaceSets(ctx, []Set{boxSet("capacete", "a", "p1", "helmet")}); err != nil {
+		t.Fatal(err)
+	}
+	s := New(r, nil, nil, nil, emptyProfiles{})
+	got, _ := r.FindSets(ctx, "capacete", []string{"a"})
+	cur := got["a"]
+	version := cur.Version()
+	for i := range 2 {
+		in := AttributesInput{Version: version}
+		in.Boxes = make([]struct {
+			Attributes map[string]any `json:"attributes"`
+		}, 1)
+		set, err := s.UpdateAttributes(ctx, "a", "capacete", in, "nathan")
+		if err != nil {
+			t.Fatalf("edição %d: %v", i+1, err)
+		}
+		version = set.Version()
+	}
+}

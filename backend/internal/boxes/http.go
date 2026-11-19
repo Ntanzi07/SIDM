@@ -215,13 +215,18 @@ func (s *Service) handleImageBoxes(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusOK, map[string]any{"items": sets})
 }
 
-// PUT /images/{sha1}/boxes/{task}
+// PUT /images/{sha1}/boxes/{task}   (X-User obrigatório)
 // {"version": "<updated_at ou imported_at lido>", "boxes": [{"attributes": {...}}, ...]}
 // Edita os atributos das caixas da imagem na tarefa (uma entrada por caixa,
 // na ordem do GET). 400 com "problems" se um atributo não passa no tipo de
 // objeto do perfil; 409 se as caixas mudaram desde a leitura.
 func (s *Service) handleUpdateAttributes(w http.ResponseWriter, r *http.Request) {
 	sha, task := r.PathValue("sha1"), r.PathValue("task")
+	user := r.Header.Get("X-User")
+	if user == "" {
+		platform.WriteError(w, http.StatusBadRequest, "informe quem está editando no header X-User")
+		return
+	}
 	if !sha1Re.MatchString(sha) {
 		platform.WriteError(w, http.StatusBadRequest, "sha1 inválido")
 		return
@@ -234,7 +239,7 @@ func (s *Service) handleUpdateAttributes(w http.ResponseWriter, r *http.Request)
 		platform.WriteError(w, http.StatusBadRequest, `JSON inválido: esperado {"version": "...", "boxes": [{"attributes": {...}}]} (`+err.Error()+")")
 		return
 	}
-	set, err := s.UpdateAttributes(r.Context(), sha, task, in, platform.UserFrom(r))
+	set, err := s.UpdateAttributes(r.Context(), sha, task, in, user)
 	var problems *annotation.InvalidError
 	var invalid *InvalidError
 	switch {

@@ -378,9 +378,13 @@ func TestAtributosDasCaixas(t *testing.T) {
 	}
 
 	put := func(version string, body string) *httptest.ResponseRecorder {
-		return env.doJSON("PUT", "/images/"+sha+"/boxes/capacete", `{"version":"`+version+`","boxes":`+body+`}`)
+		return env.do("PUT", "/images/"+sha+"/boxes/capacete", strings.NewReader(`{"version":"`+version+`","boxes":`+body+`}`),
+			map[string]string{"Content-Type": "application/json", "X-User": "nathan"})
 	}
 	version := set.ImportedAt.Format(time.RFC3339Nano)
+
+	// sem X-User: 400 (como o reopen)
+	assertStatus(t, env.doJSON("PUT", "/images/"+sha+"/boxes/capacete", `{"version":"`+version+`","boxes":[{},{},{}]}`), http.StatusBadRequest)
 
 	// atributo inválido: 400 com o caminho
 	rec := put(version, `[{"attributes":{"color":"black"}},{"attributes":{"color":"azul"}},{"attributes":{}}]`)
@@ -399,10 +403,24 @@ func TestAtributosDasCaixas(t *testing.T) {
 		set.Boxes[2].Attributes["qualquer"] != "coisa" {
 		t.Fatalf("depois da edição: %+v", set)
 	}
+	if set.UpdatedBy != "nathan" {
+		t.Errorf("updated_by = %q", set.UpdatedBy)
+	}
+	// a versão que a resposta devolve serve para a próxima edição
+	var saved boxes.Set
+	if err := json.Unmarshal(rec.Body.Bytes(), &saved); err != nil || saved.UpdatedAt == nil {
+		t.Fatalf("resposta: %v %s", err, rec.Body.String())
+	}
+	if !saved.UpdatedAt.Equal(saved.UpdatedAt.Truncate(time.Millisecond)) {
+		t.Errorf("versão com mais precisão que o Mongo guarda: %s", saved.UpdatedAt.Format(time.RFC3339Nano))
+	}
+	rec = put(saved.UpdatedAt.Format(time.RFC3339Nano), `[{"attributes":{"color":"white"}},{"attributes":{"color":"white"}},{"attributes":{"x":"y"}}]`)
+	assertStatus(t, rec, http.StatusOK)
 	// versão velha: 409
 	assertStatus(t, put(version, `[{"attributes":{}},{"attributes":{}},{"attributes":{}}]`), http.StatusConflict)
 	// tarefa sem caixas desta imagem: 404
-	assertStatus(t, env.doJSON("PUT", "/images/"+sha+"/boxes/outra", `{"version":"`+version+`","boxes":[]}`), http.StatusNotFound)
+	assertStatus(t, env.do("PUT", "/images/"+sha+"/boxes/outra", strings.NewReader(`{"version":"`+version+`","boxes":[]}`),
+		map[string]string{"Content-Type": "application/json", "X-User": "nathan"}), http.StatusNotFound)
 
 	// reimport: avisa e sobrescreve (o CVAT é a fonte)
 	rep, _ = env.importBoxes(t, "capacete", "?dry_run=false", "c.json", coco)

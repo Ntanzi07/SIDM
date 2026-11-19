@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/platform"
 )
 
@@ -153,5 +155,50 @@ func TestServiceAvisos(t *testing.T) {
 	}
 	if err := s.DeleteImage(ctx, "b"); err != nil || len(mem.Sets) != 0 {
 		t.Errorf("DeleteImage: %v, sobrou %d", err, len(mem.Sets))
+	}
+}
+
+// emptyProfiles: perfil sem tipos de objeto (os atributos ficam como vieram).
+type emptyProfiles struct{}
+
+func (emptyProfiles) ProfileOf(context.Context, string) (*annotation.Profile, error) {
+	return &annotation.Profile{Name: "vazio"}, nil
+}
+
+// Edições no mesmo milissegundo do import (o relógio parado): cada uma tem
+// de gerar uma versão nova, senão a versão velha passaria.
+func TestEdicoesNoMesmoMilissegundo(t *testing.T) {
+	ctx := context.Background()
+	mem := NewMemory()
+	at := time.Date(2026, 11, 19, 12, 0, 0, 937_000_000, time.UTC)
+	mem.Put(Set{Task: "capacete", ImageID: "a", Package: "p", ImportedAt: at, Boxes: []Box{{Label: "helmet", W: 1, H: 1}}})
+	s := New(mem, fakeImages{}, nil, nil, emptyProfiles{})
+	s.now = func() time.Time { return at }
+
+	edit := func(v time.Time) (*Set, error) {
+		in := AttributesInput{Version: v}
+		in.Boxes = make([]struct {
+			Attributes map[string]any `json:"attributes"`
+		}, 1)
+		return s.UpdateAttributes(ctx, "a", "capacete", in, "nathan")
+	}
+	first, err := edit(at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !first.Version().After(at) {
+		t.Fatalf("a versão não mudou: %s", first.Version())
+	}
+	second, err := edit(first.Version())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !second.Version().After(first.Version()) {
+		t.Fatalf("a segunda versão não é maior: %s", second.Version())
+	}
+	for _, old := range []time.Time{at, first.Version()} {
+		if _, err := edit(old); !errors.Is(err, ErrConflict) {
+			t.Errorf("versão velha %s: %v", old.Format(time.RFC3339Nano), err)
+		}
 	}
 }

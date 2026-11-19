@@ -1174,9 +1174,12 @@ paths:
         a label vêm do CVAT e não mudam). Numa caixa cuja label é um tipo de
         objeto com caixa do perfil do pacote, os atributos são conferidos pelos
         campos do tipo; numa label sem tipo, ficam como estavam. Um novo import
-        da tarefa sobrescreve a edição (o CVAT é a fonte).
+        da tarefa sobrescreve a edição (o CVAT é a fonte). A resposta traz o
+        novo updated_at (em milissegundos, como fica gravado), que serve de
+        version para a próxima edição.
       parameters:
         - $ref: "#/components/parameters/SHA1"
+        - $ref: "#/components/parameters/XUserRequired"
         - name: task
           in: path
           required: true
@@ -1203,7 +1206,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/BoxSet" }
         "400":
-          description: "Número de caixas diferente, ou atributo inválido (problems, com caminho boxes[i].attributes.<campo>)."
+          description: "Sem X-User, número de caixas diferente, ou atributo inválido (problems, com caminho boxes[i].attributes.<campo>)."
           content:
             application/json:
               schema:
