@@ -1,0 +1,261 @@
+/*
+ * Tema do SIDM: escuro e quente (preto de papel, não azulado), tipografia
+ * Figtree (interface e números grandes, leve) e Inter Tight (marca e títulos
+ * fortes). TODA cor de tela sai destes tokens: uma tela nova não escreve hex.
+ * As cores das caixas (utils/boxes.ts) ficam fora: elas ficam em cima da foto.
+ */
+:root {
+  color-scheme: dark;
+
+  /* fundo e superfícies, do mais fundo para o mais alto */
+  --bg: #0b0a09;
+  --surface: #121110;
+  --surface-2: #1a1917;
+  --surface-3: #24221f;
+  --surface-glass: rgba(11, 10, 9, 0.62);
+
+  /* linhas */
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.16);
+
+  /* texto */
+  --text: #f3f0ea;
+  --text-2: #b8b2a9;
+  --text-3: #7f7a72;
+  --on-accent: #0b0a09; /* texto em cima de um fundo de destaque (claro) */
+
+  /* destaque (gráficos, item ativo, foco) e estados */
+  --accent: #ff8a4c;
+  --accent-strong: #ff7433;
+  --accent-soft: rgba(255, 138, 76, 0.12);
+  --accent-border: rgba(255, 138, 76, 0.42);
+  --success: #6fd6a2;
+  --success-soft: rgba(111, 214, 162, 0.12);
+  --success-border: rgba(111, 214, 162, 0.4);
+  --warning: #f0d264;
+  --warning-soft: rgba(240, 210, 100, 0.12);
+  --warning-border: rgba(240, 210, 100, 0.4);
+  --danger: #ff8080;
+  --danger-soft: rgba(255, 128, 128, 0.12);
+  --danger-border: rgba(255, 128, 128, 0.4);
+
+  /* sombras (no escuro, sombra é só profundidade) */
+  --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+  --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.35);
+
+  /* forma e ritmo */
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-pill: 999px;
+  --ease: cubic-bezier(0.22, 0.8, 0.24, 1);
+
+  /* tipografia */
+  --font: 'Figtree Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-display: 'Inter Tight Variable', 'Figtree Variable', system-ui, sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-width: 320px;
+  min-height: 100%;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: 'ss01', 'tnum';
+}
+
+::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+a {
+  color: var(--accent);
+}
+
+code {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+/* barra de rolagem discreta */
+* {
+  scrollbar-color: var(--surface-3) transparent;
+  scrollbar-width: thin;
+}
+
+/* foco visível só no teclado */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* campos nativos no tema: herdam a fonte e as cores */
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']),
+select,
+textarea {
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  transition: border-color 160ms var(--ease), background 160ms var(--ease);
+}
+
+input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']):hover,
+select:hover,
+textarea:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
+input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+}
+
+select option {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  opacity: 0.55;
+}
+
+/* ── Select ───────────────────────────────────────────────────
+   Personalizado inteiro (o botão e a lista que abre) onde o navegador
+   permite (appearance: base-select, Chrome/Edge atuais); nos outros, o select
+   nativo com uma seta no tema. */
+select {
+  min-height: 42px;
+  padding: 0 38px 0 14px;
+  appearance: none;
+  -webkit-appearance: none;
+  background-color: var(--surface-2);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237f7a72' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-position: right 13px center;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  font-size: 13.5px;
+}
+
+@supports (appearance: base-select) {
+  select {
+    appearance: base-select;
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px 0 14px;
+    background-image: none;
+  }
+
+  /* a mesma seta do select nativo (no lugar do ▼ padrão) */
+  select::picker-icon {
+    flex-shrink: 0;
+    width: 12px;
+    height: 12px;
+    margin-left: auto;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%237f7a72' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") center / 12px no-repeat;
+    content: '';
+    transition: rotate 200ms var(--ease);
+  }
+
+  select:open::picker-icon {
+    rotate: 180deg;
+  }
+
+  select:open {
+    border-color: var(--accent);
+  }
+
+  /* a lista que abre */
+  ::picker(select) {
+    appearance: base-select;
+    margin-top: 6px;
+    padding: 5px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    box-shadow: var(--shadow);
+    opacity: 1;
+    transition: opacity 160ms var(--ease), translate 160ms var(--ease), display 160ms allow-discrete, overlay 160ms allow-discrete;
+  }
+
+  select:not(:open)::picker(select) {
+    opacity: 0;
+    translate: 0 -4px;
+  }
+
+  @starting-style {
+    select:open::picker(select) {
+      opacity: 0;
+      translate: 0 -4px;
+    }
+  }
+
+  option {
+    padding: 9px 12px;
+    border-radius: 6px;
+    color: var(--text-2);
+    font-size: 13.5px;
+    cursor: pointer;
+  }
+
+  option:hover,
+  option:focus-visible {
+    background: var(--surface-3);
+    color: var(--text);
+    outline: none;
+  }
+
+  option:checked {
+    background: transparent;
+    color: var(--accent);
+  }
+
+  option:checked:hover {
+    background: var(--surface-3);
+  }
+
+  option::checkmark {
+    display: none;
+  }
+}

@@ -1,13 +1,8 @@
-.search-page {
-  max-width: 1240px;
-  margin: 0 auto;
-  padding: 28px 32px 48px;
-}
 
 .search-controls {
   display: grid;
   gap: 16px;
-  margin-top: 24px;
+  margin-top: 0;
   padding: 20px 24px;
 }
 
@@ -20,7 +15,7 @@
 
 .search-controls__filters {
   padding-top: 14px;
-  border-top: 1px solid #eef0f5;
+  border-top: 1px solid var(--border);
 }
 
 .search-controls .button {
@@ -34,23 +29,23 @@
 }
 
 .search-select span {
-  color: #384257;
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
 }
 
 .search-select select {
   padding: 9px 10px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 7px;
-  background: #fff;
-  color: #283247;
+  background: var(--surface);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
 }
 
 .search-select select:focus {
-  border-color: #8189de;
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -75,12 +70,12 @@
 }
 
 .search-total strong {
-  color: #283247;
+  color: var(--text);
   font-size: 34px;
 }
 
 .search-total span {
-  color: #6b7385;
+  color: var(--text-3);
   font-size: 14px;
 }
 
@@ -93,14 +88,14 @@
 
 .search-card {
   padding: 18px 20px;
-  border: 1px solid #e5e8ef;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .search-card h2 {
   margin: 0 0 10px;
-  color: #283247;
+  color: var(--text);
   font-size: 15px;
 }
 
@@ -110,13 +105,13 @@
 
 .search-card__big {
   margin: 0;
-  color: #283247;
+  color: var(--text);
   font-size: 26px;
   font-weight: 700;
 }
 
 .search-card__big span {
-  color: #6b7385;
+  color: var(--text-3);
   font-size: 13px;
   font-weight: 400;
 }
@@ -139,7 +134,7 @@
   border: 1px solid transparent;
   border-radius: 6px;
   background: none;
-  color: #283247;
+  color: var(--text);
   font: inherit;
   font-size: 13px;
   text-align: left;
@@ -150,12 +145,12 @@
 }
 
 .search-bar--clickable:hover {
-  background: #f5f6fb;
+  background: var(--surface-2);
 }
 
 .search-bar--active {
-  border-color: #8189de;
-  background: #eef0fc;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .search-bar__label {
@@ -167,7 +162,7 @@
 .search-bar__track {
   height: 10px;
   border-radius: 5px;
-  background: #eef0f5;
+  background: var(--surface-2);
   overflow: hidden;
 }
 
@@ -175,15 +170,15 @@
   display: block;
   height: 100%;
   border-radius: 5px;
-  background: #5b63d3;
+  background: var(--accent);
 }
 
 .search-bar--missing {
-  color: #8a91a1;
+  color: var(--text-3);
 }
 
 .search-bar--missing .search-bar__fill {
-  background: #b9bfcc;
+  background: var(--surface-3);
 }
 
 .search-bar__count {
@@ -192,7 +187,7 @@
 }
 
 .search-bar__count small {
-  color: #8a91a1;
+  color: var(--text-3);
   font-size: 11px;
 }
 
@@ -202,7 +197,7 @@
 }
 
 .search-chips > span {
-  color: #384257;
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -219,23 +214,23 @@
 
 .search-chip {
   padding: 5px 12px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  background: #fff;
-  color: #4a5368;
+  background: var(--surface);
+  color: var(--text-2);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
 }
 
 .search-chip:hover {
-  border-color: #8189de;
+  border-color: var(--accent);
 }
 
 .search-chip--on {
-  border-color: #5b63d3;
-  background: #eef0fc;
-  color: #2f37a8;
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
 }
 
@@ -245,7 +240,7 @@
 
 .search-section {
   margin: 8px 0 12px;
-  color: #283247;
+  color: var(--text);
   font-size: 17px;
 }
 
@@ -260,7 +255,7 @@
 .search-labels strong {
   display: block;
   margin-bottom: 4px;
-  color: #283247;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -270,19 +265,19 @@
   align-items: center;
   gap: 10px;
   padding: 2px 0;
-  color: #4a5368;
+  color: var(--text-2);
   font-size: 12px;
 }
 
 .search-labels__line small {
-  color: #8a91a1;
+  color: var(--text-3);
   font-size: 11px;
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
 .search-bar__fill--boxes {
-  background: #9aa0e6;
+  background: var(--accent);
 }
 
 .search-images {
@@ -295,6 +290,19 @@
 }
 
 .search-images__package {
-  color: #6b7385;
+  color: var(--text-3);
   font-size: 12px;
+}
+
+/* as barras crescem ao aparecer e quando o número muda */
+.search-bar__fill {
+  transform-origin: left center;
+  transition: width 520ms var(--ease);
+  animation: bar-in 700ms var(--ease) both;
+}
+
+@keyframes bar-in {
+  from {
+    transform: scaleX(0);
+  }
 }

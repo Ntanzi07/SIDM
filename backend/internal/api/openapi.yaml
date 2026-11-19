@@ -1110,6 +1110,26 @@ paths:
                   items: { type: array, items: { $ref: "#/components/schemas/Image" } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /boxes/packages:
+    get:
+      tags: [caixas]
+      summary: Em quais tarefas cada pacote tem imagens
+      description: |
+        Pacote → as tarefas (em ordem) em que ele tem imagens anotadas. Pacote
+        sem caixas não aparece. Para a lista de pacotes filtrar e ordenar por
+        tarefa sem um pedido por pacote.
+      responses:
+        "200":
+          description: O mapa.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: object
+                    additionalProperties: { type: array, items: { type: string } }
+                    example: { rodovia-nov: [capacete, placa], top: [placa] }
   /boxes/stats:
     get:
       tags: [caixas]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import { getUser, setUser, subscribeUser } from '../../../services/user'
 import './Header.css'
 
@@ -45,54 +45,36 @@ function UserName() {
   )
 }
 
+// O menu: "Pacotes" fica ativo também dentro de um pacote (/pacotes/...).
+const LINKS = [
+  { to: '/', label: 'Pacotes', also: '/pacotes' },
+  { to: '/tarefas', label: 'Tarefas' },
+  { to: '/pesquisa', label: 'Pesquisa' },
+  { to: '/exportar', label: 'Exportar' },
+  { to: '/configurar', label: 'Configurar' },
+]
+
 export function Header() {
+  const { pathname } = useLocation()
+  const active = (link: (typeof LINKS)[number]) =>
+    link.to === '/' ? pathname === '/' || pathname.startsWith(link.also ?? '') : pathname.startsWith(link.to)
+
   return (
     <header className="app-header">
-      <div className="app-header__brand">SIDM</div>
-      <nav aria-label="Navegação principal">
-        <NavLink
-          className={({ isActive }) =>
-            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
-          }
-          to="/"
-          end
-        >
-          Pacotes
-        </NavLink>
-        <NavLink
-          className={({ isActive }) =>
-            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
-          }
-          to="/tarefas"
-        >
-          Tarefas
-        </NavLink>
-        <NavLink
-          className={({ isActive }) =>
-            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
-          }
-          to="/exportar"
-        >
-          Exportar
-        </NavLink>
-        <NavLink
-          className={({ isActive }) =>
-            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
-          }
-          to="/pesquisa"
-        >
-          Pesquisa
-        </NavLink>
-        <NavLink
-          className={({ isActive }) =>
-            isActive ? 'app-header__link app-header__link--active' : 'app-header__link'
-          }
-          to="/configurar"
-        >
-          Configurar
-        </NavLink>
+      <NavLink className="app-header__brand" to="/">SIDM</NavLink>
+      <nav aria-label="Navegação principal" className="app-header__nav">
+        {LINKS.map((link) => (
+          <NavLink
+            aria-current={active(link) ? 'page' : undefined}
+            className={active(link) ? 'app-header__link app-header__link--active' : 'app-header__link'}
+            key={link.to}
+            to={link.to}
+          >
+            {link.label}
+          </NavLink>
+        ))}
       </nav>
       <UserName />
     </header>
   )
-}
+}

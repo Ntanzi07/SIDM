@@ -7,4 +7,6 @@ export type Package = {
   pending: number
   inProgress: number
   coverImage?: string
+  profile: string // perfil de anotação
+  tasks: string[] // tarefas do CVAT em que o pacote tem imagens
 }

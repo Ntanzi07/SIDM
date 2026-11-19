@@ -436,3 +436,27 @@ func (m *MongoRepo) LabelStats(ctx context.Context, tasks []string, ids []string
 	}
 	return res, nil
 }
+
+func (m *MongoRepo) PackageTasks(ctx context.Context) (map[string][]string, error) {
+	cur, err := m.sets().Aggregate(ctx, mongo.Pipeline{
+		{{Key: "$group", Value: bson.D{{Key: "_id", Value: bson.D{{Key: "p", Value: "$package"}, {Key: "t", Value: "$task"}}}}}},
+		{{Key: "$sort", Value: bson.D{{Key: "_id.p", Value: 1}, {Key: "_id.t", Value: 1}}}},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("listar as tarefas dos pacotes: %w", err)
+	}
+	var rows []struct {
+		ID struct {
+			Package string `bson:"p"`
+			Task    string `bson:"t"`
+		} `bson:"_id"`
+	}
+	if err := cur.All(ctx, &rows); err != nil {
+		return nil, fmt.Errorf("ler as tarefas dos pacotes: %w", err)
+	}
+	out := map[string][]string{}
+	for _, r := range rows {
+		out[r.ID.Package] = append(out[r.ID.Package], r.ID.Task)
+	}
+	return out, nil
+}

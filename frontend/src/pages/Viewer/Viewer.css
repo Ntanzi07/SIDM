@@ -17,13 +17,13 @@
 
 .viewer-header__title h1 {
   margin: 0;
-  color: #283247;
+  color: var(--text);
   font-size: 20px;
 }
 
 .viewer-header__title p {
   margin: 2px 0 0;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 13px;
 }
 
@@ -44,22 +44,22 @@
   display: grid;
   place-items: center;
   padding: 18px;
-  border: 1px solid #e5e8ef;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #f1f3f7;
+  background: var(--surface-2);
 }
 
 .viewer-image__meta {
   margin: 12px 0 0;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 12px;
 }
 
 .viewer-card {
   padding: 22px;
-  border: 1px solid #e5e8ef;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .viewer-card__heading {
@@ -73,28 +73,28 @@
 .viewer-card__heading h2 {
   display: inline;
   margin: 0 10px 0 0;
-  color: #283247;
+  color: var(--text);
   font-size: 18px;
 }
 
 .viewer-card h3 {
   margin: 20px 0 10px;
-  color: #283247;
+  color: var(--text);
   font-size: 14px;
 }
 
 .viewer-badge {
   padding: 3px 10px;
   border-radius: 999px;
-  background: #e7f6ee;
-  color: #1f8a57;
+  background: var(--success-soft);
+  color: var(--success);
   font-size: 11px;
   font-weight: 600;
 }
 
 .viewer-badge--pending {
-  background: #fdf3dc;
-  color: #a46a00;
+  background: var(--warning-soft);
+  color: var(--warning);
 }
 
 .viewer-fields {
@@ -105,18 +105,18 @@
 
 .viewer-field span {
   display: block;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 11px;
 }
 
 .viewer-field strong {
-  color: #283247;
+  color: var(--text);
   font-size: 13px;
   font-weight: 600;
 }
 
 .viewer-field--unknown strong {
-  color: #a7afbd;
+  color: var(--text-3);
   font-weight: 500;
 }
 
@@ -126,33 +126,33 @@
   gap: 2px;
   padding: 10px 12px;
   margin-bottom: 8px;
-  border: 1px solid #edf0f4;
+  border: 1px solid var(--border);
   border-radius: 8px;
 }
 
 .viewer-vehicle strong {
-  color: #283247;
+  color: var(--text);
   font-size: 14px;
   letter-spacing: 0.04em;
 }
 
 .viewer-vehicle span {
-  color: #697386;
+  color: var(--text-2);
   font-size: 12px;
 }
 
 .viewer-filename {
   margin: 18px 0 0;
   padding-top: 14px;
-  border-top: 1px solid #edf0f4;
-  color: #8a93a3;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
   font-family: ui-monospace, monospace;
   font-size: 11px;
   word-break: break-all;
 }
 
 .viewer-empty {
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 13px;
 }
 

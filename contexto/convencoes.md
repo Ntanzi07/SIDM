@@ -38,6 +38,15 @@
   converta com `utils/datetime.ts`.
 - A anotação usa a **fila** (`POST /packages/{nome}/next`), nunca a lista por índice.
 
+- **Visual:** tema escuro único, em `src/styles/theme.css` (tokens: `--bg`, `--surface*`,
+  `--border*`, `--text*`, `--accent*`, `--success/warning/danger*`, fontes `--font` e
+  `--font-display`). CSS de tela **não escreve cor fixa (hex)**: usa os tokens. Botões,
+  títulos e rótulos comuns ficam em `src/styles/components.css` (`.button`,
+  `.button--primary/secondary/danger/sm`, `.eyebrow`, `.card`, `.form-error`). As cores das
+  caixas em cima da foto (`utils/boxes.ts`) são a exceção.
+- Fontes pelo npm (`@fontsource-variable/figtree` e `inter-tight`), não por CDN: a rede
+  interna pode não alcançar o Google Fonts.
+
 ## Git
 
 - Branch por assunto: `feat/...`, `fix/...`, `refactor/...`. Merge na `main` quando estável.

@@ -26,16 +26,16 @@
   box-sizing: border-box;
   margin-top: 6px;
   padding: 10px 12px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
-  color: #283247;
+  background: var(--surface);
+  color: var(--text);
   font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   resize: vertical;
 }
 
 .tasks-labels textarea:focus {
-  border-color: #8189de;
+  border-color: var(--accent);
   outline: none;
 }
 
@@ -51,7 +51,7 @@
 }
 
 .tasks-bad {
-  color: #c2410c;
+  color: var(--warning);
 }
 
 .tasks-negatives {

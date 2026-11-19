@@ -249,3 +249,15 @@ func TestContarLabels(t *testing.T) {
 		t.Errorf("tarefa inexistente: %v", err)
 	}
 }
+
+func TestTarefasDosPacotes(t *testing.T) {
+	mem := NewMemory()
+	mem.Put(Set{Task: "placa", ImageID: "a", Package: "p1"})
+	mem.Put(Set{Task: "capacete", ImageID: "b", Package: "p1"})
+	mem.Put(Set{Task: "placa", ImageID: "c", Package: "p1"})
+	mem.Put(Set{Task: "placa", ImageID: "d", Package: "p2"})
+	got, err := mem.PackageTasks(context.Background())
+	if err != nil || fmt.Sprint(got) != "map[p1:[capacete placa] p2:[placa]]" {
+		t.Errorf("%v %v", got, err)
+	}
+}

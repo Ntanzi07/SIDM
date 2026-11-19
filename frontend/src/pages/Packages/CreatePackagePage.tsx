@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createPackage, imageFiles, importPackageCsv, listAnnotationProfiles, listImportProfiles, listIniProfiles, uploadImages, type ImportProfile, type ImportReport, type UploadProgress } from '../../services/api'
+import { useFolderReading } from '../../hooks/useFolderReading'
 import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
 import { UploadStatus } from './UploadStatus'
@@ -26,6 +27,7 @@ export function CreatePackagePage() {
   const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [createdPackageName, setCreatedPackageName] = useState('')
   const [importReport, setImportReport] = useState<ImportReport | null>(null)
+  const { reading: readingFolder, start: startReadingFolder, done: doneReadingFolder, inputRef: folderInputRef } = useFolderReading()
 
   useEffect(() => {
     listAnnotationProfiles().then(setAnnotationProfiles).catch(() => { /* sem a lista: fica o padrão */ })
@@ -38,6 +40,7 @@ export function CreatePackagePage() {
   }, [])
 
   function handleFolderChange(event: ChangeEvent<HTMLInputElement>) {
+    doneReadingFolder()
     setFolder(event.target.files)
     setError('')
   }
@@ -111,11 +114,11 @@ export function CreatePackagePage() {
 
   return (
     <section className="package-page create-package-page">
+      <button className="back-button" onClick={() => navigate('/pacotes')} type="button">
+        ← Voltar para pacotes
+      </button>
       <div className="page-heading">
         <div>
-          <button className="back-button" onClick={() => navigate('/pacotes')} type="button">
-            ← Voltar para pacotes
-          </button>
           <h1>Criar pacote</h1>
           <p>Organize as imagens que serão usadas em um novo pacote de anotação.</p>
         </div>
@@ -132,79 +135,95 @@ export function CreatePackagePage() {
             value={name}
           />
         </div>
-        <div className="form-field">
-          <label htmlFor="annotation-profile">O que anotar (perfil de anotação)</label>
-          <select
-            disabled={Boolean(createdPackageName)}
-            id="annotation-profile"
-            onChange={(event) => setAnnotationProfile(event.target.value)}
-            value={annotationProfile}
-          >
-            {annotationProfiles.length === 0 && <option value="veiculos">veiculos</option>}
-            {annotationProfiles.map((profile) => (
-              <option key={profile.name} value={profile.name}>
-                {profile.name}{profile.description ? ` — ${profile.description}` : ''}
-              </option>
-            ))}
-          </select>
-          <small className="form-hint">
-            Os campos da tela de anotação vêm do perfil. Dá para trocar depois, enquanto nenhuma imagem foi verificada.
-          </small>
-        </div>
-        <div className="form-field">
-          <label htmlFor="package-folder">Pasta das imagens</label>
-          <label className="folder-picker" htmlFor="package-folder">
-            <span className="folder-picker__icon">↥</span>
-            <span>
-              <strong>{folder?.[0]?.webkitRelativePath.split('/')[0] ?? 'Selecione uma pasta'}</strong>
-              <small>{folder ? `${folder.length} arquivo(s) selecionado(s)` : 'Escolha a pasta que contém as imagens'}</small>
-            </span>
-            <input
-              id="package-folder"
-              onChange={handleFolderChange}
-              type="file"
-              {...{ webkitdirectory: 'true' }}
-            />
-          </label>
-        </div>
-        {iniProfiles.length > 0 && (
-          <div className="form-field import-field">
-            <label htmlFor="ini-profile">Ler o INI embutido nas imagens (opcional)</label>
+        <div className="form-row">
+          <div className="form-field">
+            <label htmlFor="annotation-profile">O que anotar (perfil de anotação)</label>
             <select
-              id="ini-profile"
-              disabled={saving !== '' || Boolean(createdPackageName)}
-              onChange={(event) => setIniProfile(event.target.value)}
-              value={iniProfile}
+              disabled={Boolean(createdPackageName)}
+              id="annotation-profile"
+              onChange={(event) => setAnnotationProfile(event.target.value)}
+              value={annotationProfile}
             >
-              <option value="">Não preencher pelo INI</option>
-              {forPackage(iniProfiles, annotationProfile).map((profile) => (
-                <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
+              {annotationProfiles.length === 0 && <option value="veiculos">veiculos</option>}
+              {annotationProfiles.map((profile) => (
+                <option key={profile.name} value={profile.name}>{profile.name}</option>
               ))}
             </select>
             <small className="form-hint">
-              O INI de cada imagem é guardado de qualquer jeito. Com um perfil, ele já preenche os rascunhos no upload
-              (dá para aplicar depois, no detalhe do pacote).
+              {annotationProfiles.find((profile) => profile.name === annotationProfile)?.description
+                ? `${annotationProfiles.find((profile) => profile.name === annotationProfile)?.description}. `
+                : ''}
+              Os campos da tela de anotação vêm do perfil. Dá para trocar depois, enquanto nenhuma imagem foi verificada.
             </small>
           </div>
-        )}
-        <div className="form-field import-field">
-          <label htmlFor="import-profile">Importar anotações do CSV (opcional)</label>
-          <select
-            id="import-profile"
-            disabled={saving !== ''}
-            onChange={(event) => {
-              setProfileName(event.target.value)
-              setError('')
-              setImportReport(null)
-            }}
-            value={profileName}
-          >
-            <option value="">Não importar CSV</option>
-            {forPackage(profiles, annotationProfile).map((profile) => (
-              <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
-            ))}
-          </select>
-          {profileError && <small className="form-hint form-hint--error">{profileError}</small>}
+          <div className="form-field">
+            <label htmlFor="package-folder">Pasta das imagens</label>
+            <label className={readingFolder ? 'folder-picker folder-picker--reading' : 'folder-picker'} htmlFor="package-folder">
+              <span className="folder-picker__icon">↥</span>
+              <span>
+                {readingFolder ? (
+                  <>
+                    <strong>Lendo a pasta...</strong>
+                    <small>Pastas grandes levam alguns segundos. Se o navegador perguntar, confirme o envio dos arquivos.</small>
+                  </>
+                ) : (
+                  <>
+                    <strong>{folder?.[0]?.webkitRelativePath.split('/')[0] ?? 'Selecione uma pasta'}</strong>
+                    <small>{folder ? `${folder.length} arquivo(s) selecionado(s)` : 'Escolha a pasta que contém as imagens'}</small>
+                  </>
+                )}
+              </span>
+              <input
+                id="package-folder"
+                onChange={handleFolderChange}
+                onClick={startReadingFolder}
+                ref={folderInputRef}
+                type="file"
+                {...{ webkitdirectory: 'true' }}
+              />
+            </label>
+          </div>
+        </div>
+        <div className="form-row">
+          {iniProfiles.length > 0 && (
+            <div className="form-field import-field">
+              <label htmlFor="ini-profile">Ler o INI embutido nas imagens (opcional)</label>
+              <select
+                id="ini-profile"
+                disabled={saving !== '' || Boolean(createdPackageName)}
+                onChange={(event) => setIniProfile(event.target.value)}
+                value={iniProfile}
+              >
+                <option value="">Não preencher pelo INI</option>
+                {forPackage(iniProfiles, annotationProfile).map((profile) => (
+                  <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
+                ))}
+              </select>
+              <small className="form-hint">
+                O INI de cada imagem é guardado de qualquer jeito. Com um perfil, ele já preenche os rascunhos no upload
+                (dá para aplicar depois, no detalhe do pacote).
+              </small>
+            </div>
+          )}
+          <div className="form-field import-field">
+            <label htmlFor="import-profile">Importar anotações do CSV (opcional)</label>
+            <select
+              id="import-profile"
+              disabled={saving !== ''}
+              onChange={(event) => {
+                setProfileName(event.target.value)
+                setError('')
+                setImportReport(null)
+              }}
+              value={profileName}
+            >
+              <option value="">Não importar CSV</option>
+              {forPackage(profiles, annotationProfile).map((profile) => (
+                <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
+              ))}
+            </select>
+            {profileError && <small className="form-hint form-hint--error">{profileError}</small>}
+          </div>
         </div>
         {profileName && (
           <>
@@ -240,7 +259,7 @@ export function CreatePackagePage() {
           <button className="button button--secondary" onClick={() => navigate('/pacotes')} type="button">
             Cancelar
           </button>
-          <button className="button button--primary" disabled={saving !== '' || Boolean(importReport)} type="submit">
+          <button className="button button--primary" disabled={saving !== '' || Boolean(importReport) || readingFolder} type="submit">
             {saving === 'creating' ? 'Criando...'
               : saving === 'uploading' ? 'Enviando imagens...'
                 : saving === 'testing' ? 'Ensaiando CSV...'

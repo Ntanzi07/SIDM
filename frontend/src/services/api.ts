@@ -193,6 +193,13 @@ export async function listPackages(): Promise<PackageSummary[]> {
   }))
 }
 
+// Pacote → as tarefas do CVAT em que ele tem imagens (um pedido só, para a
+// lista filtrar e ordenar por tarefa).
+export async function listPackageTasks(): Promise<Record<string, string[]>> {
+  const response = await request<{ items: Record<string, string[]> }>('/boxes/packages')
+  return response.items
+}
+
 // Um pacote pelo nome exato (a busca do backend é "contém").
 export async function getPackage(name: string): Promise<PackageSummary | undefined> {
   const response = await request<PageResponse<PackageSummary>>(

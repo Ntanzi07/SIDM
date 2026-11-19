@@ -221,7 +221,7 @@ export function PackageDetailPage() {
       <button className="back-button" onClick={() => navigate('/pacotes')} type="button">
         ← Voltar para pacotes
       </button>
-      <div className="detail-heading">
+      <div className="page-heading detail-heading">
         <div>
           <h1>{selectedPackage.name}</h1>
           <p>

@@ -15,14 +15,14 @@
   display: flex;
   align-items: center;
   gap: 14px;
-  color: #5963d9;
+  color: var(--accent);
   font-size: 13px;
 }
 
 .annotation-header span {
   padding: 6px 10px;
   border-radius: 6px;
-  background: #f0f1fc;
+  background: var(--accent-soft);
 }
 
 .annotation-layout {
@@ -31,9 +31,9 @@
 
 .annotation-preview-card,
 .annotation-form-card {
-  border: 1px solid #e5e8ef;
+  border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .annotation-main {
@@ -50,7 +50,7 @@
 
 .annotation-navigation > span {
   min-width: 110px;
-  color: #687287;
+  color: var(--text-2);
   font-size: 12px;
   text-align: center;
 }
@@ -75,7 +75,7 @@
   min-height: 380px;
   place-items: center;
   padding: 18px;
-  background: #f1f3f7;
+  background: var(--surface-2);
 }
 
 .annotation-preview img {
@@ -90,7 +90,7 @@
   align-items: center;
   gap: 4px;
   margin-left: 10px;
-  color: #5963d9;
+  color: var(--accent);
   cursor: pointer;
 }
 
@@ -104,7 +104,7 @@
 
 .annotation-image-meta {
   padding: 13px 18px;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 11px;
 }
 
@@ -115,7 +115,7 @@
 
 .annotation-image-meta strong {
   margin-bottom: 3px;
-  color: #384257;
+  color: var(--text);
   font-size: 12px;
 }
 
@@ -125,27 +125,27 @@
 
 .annotation-form-heading h2 {
   margin: 0 0 4px;
-  color: #283247;
+  color: var(--text);
   font-size: 18px;
 }
 
 .annotation-form-heading p {
   margin: 0 0 20px;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 12px;
 }
 
 .annotation-status {
   padding: 6px 10px;
   border-radius: 20px;
-  color: #a26d26;
-  background: #fff5df;
+  color: var(--warning);
+  background: var(--warning-soft);
   font-size: 11px;
 }
 
 .annotation-status--done {
-  color: #36825d;
-  background: #e8f7ef;
+  color: var(--success);
+  background: var(--success-soft);
 }
 
 .annotation-fields {
@@ -157,7 +157,7 @@
 .annotation-field {
   display: grid;
   gap: 6px;
-  color: #566177;
+  color: var(--text-2);
   font-size: 11px;
   font-weight: 600;
 }
@@ -167,10 +167,10 @@
   width: 100%;
   min-height: 38px;
   padding: 8px 10px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #384257;
-  background: #fff;
+  color: var(--text);
+  background: var(--surface);
   font: inherit;
   font-size: 12px;
 }
@@ -183,7 +183,7 @@
 .vehicle-row {
   margin-top: 22px;
   padding-top: 18px;
-  border-top: 1px solid #edf0f4;
+  border-top: 1px solid var(--border);
 }
 
 .vehicle-row-header {
@@ -195,7 +195,7 @@
 
 .vehicle-row h3 {
   margin: 0;
-  color: #384257;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -213,21 +213,21 @@
   margin: 0 0 16px;
   padding: 10px 12px;
   border-radius: 6px;
-  color: #36825d;
-  background: #e8f7ef;
+  color: var(--success);
+  background: var(--success-soft);
   font-size: 12px;
 }
 
 .annotation-feedback--error {
-  color: #a04444;
-  background: #fff0f0;
+  color: var(--danger);
+  background: var(--danger-soft);
 }
 
 .annotation-empty {
   display: grid;
   min-height: 300px;
   place-items: center;
-  color: #7d8798;
+  color: var(--text-3);
 }
 
 @media (max-width: 900px) {
@@ -257,18 +257,18 @@
 }
 
 .annotation-hint {
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 13px;
   margin: 4px 0 12px;
 }
 
 .annotation-hint a {
-  color: #5963d9;
+  color: var(--accent);
 }
 
 .annotation-field--invalid select {
-  border-color: #e11d48;
-  color: #9f1239;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .annotation-combobox {
@@ -286,15 +286,15 @@
   padding: 4px 0;
   overflow-y: auto;
   list-style: none;
-  background: #fff;
-  border: 1px solid #dfe3eb;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
 .annotation-combobox__item {
   padding: 7px 10px;
-  color: #384257;
+  color: var(--text);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -302,8 +302,8 @@
 
 .annotation-combobox__item:hover,
 .annotation-combobox__item--active {
-  background: #eef0fd;
-  color: #5963d9;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .annotation-combobox__item[aria-selected='true'] {
@@ -312,30 +312,30 @@
 
 .annotation-combobox__empty {
   padding: 8px 10px;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 12px;
   font-weight: 400;
 }
 
 .annotation-field--unknown select {
-  color: #9aa3b2;
+  color: var(--text-3);
 }
 
 /* ---- campos do perfil de anotação ---- */
 
 .annotation-field--invalid input {
-  border-color: #e11d48;
-  color: #9f1239;
+  border-color: var(--danger);
+  color: var(--danger);
 }
 
 .annotation-field__error {
-  color: #be123c;
+  color: var(--danger);
   font-size: 11px;
   font-weight: 500;
 }
 
 .annotation-required {
-  color: #be123c;
+  color: var(--danger);
   font-style: normal;
 }
 
@@ -355,10 +355,10 @@
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 999px;
-  color: #566177;
-  background: #fff;
+  color: var(--text-2);
+  background: var(--surface);
   font-size: 12px;
   font-weight: 500;
   cursor: pointer;
@@ -371,9 +371,9 @@
 }
 
 .annotation-chip--on {
-  border-color: #5963d9;
-  color: #5963d9;
-  background: #eef0fd;
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .annotation-object-type {

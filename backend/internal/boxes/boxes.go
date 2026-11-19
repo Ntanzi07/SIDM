@@ -129,6 +129,9 @@ type Repo interface {
 	// versão prev (senão ErrConflict; platform.ErrNotFound se sumiu).
 	UpdateSet(ctx context.Context, set *Set, prev time.Time) error
 	PackageCounts(ctx context.Context, pkg string) ([]PackageCount, error)
+	// PackageTasks: em quais tarefas cada pacote tem imagens (pacote →
+	// tarefas, em ordem). Pacote sem caixas não aparece.
+	PackageTasks(ctx context.Context) (map[string][]string, error)
 	// LabelStats conta, nas tarefas, as caixas das imagens ids: por tarefa e
 	// por label (ver stats.go).
 	LabelStats(ctx context.Context, tasks []string, ids []string) (map[string]*TaskStats, error)

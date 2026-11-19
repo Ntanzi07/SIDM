@@ -294,3 +294,23 @@ func (m *Memory) LabelStats(ctx context.Context, tasks []string, ids []string) (
 	}
 	return res, nil
 }
+
+func (m *Memory) PackageTasks(ctx context.Context) (map[string][]string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seen := map[string]map[string]bool{}
+	for _, set := range m.Sets {
+		if seen[set.Package] == nil {
+			seen[set.Package] = map[string]bool{}
+		}
+		seen[set.Package][set.Task] = true
+	}
+	out := map[string][]string{}
+	for pkg, tasks := range seen {
+		for t := range tasks {
+			out[pkg] = append(out[pkg], t)
+		}
+		sort.Strings(out[pkg])
+	}
+	return out, nil
+}

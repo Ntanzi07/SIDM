@@ -1,27 +1,27 @@
 .box-attributes {
   margin-top: 12px;
   padding: 12px 14px;
-  border: 1px solid #e3e7ef;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fff;
+  background: var(--surface);
 }
 
 .box-attributes h3 {
   margin: 0 0 6px;
-  color: #384257;
+  color: var(--text);
   font-size: 14px;
 }
 
 .box-attributes__hint {
   margin: 4px 0;
-  color: #7a8499;
+  color: var(--text-3);
   font-size: 12px;
 }
 
 .box-attributes__task + .box-attributes__task {
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px solid #eef1f6;
+  border-top: 1px solid var(--accent-border);
 }
 
 .box-attributes__heading {
@@ -32,7 +32,7 @@
 }
 
 .box-attributes__heading small {
-  color: #7a8499;
+  color: var(--text-3);
 }
 
 .box-attributes__list {
@@ -46,20 +46,20 @@
   padding: 3px 8px;
   border: 2px solid;
   border-radius: 12px;
-  background: #fff;
-  color: #384257;
+  background: var(--surface);
+  color: var(--text);
   font-size: 12px;
   cursor: pointer;
 }
 
 .box-attributes__chip--on {
-  background: #eef2ff;
+  background: var(--accent-soft);
   font-weight: 600;
 }
 
 .box-attributes__pending {
   margin-left: 4px;
-  color: #dc2626;
+  color: var(--danger);
   font-weight: 700;
 }
 
@@ -78,7 +78,7 @@
 }
 
 .box-attributes__values dt {
-  color: #7a8499;
+  color: var(--text-3);
 }
 
 .box-attributes__values dd {

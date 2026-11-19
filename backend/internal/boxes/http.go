@@ -28,6 +28,7 @@ import (
 //	GET    /images/{sha1}/boxes       as caixas de uma imagem, em todas as tarefas
 //	GET    /packages/{name}/boxes     por tarefa: imagens do pacote anotadas nela
 //	GET    /packages/{name}/cvat.zip  as imagens do pacote, para criar a task no CVAT
+//	GET    /boxes/packages            em quais tarefas cada pacote tem imagens
 //	GET    /boxes/stats               labels das tarefas nas imagens de uma pesquisa (GET /images/stats)
 func (s *Service) Routes() []platform.Route {
 	return []platform.Route{
@@ -41,6 +42,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "PUT", Path: "/images/{sha1}/boxes/{task}", Handler: s.handleUpdateAttributes},
 		{Method: "GET", Path: "/packages/{name}/boxes", Handler: s.handlePackageBoxes},
 		{Method: "GET", Path: "/boxes/stats", Handler: s.handleLabelStats},
+		{Method: "GET", Path: "/boxes/packages", Handler: s.handlePackageTasks},
 		{Method: "GET", Path: "/packages/{name}/cvat.zip", Handler: s.handleCVATZip},
 	}
 }
@@ -386,4 +388,16 @@ func (s *Service) addToZip(zw *zip.Writer, img ImageRef) error {
 	}
 	_, err = io.Copy(fw, f)
 	return err
+}
+
+// GET /boxes/packages
+// {"items": {"<pacote>": ["<tarefa>", ...]}}: para a lista de pacotes filtrar
+// e ordenar por tarefa sem um pedido por pacote.
+func (s *Service) handlePackageTasks(w http.ResponseWriter, r *http.Request) {
+	items, err := s.repo.PackageTasks(r.Context())
+	if err != nil {
+		platform.ServerError(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, map[string]any{"items": items})
 }

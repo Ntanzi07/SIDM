@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
   createCamera,
   createEquipment,
@@ -145,7 +144,6 @@ function advancedLabel(rule: FieldRule | undefined): string {
 type EditingRegistry = { type: 'equipment' | 'camera'; name: string; newName: string } | null
 
 export function SettingsPage() {
-  const navigate = useNavigate()
   const [equipments, setEquipments] = useState<string[]>([])
   const [cameras, setCameras] = useState<string[]>([])
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
@@ -635,7 +633,6 @@ export function SettingsPage() {
 
   return (
     <section className="package-page settings-page">
-      <button className="back-button" onClick={() => navigate('/pacotes')} type="button">← Voltar para pacotes</button>
       <div className="page-heading">
         <div>
           <h1>Configurar</h1>

@@ -330,3 +330,15 @@ func deref(m map[string]*TaskStats) map[string]TaskStats {
 	}
 	return out
 }
+
+func TestMongoTarefasDosPacotes(t *testing.T) {
+	r := testRepo(t)
+	ctx := context.Background()
+	if err := r.ReplaceSets(ctx, []Set{boxSet("placa", "a", "p1"), boxSet("capacete", "b", "p1"), boxSet("placa", "c", "p1"), boxSet("placa", "d", "p2")}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.PackageTasks(ctx)
+	if err != nil || fmt.Sprint(got) != "map[p1:[capacete placa] p2:[placa]]" {
+		t.Errorf("%v %v", got, err)
+	}
+}

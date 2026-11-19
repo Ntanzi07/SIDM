@@ -1,16 +1,6 @@
-.settings-page .page-heading {
-  margin-bottom: 28px;
-}
-
-.settings-page .page-heading h1 {
-  margin: 0 0 8px;
-  color: #172033;
-  font-size: 32px;
-}
-
 .settings-page .page-heading p {
   margin: 0;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 14px;
 }
 
@@ -22,11 +12,11 @@
 }
 
 .settings-sidebar {
-  background: #fff;
-  border: 1px solid #edf0f4;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px;
-  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.03);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.07);
 }
 
 .settings-nav {
@@ -38,7 +28,7 @@
 .settings-nav-section-title {
   display: block;
   padding: 10px 12px 4px;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
@@ -47,7 +37,7 @@
 
 .settings-nav-divider {
   height: 1px;
-  background: #edf0f4;
+  background: var(--surface-2);
   margin: 8px 0;
 }
 
@@ -60,7 +50,7 @@
   border: none;
   border-radius: 7px;
   background: transparent;
-  color: #4b5563;
+  color: var(--text-2);
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
@@ -69,19 +59,19 @@
 }
 
 .settings-nav-item:hover {
-  background: #f8fafc;
-  color: #1e293b;
+  background: var(--surface-2);
+  color: var(--accent);
 }
 
 .settings-nav-item--active {
-  background: #f0f2fe;
-  color: #4f46e5;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
 }
 
 .settings-nav-item--active:hover {
-  background: #e9ecfd;
-  color: #4338ca;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .settings-nav-text {
@@ -98,15 +88,15 @@
   justify-content: center;
   padding: 2px 7px;
   border-radius: 10px;
-  background: #f1f5f9;
-  color: #64748b;
+  background: var(--accent-soft);
+  color: var(--text-2);
   font-size: 11px;
   font-weight: 600;
 }
 
 .settings-nav-item--active .settings-nav-badge {
-  background: #dfe3fd;
-  color: #4338ca;
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .settings-content {
@@ -125,13 +115,13 @@
 
 .settings-card h2 {
   margin: 0 0 5px;
-  color: #283247;
+  color: var(--text);
   font-size: 18px;
 }
 
 .settings-card > p {
   margin: 0 0 22px;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 12px;
 }
 
@@ -143,7 +133,7 @@
 .settings-card .form-field > span {
   display: block;
   margin-bottom: 8px;
-  color: #384257;
+  color: var(--text);
   font-size: 12px;
   font-weight: 600;
 }
@@ -161,15 +151,15 @@
   gap: 7px;
   margin: 22px 0 0;
   padding: 16px 0 0;
-  border-top: 1px solid #edf0f4;
+  border-top: 1px solid var(--border);
   list-style: none;
 }
 
 .settings-list li {
   padding: 8px 10px;
   border-radius: 6px;
-  color: #566177;
-  background: #f5f6fa;
+  color: var(--text-2);
+  background: var(--surface-2);
   font-size: 12px;
 }
 
@@ -185,13 +175,13 @@
   gap: 10px;
   padding: 8px 10px;
   border-radius: 6px;
-  background: #f5f6fa;
+  background: var(--surface-2);
   font-size: 12px;
 }
 
 .settings-list__name {
   flex: 1;
-  color: #566177;
+  color: var(--text-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -215,18 +205,18 @@
   flex: 1;
   min-height: 32px;
   padding: 4px 8px;
-  border: 1px solid #8189de;
+  border: 1px solid var(--accent);
   border-radius: 6px;
   font: inherit;
   font-size: 12px;
-  color: #283247;
-  background: #fff;
+  color: var(--text);
+  background: var(--surface);
   outline: none;
 }
 
 .settings-message {
   margin: 0 0 18px;
-  color: #36825d;
+  color: var(--success);
   font-size: 12px;
 }
 
@@ -244,25 +234,25 @@
 .settings-card .form-field input {
   width: 100%;
   min-height: 40px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 7px;
   outline: 0;
   padding: 10px 12px;
-  color: #283247;
-  background: #fff;
+  color: var(--text);
+  background: var(--surface);
   font: inherit;
   font-size: 13px;
 }
 
 .settings-card .form-field select:focus,
 .settings-card .form-field input:focus {
-  border-color: #8189de;
+  border-color: var(--accent);
 }
 
 .profile-name-hint {
   display: block;
   margin-top: 6px;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 10px;
   font-weight: 400;
 }
@@ -273,9 +263,9 @@
   min-height: 44px;
   margin: 4px 0 12px;
   padding: 10px 12px;
-  border: 1px dashed #bfc5ed;
+  border: 1px dashed var(--accent-border);
   border-radius: 7px;
-  color: #5963d9;
+  color: var(--accent);
   cursor: pointer;
   font-size: 12px;
 }
@@ -287,19 +277,19 @@
 .profile-editor {
   margin-top: 18px;
   padding-top: 18px;
-  border-top: 1px solid #edf0f4;
+  border-top: 1px solid var(--border);
 }
 
 .profile-editor__summary,
 .profile-editor__hint {
   margin: 0 0 16px;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 12px;
 }
 
 .profile-editor h3 {
   margin: 20px 0 5px;
-  color: #384257;
+  color: var(--text);
   font-size: 14px;
 }
 
@@ -317,13 +307,7 @@
 .profile-object {
   margin-top: 12px;
   padding-top: 4px;
-  border-top: 1px solid #e3e7ef;
-}
-
-.button--sm {
-  min-height: 32px;
-  padding: 6px 12px;
-  font-size: 11px;
+  border-top: 1px solid var(--border);
 }
 
 .profile-items-list {
@@ -334,15 +318,15 @@
 
 .profile-item {
   padding: 14px 16px;
-  border: 1px solid #edf0f4;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fbfcfd;
+  background: var(--surface);
   transition: border-color 0.2s, background-color 0.2s;
 }
 
 .profile-item--selected {
-  border-color: #8189de;
-  background: #f5f6ff;
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .profile-item__header {
@@ -354,14 +338,14 @@
 
 .profile-item__name {
   display: block;
-  color: #283247;
+  color: var(--text);
   font-size: 14px;
 }
 
 .profile-item__desc {
   display: block;
   margin-top: 2px;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 12px;
 }
 
@@ -378,13 +362,13 @@
   gap: 8px 16px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #e7ebf1;
-  color: #647087;
+  border-top: 1px dashed var(--border);
+  color: var(--text-2);
   font-size: 11px;
 }
 
 .profile-empty-hint {
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 13px;
   font-style: italic;
   margin: 12px 0 0;
@@ -404,7 +388,7 @@
 
 .profile-header-flex p {
   margin: 0;
-  color: #929aaa;
+  color: var(--text-3);
   font-size: 12px;
 }
 
@@ -472,8 +456,8 @@
   margin-left: 8px;
   padding: 2px 6px;
   border-radius: 4px;
-  background: #eef0fd;
-  color: #5963d9;
+  background: var(--accent-soft);
+  color: var(--accent);
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.04em;
@@ -487,7 +471,7 @@
   gap: 12px;
   margin-top: 20px;
   padding-top: 16px;
-  border-top: 1px solid #e5e8ef;
+  border-top: 1px solid var(--border);
 }
 
 .ap-editor h3 {
@@ -497,7 +481,7 @@
 
 .ap-editor h4 {
   margin: 8px 0 0;
-  color: #384257;
+  color: var(--text);
   font-size: 13px;
 }
 
@@ -512,7 +496,7 @@
   display: grid;
   gap: 4px;
   min-width: 150px;
-  color: #566177;
+  color: var(--text-2);
   font-size: 11px;
   font-weight: 600;
 }
@@ -531,10 +515,10 @@
 .ap-option input {
   min-height: 34px;
   padding: 6px 8px;
-  border: 1px solid #dfe3eb;
+  border: 1px solid var(--border);
   border-radius: 6px;
-  color: #384257;
-  background: #fff;
+  color: var(--text);
+  background: var(--surface);
   font: inherit;
   font-size: 12px;
 }
@@ -544,7 +528,7 @@
   align-items: center;
   gap: 6px;
   min-height: 34px;
-  color: #566177;
+  color: var(--text-2);
   font-size: 12px;
 }
 
@@ -572,21 +556,21 @@
   display: grid;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid #e5e8ef;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fafbfd;
+  background: var(--surface);
 }
 
 .ap-object {
-  background: #f5f6fb;
+  background: var(--surface-2);
 }
 
 .ap-object .ap-field {
-  background: #fff;
+  background: var(--surface);
 }
 
 .ap-field--error {
-  border-color: #e11d48;
+  border-color: var(--danger);
 }
 
 .ap-options {
@@ -609,24 +593,24 @@
 
 .ap-small {
   margin: 0;
-  color: #7d8798;
+  color: var(--text-3);
   font-size: 11px;
 }
 
 .ap-error {
-  color: #be123c;
+  color: var(--danger);
   font-size: 11px;
 }
 
 .ap-input--error {
-  border-color: #e11d48 !important;
+  border-color: var(--danger) !important;
 }
 
 .ap-problems {
   padding: 10px 12px;
   border-radius: 8px;
-  color: #9f1239;
-  background: #fff1f2;
+  color: var(--danger);
+  background: var(--danger-soft);
   font-size: 12px;
 }
 
