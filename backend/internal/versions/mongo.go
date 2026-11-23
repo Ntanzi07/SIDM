@@ -187,3 +187,29 @@ func (m *MongoRepo) ListItems(ctx context.Context, version string, limit, skip i
 	}
 	return list, total, nil
 }
+
+func (m *MongoRepo) ItemRefs(ctx context.Context, version string) ([]ItemRef, error) {
+	cur, err := m.items().Find(ctx, bson.D{{Key: "version", Value: version}}, options.Find().
+		SetSort(bson.D{{Key: "sha1", Value: 1}}).
+		SetProjection(bson.D{{Key: "_id", Value: 0}, {Key: "sha1", Value: 1}, {Key: "package", Value: 1}, {Key: "file_name", Value: 1}, {Key: "hash", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("listar as imagens da versão: %w", err)
+	}
+	list := []ItemRef{}
+	if err := cur.All(ctx, &list); err != nil {
+		return nil, fmt.Errorf("ler as imagens da versão: %w", err)
+	}
+	return list, nil
+}
+
+func (m *MongoRepo) FindItem(ctx context.Context, version, sha1 string) (*Item, error) {
+	var it Item
+	err := m.items().FindOne(ctx, bson.D{{Key: "version", Value: version}, {Key: "sha1", Value: sha1}}).Decode(&it)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, platform.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("buscar a imagem %s da versão: %w", sha1, err)
+	}
+	return &it, nil
+}

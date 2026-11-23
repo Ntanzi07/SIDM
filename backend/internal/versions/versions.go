@@ -148,6 +148,12 @@ type Repo interface {
 	DeleteItems(ctx context.Context, version string) error
 	// ListItems: em ordem de sha1.
 	ListItems(ctx context.Context, version string, limit, skip int64) ([]Item, int64, error)
+	// ItemRefs: todos os itens da versão, só sha1, pacote, nome e hash, em
+	// ordem de sha1 (o diff).
+	ItemRefs(ctx context.Context, version string) ([]ItemRef, error)
+	// FindItem: um item inteiro (platform.ErrNotFound se a imagem não está
+	// na versão).
+	FindItem(ctx context.Context, version, sha1 string) (*Item, error)
 }
 
 // Images é o que o módulo lê das imagens: quem passa na pesquisa e a

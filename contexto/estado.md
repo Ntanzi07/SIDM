@@ -35,10 +35,10 @@ Atualizado em 2026-11-19. Branch de trabalho: `feat/filter`.
   falta abrir a lista das imagens de um número.
 - **Export sem caixas (colega da equipe, em andamento):** só os dados anotados de cada
   imagem, sem as caixas do CVAT, no módulo `exports`.
-- **Versionamento (Nathan, em andamento, branch `feat/datacontrol`):** etapa 1 pronta no
-  backend (módulo `versions`: datasets, criar/listar versões, itens). Próximas: o diff entre
-  duas versões (o `hash` de cada item já é gravado para isso), a tela no dashboard, e o
-  export de uma versão (com o número no manifesto do zip, para o DVC do lado do treino).
+- **Versionamento (Nathan, em andamento, branch `feat/datacontrol`):** etapas 1 e 2 prontas no
+  backend (módulo `versions`: datasets, criar/listar versões, itens; o diff entre duas
+  versões pelo `hash` de cada item, e o detalhe do que mudou numa imagem). Próximas: a tela
+  no dashboard, e o export de uma versão (com o número no manifesto do zip, para o DVC do lado do treino).
 - Depois: levar os atributos das caixas para o export; histórico das edições de atributo.
 
 ## Pendências menores

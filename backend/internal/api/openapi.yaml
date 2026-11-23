@@ -1271,6 +1271,44 @@ paths:
                   total: { type: integer }
                   items: { type: array, items: { $ref: "#/components/schemas/VersionItem" } }
         "404": { $ref: "#/components/responses/NotFound" }
+  /datasets/{name}/diff:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+      - { name: from, in: query, description: "A versão velha (3 ou v3). Sem: a anterior à `to` (nenhuma, se a `to` é a v1: tudo entra como adicionado).", schema: { type: string } }
+      - { name: to, in: query, description: "A versão nova. Sem: a mais nova.", schema: { type: string } }
+    get:
+      tags: [versões]
+      summary: O que mudou entre duas versões
+      description: |
+        Compara o sha1 e o hash da anotação de cada imagem: só na nova =
+        adicionada; só na velha = removida (voltou a pendente ou saiu dos
+        filtros); nas duas com hash diferente = alterada.
+      responses:
+        "200":
+          description: O diff.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /datasets/{name}/diff/{sha1}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+      - { name: sha1, in: path, required: true, schema: { type: string } }
+      - { name: from, in: query, schema: { type: string } }
+      - { name: to, in: query, schema: { type: string } }
+    get:
+      tags: [versões]
+      summary: O que mudou numa imagem entre duas versões
+      description: Só o que mudou. Um valor null é "não informado".
+      responses:
+        "200":
+          description: O detalhe.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionItemDiff" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound", description: "A imagem não está em nenhuma das duas versões." }
   /boxes/packages:
     get:
       tags: [caixas]
@@ -1882,15 +1920,15 @@ components:
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-        latest:
-          type: object
-          description: A versão mais nova (ausente se não há).
-          properties:
-            number: { type: integer }
-            message: { type: string }
-            created_by: { type: string }
-            created_at: { type: string, format: date-time }
-            images: { type: integer }
+        latest: { allOf: [{ $ref: "#/components/schemas/VersionInfo" }], description: "A versão mais nova (ausente se não há)." }
+    VersionInfo:
+      type: object
+      properties:
+        number: { type: integer }
+        message: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        images: { type: integer }
     Version:
       type: object
       properties:
@@ -1928,6 +1966,58 @@ components:
               height: { type: integer }
               boxes: { type: array, items: { type: object } }
         hash: { type: string, description: "O sha1 da anotação: mudou entre versões = a anotação mudou." }
+    DiffRef:
+      type: object
+      properties:
+        sha1: { type: string }
+        package: { type: string }
+        file_name: { type: string }
+    VersionDiff:
+      type: object
+      properties:
+        dataset: { type: string }
+        from: { allOf: [{ $ref: "#/components/schemas/VersionInfo" }], nullable: true }
+        to: { $ref: "#/components/schemas/VersionInfo" }
+        added: { type: array, items: { $ref: "#/components/schemas/DiffRef" } }
+        removed: { type: array, items: { $ref: "#/components/schemas/DiffRef" } }
+        changed: { type: array, items: { $ref: "#/components/schemas/DiffRef" } }
+        unchanged: { type: integer }
+    DiffChange:
+      type: object
+      properties:
+        key: { type: string, example: objects.veiculo.cor }
+        from: { nullable: true, example: preto }
+        to: { nullable: true, example: branco }
+    VersionItemDiff:
+      type: object
+      properties:
+        sha1: { type: string }
+        package: { type: string }
+        file_name: { type: string }
+        status: { type: string, enum: [added, removed, changed, unchanged] }
+        fields: { type: array, items: { $ref: "#/components/schemas/DiffChange" } }
+        objects:
+          type: array
+          description: 'Com mais de um objeto do mesmo tipo, a chave leva a posição: "objects.veiculo[2].cor".'
+          items: { $ref: "#/components/schemas/DiffChange" }
+        tasks:
+          type: array
+          items:
+            type: object
+            properties:
+              task: { type: string }
+              from: { type: integer, description: "Caixas na versão velha." }
+              to: { type: integer }
+              labels:
+                type: array
+                description: Só as labels cuja quantidade mudou.
+                items:
+                  type: object
+                  properties:
+                    label: { type: string }
+                    from: { type: integer }
+                    to: { type: integer }
+              edited: { type: boolean, description: "As mesmas quantidades, mas as caixas mudaram (posição, tamanho, atributos)." }
     Counts:
       type: object
       description: Valor → quantidade.

@@ -76,6 +76,26 @@ func TestVersoesDeDataset(t *testing.T) {
 		t.Errorf("itens da v1: %+v", items)
 	}
 
+	// o diff: a m2 entrou na v2; o detalhe diz o que ela tem
+	rec = env.do("GET", "/datasets/motos-noite/diff", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var d versions.Diff
+	decode(t, rec, &d)
+	if d.From == nil || d.From.Number != 1 || d.To.Number != 2 || len(d.Added) != 1 || d.Added[0].SHA1 != res[1].SHA1 || d.Unchanged != 1 {
+		t.Errorf("diff: %+v", d)
+	}
+	rec = env.do("GET", "/datasets/motos-noite/diff/"+res[1].SHA1+"?from=v1&to=2", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var item versions.ItemDiff
+	decode(t, rec, &item)
+	if item.Status != versions.StatusAdded || len(item.Fields) == 0 {
+		t.Errorf("detalhe: %+v", item)
+	}
+	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff?from=2&to=2", nil, nil), http.StatusBadRequest)
+	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff?from=x", nil, nil), http.StatusBadRequest)
+	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff?to=9", nil, nil), http.StatusNotFound)
+	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff/zzz", nil, nil), http.StatusNotFound)
+
 	// a lista de datasets traz a mais nova
 	rec = env.do("GET", "/datasets", nil, nil)
 	var ds platform.Page[versions.Dataset]

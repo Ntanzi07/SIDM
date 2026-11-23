@@ -152,3 +152,27 @@ func (m *Memory) ListItems(ctx context.Context, version string, limit, skip int6
 	end := min(start+limit, total)
 	return append([]Item{}, list[start:end]...), total, nil
 }
+
+func (m *Memory) ItemRefs(ctx context.Context, version string) ([]ItemRef, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	list := []ItemRef{}
+	for _, it := range m.Items {
+		if it.Version == version {
+			list = append(list, ItemRef{SHA1: it.SHA1, Package: it.Package, FileName: it.FileName, Hash: it.Hash})
+		}
+	}
+	slices.SortFunc(list, func(a, b ItemRef) int { return strings.Compare(a.SHA1, b.SHA1) })
+	return list, nil
+}
+
+func (m *Memory) FindItem(ctx context.Context, version, sha1 string) (*Item, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, it := range m.Items {
+		if it.Version == version && it.SHA1 == sha1 {
+			return &it, nil
+		}
+	}
+	return nil, platform.ErrNotFound
+}

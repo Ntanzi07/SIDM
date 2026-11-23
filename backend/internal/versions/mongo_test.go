@@ -26,7 +26,7 @@ func testRepo(t *testing.T) *MongoRepo {
 func TestMongoVersoes(t *testing.T) {
 	ctx := context.Background()
 	r := testRepo(t)
-	s, _, _, _ := newTestService()
+	s, _, img, _ := newTestService()
 	s.repo = r
 
 	if _, err := s.CreateDataset(ctx, DatasetInput{Name: "motos", Profile: "veiculos", Query: Query{Packages: []string{"p1"}}}, "nathan"); err != nil {
@@ -72,6 +72,38 @@ func TestMongoVersoes(t *testing.T) {
 	}
 	if items[0].Hash == "" || items[0].Fields["weather"] != "rain" {
 		t.Errorf("anotação do banco: %+v", items[0])
+	}
+
+	// diff pelo banco: v1 e v2 iguais
+	d, err := s.Diff(ctx, "motos", 1, 2)
+	if err != nil || d.Unchanged != 2 || len(d.Added)+len(d.Removed)+len(d.Changed) != 0 {
+		t.Errorf("diff igual: %+v %v", d, err)
+	}
+	if _, err := r.FindItem(ctx, got.ID, "zzz"); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("item que não existe: %v", err)
+	}
+
+	// uma lista volta do banco como bson.A: o detalhe mostra como lista
+	a := img.imgs["a"]
+	a.Fields = map[string]any{"weather": "rain", "tags": []any{"x", "y"}}
+	img.imgs["a"] = a
+	if _, err := s.CreateVersion(ctx, "motos", "tags", "nathan"); err != nil {
+		t.Fatal(err)
+	}
+	a.Fields = map[string]any{"weather": "rain", "tags": []any{"x"}}
+	img.imgs["a"] = a
+	if _, err := s.CreateVersion(ctx, "motos", "menos tags", "nathan"); err != nil {
+		t.Fatal(err)
+	}
+	ia, err := s.DiffItem(ctx, "motos", 3, 4, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ia.Status != StatusChanged || !reflect.DeepEqual(ia.Fields, []Change{{Key: "fields.tags", From: []any{"x", "y"}, To: []any{"x"}}}) {
+		t.Errorf("tags: %+v", ia)
+	}
+	if d, _ := s.Diff(ctx, "motos", 3, 4); len(d.Changed) != 1 || d.Changed[0].SHA1 != "a" || d.Changed[0].FileName != "a_v2.jpg" {
+		t.Errorf("diff tags: %+v", d)
 	}
 
 	// com versões, não apaga; sem, apaga

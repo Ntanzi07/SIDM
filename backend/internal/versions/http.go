@@ -20,6 +20,8 @@ import (
 //	POST   /datasets/{name}/versions               congela uma versão nova (X-User, {"message"})
 //	GET    /datasets/{name}/versions/{number}      uma versão, com o resumo
 //	GET    /datasets/{name}/versions/{number}/items  as imagens congeladas, paginadas
+//	GET    /datasets/{name}/diff?from=&to=         o que mudou entre duas versões
+//	GET    /datasets/{name}/diff/{sha1}?from=&to=  o que mudou numa imagem
 func (s *Service) Routes() []platform.Route {
 	return []platform.Route{
 		{Method: "GET", Path: "/datasets", Handler: s.handleListDatasets},
@@ -31,6 +33,8 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "POST", Path: "/datasets/{name}/versions", Handler: s.handleCreateVersion},
 		{Method: "GET", Path: "/datasets/{name}/versions/{number}", Handler: s.handleGetVersion},
 		{Method: "GET", Path: "/datasets/{name}/versions/{number}/items", Handler: s.handleItems},
+		{Method: "GET", Path: "/datasets/{name}/diff", Handler: s.handleDiff},
+		{Method: "GET", Path: "/datasets/{name}/diff/{sha1}", Handler: s.handleDiffItem},
 	}
 }
 
@@ -154,18 +158,44 @@ func (s *Service) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusCreated, v)
 }
 
-// number: o {number} da rota ("3" ou "v3").
-func number(w http.ResponseWriter, r *http.Request) (int, bool) {
-	raw := r.PathValue("number")
+// parseNumber: "3" ou "v3".
+func parseNumber(raw string) (int, bool) {
 	if len(raw) > 1 && (raw[0] == 'v' || raw[0] == 'V') {
 		raw = raw[1:]
 	}
 	n, err := strconv.Atoi(raw)
-	if err != nil || n < 1 {
+	return n, err == nil && n >= 1
+}
+
+// number: o {number} da rota.
+func number(w http.ResponseWriter, r *http.Request) (int, bool) {
+	n, ok := parseNumber(r.PathValue("number"))
+	if !ok {
 		platform.WriteError(w, http.StatusBadRequest, "número de versão inválido: "+r.PathValue("number"))
-		return 0, false
 	}
-	return n, true
+	return n, ok
+}
+
+// fromTo: o ?from= e o ?to= do diff (0 = não informado: to é a mais nova e
+// from a anterior a ela).
+func fromTo(w http.ResponseWriter, r *http.Request) (from, to int, ok bool) {
+	q := r.URL.Query()
+	for _, p := range []struct {
+		key string
+		dst *int
+	}{{"from", &from}, {"to", &to}} {
+		raw := q.Get(p.key)
+		if raw == "" {
+			continue
+		}
+		n, valid := parseNumber(raw)
+		if !valid {
+			platform.WriteError(w, http.StatusBadRequest, "número de versão inválido em "+p.key+": "+raw)
+			return 0, 0, false
+		}
+		*p.dst = n
+	}
+	return from, to, true
 }
 
 func (s *Service) handleGetVersion(w http.ResponseWriter, r *http.Request) {
@@ -194,4 +224,30 @@ func (s *Service) handleItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, platform.Page[Item]{Total: total, Items: items})
+}
+
+func (s *Service) handleDiff(w http.ResponseWriter, r *http.Request) {
+	from, to, ok := fromTo(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.Diff(r.Context(), r.PathValue("name"), from, to)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, d)
+}
+
+func (s *Service) handleDiffItem(w http.ResponseWriter, r *http.Request) {
+	from, to, ok := fromTo(w, r)
+	if !ok {
+		return
+	}
+	d, err := s.DiffItem(r.Context(), r.PathValue("name"), from, to, r.PathValue("sha1"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, d)
 }
