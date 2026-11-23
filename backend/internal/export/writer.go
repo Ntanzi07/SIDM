@@ -2,6 +2,8 @@ package export
 
 import (
 	"archive/zip"
+	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -26,6 +28,9 @@ type Item struct {
 	Dir      string // pasta da imagem no layout por pastas (Profile.Dir); vazio no layout por divisão
 	Boxes    []boxes.Box
 	Open     func() (io.ReadCloser, error) // o arquivo da imagem
+	// Meta: os metadados da imagem (os VALORES guardados, de NameMeta). Só o
+	// formato images usa, no anotacoes.csv.
+	Meta Meta
 }
 
 // Result é o que foi escrito.
@@ -57,6 +62,8 @@ func Write(zw *zip.Writer, p Profile, items []Item, classes []string, info any) 
 		w = &yoloWriter{zw: zw, split: p.Split, classes: classes}
 	case FormatVOC:
 		w = &vocWriter{zw: zw, folders: p.Layout == LayoutFolders, split: p.Split, classes: classes}
+	case FormatImages:
+		w = newImagesWriter(zw, &p)
 	default:
 		return nil, fmt.Errorf("formato desconhecido %q", p.Format)
 	}
@@ -392,4 +399,78 @@ func (w *vocWriter) finish() error {
 		}
 	}
 	return writeFile(w.zw, "labels.txt", []byte(strings.Join(w.classes, "\n")+"\n"))
+}
+
+// ---------- Só imagens (sem caixas) ----------
+//
+// As imagens com o nome de saída, e um anotacoes.csv com os dados anotados:
+//
+//	por divisão: train/, valid/, test/ (com um grupo só, 100/0/0, na raiz)
+//	por pastas:  a árvore do perfil
+//	anotacoes.csv: arquivo;sha1;pacote;nome_original;<campos do perfil de anotação>
+//
+// O CSV sai em UTF-8 com BOM e ";" (o Excel em português abre direto), com os
+// valores guardados ("rear", não o código do nome).
+
+// CSVName é o arquivo com os dados anotados no formato images.
+const CSVName = "anotacoes.csv"
+
+type imagesWriter struct {
+	zw      *zip.Writer
+	folders bool
+	splits  []string
+	columns []string // as chaves de Meta, depois das fixas
+	rows    [][]string
+}
+
+func newImagesWriter(zw *zip.Writer, p *Profile) *imagesWriter {
+	w := &imagesWriter{zw: zw, folders: p.Layout == LayoutFolders, splits: p.Split.Splits()}
+	if p.ap != nil {
+		for _, f := range MetaFields(p.ap) {
+			if f.Group != "file" && !f.Alias {
+				w.columns = append(w.columns, f.Key)
+			}
+		}
+	}
+	return w
+}
+
+func (w *imagesWriter) dir(it Item) string {
+	switch {
+	case w.folders:
+		return it.Dir
+	case len(w.splits) == 1:
+		return "" // um grupo só: tudo na raiz
+	default:
+		return it.Split
+	}
+}
+
+func (w *imagesWriter) imagePath(it Item) string { return path.Join(w.dir(it), it.FileName) }
+
+func (w *imagesWriter) add(it Item, _ map[string]int) error {
+	row := []string{w.imagePath(it), it.SHA1, it.Meta["package"], it.Meta["original"]}
+	for _, k := range w.columns {
+		row = append(row, it.Meta[k])
+	}
+	w.rows = append(w.rows, row)
+	return nil
+}
+
+func (w *imagesWriter) finish() error {
+	if !w.folders && len(w.splits) > 1 {
+		for _, sp := range w.splits {
+			if _, err := w.zw.CreateHeader(&zip.FileHeader{Name: sp + "/", Modified: time.Now()}); err != nil {
+				return err
+			}
+		}
+	}
+	var buf bytes.Buffer
+	buf.WriteString("\uFEFF") // BOM: o Excel lê os acentos como UTF-8
+	cw := csv.NewWriter(&buf)
+	cw.Comma = ';'
+	cw.UseCRLF = true
+	_ = cw.Write(append([]string{"arquivo", "sha1", "pacote", "nome_original"}, w.columns...))
+	_ = cw.WriteAll(w.rows) // num bytes.Buffer não falha
+	return writeFile(w.zw, CSVName, buf.Bytes())
 }

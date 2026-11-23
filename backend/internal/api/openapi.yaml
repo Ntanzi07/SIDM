@@ -27,9 +27,11 @@ tags:
     description: |
       Datasets de treino (RF-DETR / YOLO / Pascal VOC). Entram as imagens **verificadas** e
       **anotadas na tarefa** escolhida que passam nos filtros do perfil (as
-      anotadas sem nenhuma caixa entram como negativas). A divisão
+      anotadas sem nenhuma caixa entram como negativas). No formato `images`
+      (só imagens) não há tarefa nem caixas: entra toda verificada que passa nos
+      filtros, com o nome de saída e um `anotacoes.csv`. A divisão
       train/valid/test é **fixa por imagem** (pelo sha1). Perfis padrão:
-      `rf-detr`, `yolo`, `voc` e `voc-pastas`.
+      `rf-detr`, `yolo`, `voc`, `voc-pastas` e `imagens`.
   - name: perfis de anotação
     description: |
       O que se anota em cada imagem: os **campos da imagem** e os **tipos de
@@ -1759,7 +1761,7 @@ components:
       properties:
         name: { type: string, example: yolo-placas-noite }
         description: { type: string }
-        format: { type: string, enum: [coco, yolo, voc], description: "coco = RF-DETR (layout do Roboflow); voc = Pascal VOC (um .xml por imagem, ao lado dela)." }
+        format: { type: string, enum: [coco, yolo, voc, images], description: "coco = RF-DETR (layout do Roboflow); voc = Pascal VOC (um .xml por imagem, ao lado dela); images = só as imagens com o nome de saída e um anotacoes.csv (arquivo;sha1;pacote;nome_original;campos do perfil de anotação, em UTF-8 com BOM e ;), sem caixas: não usa tasks, all_tasks nem labels." }
         file_name:
           type: string
           example: "{sha1}{direction}{resolution}{capture_angle}{day_time}{vehicle_type}{image_range}{plate_type}{plate_category}{weather}{condition}{plate}"
@@ -1774,7 +1776,7 @@ components:
           type: string
           enum: [split, folders]
           default: split
-          description: "split = train/valid/test; folders = árvore de pastas pelos metadados (só VOC; a divisão só vale com um nível split)."
+          description: "split = train/valid/test; folders = árvore de pastas pelos metadados (VOC e images; a divisão só vale com um nível split). No images por divisão com um grupo só (100/0/0), as imagens ficam na raiz."
         folders:
           type: array
           description: Níveis de pasta, na ordem (layout folders).
@@ -1793,7 +1795,7 @@ components:
           type: array
           items: { type: string }
           example: [parabrisa, placa]
-          description: "Tarefas cujas caixas entram, juntas num dataset só (vazio = escolher na hora de exportar). A mesma label em duas tarefas vira uma classe só (use labels.rename para separar)."
+          description: "Tarefas cujas caixas entram, juntas num dataset só (vazio = escolher na hora de exportar; não usado no formato images). A mesma label em duas tarefas vira uma classe só (use labels.rename para separar)."
         all_tasks:
           type: boolean
           description: "Só as imagens anotadas em TODAS as tarefas. Sem isso, uma imagem anotada só numa tarefa entra sem as caixas das outras (e o modelo aprende que o objeto não marcado é fundo)."

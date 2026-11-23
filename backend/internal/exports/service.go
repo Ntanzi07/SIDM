@@ -151,7 +151,7 @@ func (s *Service) Prepare(ctx context.Context, p *export.Profile, tasks []string
 		return err
 	}
 	p.Bind(ap)
-	if len(p.Tasks) == 0 {
+	if p.NeedsTasks() && len(p.Tasks) == 0 {
 		return &InvalidError{"escolha a tarefa de anotação (as caixas de qual tarefa entram no dataset)"}
 	}
 	for _, task := range p.Tasks {
@@ -219,6 +219,7 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 			for _, img := range imgs {
 				set, found := mergeSets(img.SHA1, byTask)
 				switch {
+				case !p.NeedsTasks(): // só imagens: toda verificada que passa nos filtros
 				case found == 0:
 					prev.Skipped.NotAnnotated++
 					continue
@@ -233,9 +234,11 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 					stored = path.Base(img.Path)
 				}
 				meta := imageMeta(&img)
+				nameMeta := export.NameMeta(img.SHA1, stored, img.OriginalName, meta)
 				item := export.Item{
 					SHA1: img.SHA1, Width: set.Width, Height: set.Height,
-					FileName: p.FileNameOf(export.NameMeta(img.SHA1, stored, img.OriginalName, meta), path.Ext(stored)),
+					FileName: p.FileNameOf(nameMeta, path.Ext(stored)),
+					Meta:     nameMeta,
 					Split:    export.SplitOf(img.SHA1, p.Split),
 					Open:     s.opener(img.Path),
 				}
@@ -250,6 +253,7 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 					}
 				}
 				switch {
+				case !p.NeedsTasks(): // sem caixas: não é negativa
 				case len(set.Boxes) == 0: // negativa: entra sem caixas
 					prev.Negatives++
 				case len(item.Boxes) == 0: // tinha caixas, mas de labels que não entram

@@ -28,7 +28,15 @@ const FORMATS = [
   ['coco', 'RF-DETR (COCO)', 'train/, valid/, test/ com _annotations.coco.json (layout do Roboflow)'],
   ['yolo', 'YOLO (Ultralytics)', 'images/, labels/ e data.yaml'],
   ['voc', 'Pascal VOC', 'um .xml por imagem, ao lado dela; em train/valid/test ou em pastas pelos metadados'],
+  ['images', 'Só imagens', 'as imagens com o nome de saída e um anotacoes.csv com os dados anotados; sem caixas nem tarefa'],
 ] as const
+
+const FORMAT_NAMES: Record<ExportProfile['format'], string> = {
+  coco: 'RF-DETR (COCO)', yolo: 'YOLO', voc: 'Pascal VOC', images: 'Só imagens',
+}
+
+// Formatos com pastas pelos metadados (COCO e YOLO precisam de train/valid/test).
+const withFolders = (format: ExportProfile['format']) => format === 'voc' || format === 'images'
 
 // A divisão importa? (por divisão, ou com um nível "split" nas pastas)
 function usesSplit(profile: ExportProfile): boolean {
@@ -189,17 +197,20 @@ export function ExportPage() {
   const original = profiles.find((profile) => profile.name === selected)
   const isBuiltin = Boolean(original?.builtin)
   const splitSum = draft.split.train + draft.split.valid + draft.split.test
-  const isFolders = draft.format === 'voc' && draft.layout === 'folders'
+  const noBoxes = draft.format === 'images' // só imagens: sem tarefa, sem labels
+  const isFolders = withFolders(draft.format) && draft.layout === 'folders'
   const splitMatters = usesSplit(draft)
   const fileNameOk = !draft.file_name || /\{(sha1|name)\}/.test(draft.file_name)
   const foldersOk = (!isFolders || (draft.folders ?? []).length > 0) && fileNameOk
   const hasTasks = (draft.tasks?.length ?? 0) > 0
-  const canRun = splitSum === 100 && hasTasks && foldersOk
+  const canRun = splitSum === 100 && (hasTasks || noBoxes) && foldersOk
 
   // O perfil como está na tela (com as labels da tabela).
   const current = useMemo<ExportProfile>(
-    () => ({ ...draft, labels: labelsFrom(rows, original?.labels.include) }),
-    [draft, rows, original],
+    () => noBoxes
+      ? { ...draft, tasks: undefined, all_tasks: undefined, labels: {} }
+      : { ...draft, labels: labelsFrom(rows, original?.labels.include) },
+    [draft, rows, original, noBoxes],
   )
   const dirty = useMemo(() => !original || JSON.stringify(original) !== JSON.stringify({ ...original, ...current }), [original, current])
 
@@ -340,7 +351,7 @@ export function ExportPage() {
       <div className="page-heading">
         <div>
           <h1>Exportar</h1>
-          <p>Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa.</p>
+          <p>Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa, ou só as imagens com o nome e os dados anotados.</p>
         </div>
       </div>
       {error && <p className="form-error">{error}</p>}
@@ -357,7 +368,7 @@ export function ExportPage() {
               type="button"
             >
               <strong>{profile.name}</strong>
-              <span>{profile.builtin ? 'padrão' : profile.format === 'coco' ? 'RF-DETR (COCO)' : 'YOLO'}</span>
+              <span>{profile.builtin ? 'padrão' : FORMAT_NAMES[profile.format] ?? profile.format}</span>
             </button>
           ))}
           <button className="button button--secondary export-profiles__new" onClick={() => open(null)} type="button">+ Novo perfil</button>
@@ -384,6 +395,7 @@ export function ExportPage() {
               </label>
             </div>
 
+            {!noBoxes && <>
             <h3>Tarefa</h3>
             {tasks.length === 0 ? (
               <p className="form-error">
@@ -423,6 +435,7 @@ export function ExportPage() {
               </>
             )}
             {isBuiltin && <p className="profile-name-hint">Os perfis padrão servem para qualquer tarefa: escolha na hora.</p>}
+            </>}
 
             <h3>Perfil de anotação</h3>
             <div className="profile-form-grid">
@@ -446,7 +459,7 @@ export function ExportPage() {
                   <input
                     checked={draft.format === value}
                     name="format"
-                    onChange={() => change(value === 'voc' ? { format: value } : { format: value, layout: 'split', folders: undefined })}
+                    onChange={() => change(withFolders(value) ? { format: value } : { format: value, layout: 'split', folders: undefined })}
                     type="radio"
                   />
                   <strong>{label}</strong>
@@ -455,14 +468,14 @@ export function ExportPage() {
               ))}
             </div>
 
-            {draft.format === 'voc' && (
+            {withFolders(draft.format) && (
               <>
                 <h3>Pastas de saída</h3>
                 <div className="export-formats">
                   <label className={!isFolders ? 'export-format export-format--active' : 'export-format'}>
                     <input checked={!isFolders} name="layout" onChange={() => change({ layout: 'split', folders: undefined })} type="radio" />
                     <strong>Por divisão</strong>
-                    <span>train/, valid/ e test/, cada imagem com o seu .xml</span>
+                    <span>{noBoxes ? 'train/, valid/ e test/ (com tudo em treino, as imagens ficam na raiz do zip)' : 'train/, valid/ e test/, cada imagem com o seu .xml'}</span>
                   </label>
                   <label className={isFolders ? 'export-format export-format--active' : 'export-format'}>
                     <input
@@ -573,6 +586,7 @@ export function ExportPage() {
               </>
             )}
 
+            {!noBoxes && <>
             <h3>Labels</h3>
             {!hasTasks ? (
               <p className="profile-name-hint">Escolha a tarefa para ver as labels dela.</p>
@@ -604,13 +618,14 @@ export function ExportPage() {
             <p className="profile-name-hint">
               Dê o mesmo nome a duas labels para juntá-las (ex.: "Placa" e "placa" viram uma classe só).
             </p>
+            </>}
 
             <div className="export-actions">
               <button
                 className="button button--secondary"
                 disabled={busy !== '' || !canRun}
                 onClick={() => void runPreview()}
-                title={!hasTasks ? 'Escolha a tarefa antes' : !foldersOk ? 'Escolha pelo menos um nível de pasta' : undefined}
+                title={!hasTasks && !noBoxes ? 'Escolha a tarefa antes' : !foldersOk ? 'Escolha pelo menos um nível de pasta' : undefined}
                 type="button"
               >
                 {busy === 'preview' ? 'Calculando...' : 'Prévia'}
@@ -642,7 +657,7 @@ export function ExportPage() {
               <h2>Prévia</h2>
               {preview.total === 0 ? (
                 <p className="form-error">
-                  Nenhuma imagem verificada e anotada {preview.tasks.length > 1 ? `${preview.all_tasks ? 'em todas as tarefas' : 'nas tarefas'} "${preview.task}"` : `na tarefa "${preview.task}"`} passa nestes filtros.
+                  {preview.format === 'images' ? 'Nenhuma imagem verificada passa nestes filtros.' : <>Nenhuma imagem verificada e anotada {preview.tasks.length > 1 ? `${preview.all_tasks ? 'em todas as tarefas' : 'nas tarefas'} "${preview.task}"` : `na tarefa "${preview.task}"`} passa nestes filtros.</>}
                 </p>
               ) : (
                 <>
@@ -671,7 +686,7 @@ export function ExportPage() {
                       </tbody>
                     </table>
                   )}
-                  <table className="export-labels">
+                  {preview.format !== 'images' && <table className="export-labels">
                     <thead><tr>{preview.format !== 'voc' && <th>Id</th>}<th>Classe</th><th>Caixas</th></tr></thead>
                     <tbody>
                       {preview.classes.map((name, i) => (
@@ -682,7 +697,10 @@ export function ExportPage() {
                         </tr>
                       ))}
                     </tbody>
-                  </table>
+                  </table>}
+                  {preview.format === 'images' && (
+                    <p className="profile-name-hint">O zip leva também o anotacoes.csv, com os dados anotados de cada imagem (abre no Excel).</p>
+                  )}
                 </>
               )}
               {(preview.skipped.not_annotated > 0 || preview.skipped.missing_tasks > 0 || preview.skipped.without_labels > 0) && (

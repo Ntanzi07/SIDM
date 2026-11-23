@@ -233,7 +233,7 @@ func TestPerfisDeExport(t *testing.T) {
 	for _, p := range list.Items {
 		names = append(names, p.Name)
 	}
-	if strings.Join(names, ",") != "rf-detr,yolo,voc,voc-pastas,meu-yolo" || !list.Items[0].Builtin {
+	if strings.Join(names, ",") != "rf-detr,yolo,voc,voc-pastas,imagens,meu-yolo" || !list.Items[0].Builtin {
 		t.Errorf("lista = %v", names)
 	}
 
@@ -450,5 +450,77 @@ func TestExportVariasTarefas(t *testing.T) {
 	// tarefa inexistente no meio: 400
 	if _, code, _ := preview(t, env, `{"profile":"yolo","tasks":["parabrisa","sumiu"]}`); code != http.StatusBadRequest {
 		t.Errorf("tarefa inexistente: %d", code)
+	}
+}
+
+// Só imagens: sem tarefa e sem caixas; entra toda verificada que passa nos
+// filtros, com o nome v2, e o zip leva o anotacoes.csv.
+func TestExportSoImagens(t *testing.T) {
+	env := newTestEnv(t)
+	n1, n2, day := seedExport(t, env)
+
+	p, code, msg := preview(t, env, `{"profile":"imagens"}`)
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, msg)
+	}
+	// 5 verificadas no pacote (com e sem caixa, e a da outra tarefa) + 1 do
+	// outro pacote; a pendente não entra
+	if p.Total != 6 || p.Images["train"] != 6 || p.Negatives != 0 || len(p.Boxes) != 0 || len(p.Classes) != 0 || p.Skipped.NotAnnotated != 0 {
+		t.Errorf("preview = %+v", p)
+	}
+	// a tarefa do pedido é ignorada (não precisa existir)
+	if _, code, msg := preview(t, env, `{"profile":"imagens","task":"nao-existe"}`); code != http.StatusOK {
+		t.Errorf("tarefa no images: %d %s", code, msg)
+	}
+
+	// perfil da tela: só as de noite deste pacote, por divisão
+	prof := map[string]any{
+		"name": "imagens-noite", "format": "images", "split": map[string]int{"train": 70, "valid": 15, "test": 15},
+		"packages": []string{testPkg}, "filters": map[string]string{"day_time": "night"},
+	}
+	body, _ := json.Marshal(map[string]any{"profile": prof})
+	rec := env.doJSON("POST", "/exports/download", string(body))
+	assertStatus(t, rec, http.StatusOK)
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, f := range zr.File {
+		rc, _ := f.Open()
+		b, _ := io.ReadAll(rc)
+		rc.Close()
+		files[f.Name] = string(b)
+	}
+	csv := files[export.CSVName]
+	for _, sha := range []string{n1, n2} {
+		img := env.img.Images[sha]
+		name := path.Join(export.SplitOf(sha, export.Split{Train: 70, Valid: 15, Test: 15}), img.FileName)
+		if _, ok := files[name]; !ok {
+			t.Errorf("faltou %s", name)
+		}
+		if !strings.Contains(csv, "\r\n"+name+";"+sha+";"+testPkg+";") {
+			t.Errorf("o csv não tem a linha de %s:\n%s", name, csv)
+		}
+	}
+	if strings.Contains(csv, day) {
+		t.Error("a de dia não passa no filtro")
+	}
+	for name := range files {
+		if strings.HasPrefix(name, "labels") || strings.HasSuffix(name, ".xml") || name == "data.yaml" {
+			t.Errorf("sem caixas não tem %s", name)
+		}
+	}
+
+	// nenhuma imagem (pacote vazio): a mensagem não fala de tarefa
+	env.cat.Packages["vazio"] = catalog.Package{Name: "vazio"}
+	prof["packages"] = []string{"vazio"}
+	body, _ = json.Marshal(map[string]any{"profile": prof})
+	rec = env.doJSON("POST", "/exports/download", string(body))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("vazio: %d", rec.Code)
+	}
+	if m := errorMsg(t, rec); m != "nenhuma imagem verificada passa nos filtros deste perfil" {
+		t.Errorf("mensagem = %q", m)
 	}
 }

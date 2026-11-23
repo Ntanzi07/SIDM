@@ -9,7 +9,7 @@ import (
 // Layouts de saída.
 const (
 	LayoutSplit   = "split"   // train/, valid/, test/ (padrão)
-	LayoutFolders = "folders" // pastas montadas a partir dos metadados de cada imagem (só VOC)
+	LayoutFolders = "folders" // pastas montadas a partir dos metadados de cada imagem (VOC e só imagens)
 )
 
 // FolderLevel é um nível da árvore de pastas: de qual metadado sai o nome da
@@ -126,8 +126,8 @@ func (p *Profile) validateFolders(add func(string, ...any)) {
 		add("layout: use %q (train/valid/test) ou %q (pastas pelos metadados)", LayoutSplit, LayoutFolders)
 		return
 	}
-	if p.Format != FormatVOC {
-		add("layout: pastas pelos metadados só no formato %q (COCO e YOLO precisam de train/valid/test)", FormatVOC)
+	if p.Format != FormatVOC && p.Format != FormatImages {
+		add("layout: pastas pelos metadados só nos formatos %q e %q (COCO e YOLO precisam de train/valid/test)", FormatVOC, FormatImages)
 	}
 	if len(p.Folders) == 0 {
 		add("folders: escolha pelo menos um nível de pasta")

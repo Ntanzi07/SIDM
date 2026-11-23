@@ -526,3 +526,122 @@ func TestFileNameOf(t *testing.T) {
 		t.Errorf("válido: %v %q", err, ok.FileName)
 	}
 }
+
+func TestWriteImages(t *testing.T) {
+	write := func(t *testing.T, p Profile, list []Item) map[string]string {
+		t.Helper()
+		p.Bind(&vehicles)
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		res, err := Write(zw, p, list, nil, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		zw.Close()
+		if len(res.Boxes) != 0 || len(res.Missing) != 1 {
+			t.Errorf("result = %+v", res)
+		}
+		files := readZip(t, buf.Bytes())
+		for name := range files {
+			if strings.HasSuffix(name, ".xml") || strings.HasSuffix(name, ".txt") && name != "FALTANDO.txt" || strings.HasSuffix(name, ".json") && name != "export_info.json" {
+				t.Errorf("sem caixas não tem arquivo de anotação: %s", name)
+			}
+		}
+		return files
+	}
+	withMeta := func() []Item {
+		list := items()
+		for i := range list {
+			list[i].Boxes = nil // o Collect não busca caixas no images
+		}
+		list[0].Meta = Meta{"sha1": "a", "package": "p1", "original": "foto", "day_time": "night", "vehicle_type": "car", "vehicle_plate": "ABC1D23"}
+		list[1].Meta = Meta{"sha1": "b", "package": "p1"}
+		return list
+	}
+
+	t.Run("um grupo só: na raiz, com o csv", func(t *testing.T) {
+		p, ok := Builtin("imagens")
+		if !ok || p.NeedsTasks() {
+			t.Fatal("faltou o perfil padrão imagens")
+		}
+		files := write(t, p, withMeta())
+		if files["a_v2_x.jpg"] != "A" || files["b.jpg"] != "B" || files["export_info.json"] == "" {
+			t.Errorf("arquivos: %v", keys(files))
+		}
+		if _, ok := files["train/"]; ok {
+			t.Error("com 100/0/0 não tem pasta train/")
+		}
+		csv := files[CSVName]
+		if !strings.HasPrefix(csv, "\uFEFFarquivo;sha1;pacote;nome_original;") {
+			t.Fatalf("cabeçalho do csv:\n%s", csv)
+		}
+		lines := strings.Split(strings.TrimSuffix(csv, "\r\n"), "\r\n")
+		if len(lines) != 3 { // cabeçalho + 2 (a que não abriu fica de fora)
+			t.Fatalf("linhas do csv:\n%s", csv)
+		}
+		head := strings.Split(strings.TrimPrefix(lines[0], "\uFEFF"), ";")
+		row := strings.Split(lines[1], ";")
+		col := func(name string) string {
+			for i, h := range head {
+				if h == name {
+					return row[i]
+				}
+			}
+			t.Errorf("o csv não tem a coluna %s: %v", name, head)
+			return ""
+		}
+		if col("arquivo") != "a_v2_x.jpg" || col("pacote") != "p1" || col("nome_original") != "foto" ||
+			col("day_time") != "night" || col("vehicle_type") != "car" || col("vehicle_plate") != "ABC1D23" {
+			t.Errorf("linha = %v", row)
+		}
+		for _, h := range head {
+			if h == "plate" || h == "condition" || h == "split" {
+				t.Errorf("atalho ou campo de arquivo não vira coluna: %s", h)
+			}
+		}
+	})
+
+	t.Run("por divisão", func(t *testing.T) {
+		p := Profile{Name: "x", Format: FormatImages, Split: Split{70, 15, 15}}
+		files := write(t, p, withMeta())
+		if files["train/a_v2_x.jpg"] != "A" || files["valid/b.jpg"] != "B" {
+			t.Errorf("arquivos: %v", keys(files))
+		}
+		if _, ok := files["test/"]; !ok {
+			t.Error("a pasta test/ tem que existir mesmo vazia")
+		}
+		if !strings.Contains(files[CSVName], "\r\ntrain/a_v2_x.jpg;a;") {
+			t.Errorf("o csv leva o caminho no zip:\n%s", files[CSVName])
+		}
+	})
+
+	t.Run("por pastas", func(t *testing.T) {
+		p := Profile{Name: "x", Format: FormatImages, Split: Split{100, 0, 0}, Layout: LayoutFolders, Folders: []FolderLevel{{Field: "day_time"}}}
+		list := withMeta()
+		list[0].Dir, list[1].Dir = "night", DefaultUnknown
+		files := write(t, p, list)
+		if files["night/a_v2_x.jpg"] != "A" || files[DefaultUnknown+"/b.jpg"] != "B" {
+			t.Errorf("arquivos: %v", keys(files))
+		}
+	})
+}
+
+func TestValidateSoImagens(t *testing.T) {
+	p := Profile{
+		Name: "imagens-noite", Format: FormatImages, Split: Split{100, 0, 0},
+		Layout: LayoutFolders, Folders: []FolderLevel{{Field: "vehicle_type"}},
+		Tasks: []string{"veiculos"}, AllTasks: true, Labels: LabelRules{Include: []string{"placa"}},
+		Filters: Filters{DayTime: "night"},
+	}
+	p.Normalize()
+	if err := p.Validate(&vehicles); err != nil {
+		t.Fatalf("pastas no images deveriam valer: %v", err)
+	}
+	if p.Tasks != nil || p.AllTasks || len(p.Labels.Include) != 0 {
+		t.Errorf("sem caixas, tarefa e labels não ficam no perfil: %+v", p)
+	}
+	p.SetTasks([]string{"veiculos"})
+	if p.Tasks != nil {
+		t.Errorf("SetTasks no images: %v", p.Tasks)
+	}
+}

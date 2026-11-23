@@ -84,7 +84,7 @@ SIDM/
         ├── imports/        MÓDULO: perfis de import, raio-x e import de CSV/INI nos rascunhos
         ├── crypt/          abre as imagens criptografadas pelos equipamentos
         ├── boxes/          MÓDULO: tarefas e caixas do CVAT (leitura do COCO, import, cvat.zip)
-        ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC (sem banco, sem HTTP)
+        ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC e só imagens (sem banco, sem HTTP)
         ├── exports/        MÓDULO: perfis de export salvos, preview e download do zip
         ├── annotation/     MÓDULO: perfis de anotação (campos da imagem e tipos de objeto)
         └── api/            junta as rotas dos módulos: /health, /docs + openapi.yaml
@@ -206,16 +206,16 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `POST /tasks` | cria uma tarefa (`name`, `description`, `labels`) |
 | `GET`/`PUT`/`DELETE /tasks/{name}` | uma tarefa: resumo por pacote e label; renomear leva caixas e perfis junto; apagar leva as caixas |
 | `POST /tasks/{name}/import` | importa o export COCO 1.0 do CVAT na tarefa, procurando as imagens em todos os pacotes; ensaio por padrão |
-| `GET /export-profiles` | perfis de export: os padrões (`rf-detr`, `yolo`) e os salvos |
+| `GET /export-profiles` | perfis de export: os padrões (`rf-detr`, `yolo`, `voc`, `voc-pastas`, `imagens`) e os salvos |
 | `POST /export-profiles` | cria um perfil de export |
 | `GET`/`PUT`/`DELETE /export-profiles/{name}` | um perfil de export (os padrões não mudam) |
-| `POST /exports/preview` | prévia do dataset (uma ou várias tarefas): imagens por grupo, caixas por classe |
+| `POST /exports/preview` | prévia do dataset (uma ou várias tarefas, ou nenhuma no formato `images`): imagens por grupo, caixas por classe |
 | `POST /exports/download` | o zip do dataset |
 | `GET /annotation-profiles` | perfis de anotação: o padrão (`veiculos`) e os salvos |
 | `POST /annotation-profiles` | cria um perfil de anotação (os erros voltam todos juntos, em `problems`) |
 | `GET`/`PUT`/`DELETE /annotation-profiles/{name}` | um perfil de anotação (o padrão não muda) |
 | `POST /annotation-profiles/{name}/check` | confere uma anotação contra o perfil, sem gravar: valores limpos ou problemas |
-| `GET /export-folder-fields?annotation_profile=` | metadados de um perfil de anotação que podem virar pasta (VOC por pastas) ou parte do nome, com o nome padrão de cada valor |
+| `GET /export-folder-fields?annotation_profile=` | metadados de um perfil de anotação que podem virar pasta (VOC ou só imagens, por pastas) ou parte do nome, com o nome padrão de cada valor |
 | `GET /import-profiles` | lista os perfis de import |
 | `POST /import-profiles` | cria um perfil de import |
 | `GET /import-profiles/{name}` | um perfil |
@@ -685,7 +685,7 @@ e ela é tentada de novo na próxima subida.
 ## Export para treino (RF-DETR, YOLO, Pascal VOC)
 
 Na tela **Exportar**: escolha um perfil e a **tarefa** (ou várias), veja a
-**prévia** e baixe o zip.
+**prévia** e baixe o zip. No formato **só imagens** não há tarefa (veja abaixo).
 
 **O que entra:** imagens **verificadas** e **anotadas na tarefa** escolhida que
 passam nos filtros do perfil. As anotadas como "sem objetos" entram sem caixas
@@ -709,9 +709,20 @@ O formato de antes (`"task": "placa"`) continua valendo.
 | `yolo` | Ultralytics: `images/{train,val,test}`, `labels/{train,val,test}` e `data.yaml` | 70/15/15 |
 | `voc` | Pascal VOC: `train/`, `valid/`, `test/`, cada imagem com o seu `.xml` ao lado | 70/15/15 |
 | `voc-pastas` | Pascal VOC em pastas pelos metadados: `Car/01-640x480/Br/Traseiro/Noturno/` (tipo de veículo / resolução / tipo de placa / direção / período), com o nome no **padrão antigo** | sem divisão |
+| `imagens` | Só imagens (formato `images`): as verificadas com o nome do SIDM (v2), na raiz do zip, e um `anotacoes.csv`; sem caixas e sem tarefa | 100/0/0 |
+
+**Só imagens (formato `images`):** para quem precisa das imagens e dos dados
+anotados, sem caixas. Não usa tarefa, `all_tasks` nem labels (o perfil não guarda
+esses campos): entra toda imagem **verificada** que passa nos filtros, com o nome de
+saída escolhido. As pastas são por divisão (com um grupo só, 100/0/0, as imagens
+ficam na raiz) ou pelos metadados, como no VOC. O zip leva um `anotacoes.csv` em
+UTF-8 com BOM e `;` (abre direto no Excel em português), uma linha por imagem:
+`arquivo;sha1;pacote;nome_original;` e os campos do perfil de anotação, com os
+valores guardados (`rear`, não o código do nome); `arquivo` é o caminho dentro do zip.
 
 **Um perfil próprio controla:**
-- **tarefas** (as caixas de quais tarefas entram, e se só as imagens anotadas em todas);
+- **tarefas** (as caixas de quais tarefas entram, e se só as imagens anotadas em todas;
+  não se aplica ao formato `images`);
 - **formato e divisão** (porcentagens que somam 100; no YOLO a validação não pode ser 0);
 - **nome dos arquivos**: o do SIDM (v2), o **padrão antigo** (hash +
   características + placa, ex.: `02d9…3a3fF01LDBEB1S01KOY7386.jpg`) ou um modelo
@@ -724,7 +735,7 @@ O formato de antes (`"task": "placa"`) continua valendo.
   dele (a do maior código; o padrão antigo continua com tamanho fixo). O modelo
   tem que ter `{sha1}` (ou `{name}`), para os nomes não repetirem. O `.xml`, o
   `.txt` e o COCO usam o nome novo;
-- **pastas de saída** (só no VOC): **por divisão** (`train/valid/test`) ou **por
+- **pastas de saída** (no VOC e no só imagens): **por divisão** (`train/valid/test`) ou **por
   pastas**, uma árvore com os níveis que você escolhe, na ordem que quiser: os
   campos do perfil de anotação (no `veiculos`: tipo de veículo, tipo e categoria
   da placa, cor, resolução, direção, período, clima, ângulo, alcance,
@@ -742,7 +753,7 @@ O formato de antes (`"task": "placa"`) continua valendo.
   valor) e `filters.objects` (tipo → campo → valor, todos no mesmo objeto), ex.:
   `{"fields": {"day_time": "night"}, "objects": {"vehicle": {"type": "truck"}}}`.
   Os nomes antigos (`day_time`, `vehicle_type`…) ainda são aceitos;
-- **labels**: quais entram e com que nome. Dar o mesmo nome a duas labels junta as
+- **labels** (não no formato `images`): quais entram e com que nome. Dar o mesmo nome a duas labels junta as
   classes (`Placa` e `placa` viram `placa`). A ordem das classes define os ids
   (YOLO começa em 0, COCO em 1) e aparece na prévia.
 
@@ -758,7 +769,8 @@ dá para comparar treinos.
 - o YOLO sai pronto para `yolo train data=data.yaml` depois de descompactar;
 - no VOC, cada imagem tem o seu `.xml` ao lado (coordenadas em pixels inteiros:
   `xmin, ymin, xmax, ymax`; `truncated` = caixa encostada na borda; `occluded` vem
-  do CVAT), e um `labels.txt` na raiz lista as classes.
+  do CVAT), e um `labels.txt` na raiz lista as classes;
+- no só imagens, o `anotacoes.csv` com os dados anotados de cada imagem.
 
 O zip é gerado enquanto baixa: não ocupa disco no servidor, e o navegador salva
 direto no disco.

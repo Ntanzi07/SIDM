@@ -1,6 +1,6 @@
 # Estado atual
 
-Atualizado em 2026-11-19. Branch de trabalho: `feat/filter`.
+Atualizado em 2026-11-23. Branch de trabalho: `feature/exportar-sem-label`.
 
 ## Pronto
 
@@ -24,6 +24,10 @@ Atualizado em 2026-11-19. Branch de trabalho: `feat/filter`.
   e `all_tasks` (só as imagens anotadas em todas); as caixas das tarefas são juntadas
   na mesma imagem (`exports.mergeSets`, que também ajusta a escala se o tamanho no CVAT
   diferir).
+- Export sem caixas: formato `images` ("Só imagens", perfil padrão `imagens`), sem tarefa
+  nem labels; entram as verificadas que passam nos filtros, com o nome de saída (v2 ou
+  modelo), por divisão (um grupo só = na raiz) ou por pastas, e um `anotacoes.csv` com os
+  dados anotados.
 
 ## Próximos passos (em ordem)
 
@@ -33,8 +37,6 @@ Atualizado em 2026-11-19. Branch de trabalho: `feat/filter`.
   (`pages/Search`): perfil, status, vários pacotes, tarefas (todas ou algumas), filtros
   dos campos, cartões com barras (clicar num valor filtra). O front vai ser refeito;
   falta abrir a lista das imagens de um número.
-- **Export sem caixas (colega da equipe, em andamento):** só os dados anotados de cada
-  imagem, sem as caixas do CVAT, no módulo `exports`.
 - Depois: levar os atributos das caixas para o export; histórico das edições de atributo.
 
 ## Pendências menores

@@ -1,5 +1,5 @@
-// Package export monta datasets de treino (RF-DETR, YOLO) a partir das
-// imagens e das caixas guardadas no SIDM. Sem banco e sem HTTP: quem chama
+// Package export monta datasets de treino (RF-DETR, YOLO, VOC) a partir das
+// imagens e das caixas guardadas no SIDM, ou só as imagens renomeadas. Sem banco e sem HTTP: quem chama
 // entrega as imagens, e este pacote decide a divisão, traduz as labels e
 // escreve o zip.
 package export
@@ -22,7 +22,14 @@ const (
 	FormatCOCO = "coco" // layout do Roboflow, o que o RF-DETR lê: train/valid/test com _annotations.coco.json
 	FormatYOLO = "yolo" // Ultralytics: images/, labels/ e data.yaml
 	FormatVOC  = "voc"  // Pascal VOC: um .xml por imagem, ao lado dela
+	// FormatImages: só as imagens, com o nome de saída (o v2 ou o modelo), e
+	// um anotacoes.csv com os dados anotados. Sem caixas: não usa tarefa nem
+	// labels, e entra toda verificada que passa nos filtros.
+	FormatImages = "images"
 )
+
+// NeedsTasks: o formato usa as caixas de uma tarefa? (todos, menos o images)
+func (p *Profile) NeedsTasks() bool { return p.Format != FormatImages }
 
 // Nomes dos grupos da divisão.
 const (
@@ -316,6 +323,10 @@ func Builtins() []Profile {
 				{Field: "day_time", Names: map[string]string{"day": "Diurno", "night": "Noturno"}},
 			},
 		},
+		{
+			Name: "imagens", Format: FormatImages, Split: Split{100, 0, 0}, Layout: LayoutSplit, Builtin: true,
+			Description: "Só as imagens verificadas, com o nome do SIDM (v2) e um anotacoes.csv; sem caixas, sem tarefa.",
+		},
 	}
 }
 
@@ -375,6 +386,10 @@ func (p *Profile) Normalize() {
 		}
 	}
 	p.Labels.Include = include
+	if !p.NeedsTasks() {
+		// Sem caixas: tarefa e labels não se aplicam (não ficam salvos à toa).
+		p.Tasks, p.AllTasks, p.Labels = nil, false, LabelRules{}
+	}
 }
 
 // MaxTasks: tarefas num dataset só.
@@ -394,8 +409,13 @@ func cleanTasks(in []string) []string {
 }
 
 // SetTasks troca as tarefas (as do pedido de export valem mais que as do
-// perfil), já limpas.
-func (p *Profile) SetTasks(tasks []string) { p.Tasks, p.Task = cleanTasks(tasks), "" }
+// perfil), já limpas. No formato sem caixas, não há tarefa.
+func (p *Profile) SetTasks(tasks []string) {
+	p.Tasks, p.Task = cleanTasks(tasks), ""
+	if !p.NeedsTasks() {
+		p.Tasks = nil
+	}
+}
 
 // Validate confere o perfil (depois do Normalize) contra ap, o perfil de
 // anotação dele (o de AnnotationProfile, ou o padrão).
@@ -413,8 +433,8 @@ func (p *Profile) Validate(ap *annotation.Profile) error {
 	if _, builtin := Builtin(p.Name); builtin && !p.Builtin {
 		add("name: %q é um perfil padrão do sistema; use outro nome", p.Name)
 	}
-	if p.Format != FormatCOCO && p.Format != FormatYOLO && p.Format != FormatVOC {
-		add("format: use %q (RF-DETR), %q ou %q (Pascal VOC)", FormatCOCO, FormatYOLO, FormatVOC)
+	if p.Format != FormatCOCO && p.Format != FormatYOLO && p.Format != FormatVOC && p.Format != FormatImages {
+		add("format: use %q (RF-DETR), %q, %q (Pascal VOC) ou %q (só as imagens, sem caixas)", FormatCOCO, FormatYOLO, FormatVOC, FormatImages)
 	}
 	p.validateFolders(add)
 	p.validateFileName(add)
