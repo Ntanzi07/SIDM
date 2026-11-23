@@ -21,3 +21,11 @@ export function optionLabel(profile: ImportProfile, annotationProfile: string | 
   const other = targetOf(profile) !== target ? ` (feito para ${targetOf(profile)})` : ''
   return `${prefix}${profile.name}${other}`
 }
+
+// Perfil de INI que já vem escolhido no upload (o dos equipamentos da
+// Splice). Se ele não existir, fica "Não preencher pelo INI".
+const DEFAULT_INI_PROFILE = 'splice-ini'
+
+export function defaultIniProfile(profiles: ImportProfile[]): string {
+  return profiles.some((profile) => profile.name === DEFAULT_INI_PROFILE) ? DEFAULT_INI_PROFILE : ''
+}

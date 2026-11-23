@@ -246,7 +246,8 @@ func (s *Service) handleSearch(reg Registry) http.HandlerFunc {
 			return
 		}
 		q := r.URL.Query()
-		names, total, err := s.repo.Search(r.Context(), reg, query,
+		// ?inactive=true: os desativados (para reativar em Configurar).
+		names, total, err := s.repo.Search(r.Context(), reg, query, q.Get("inactive") != "true",
 			platform.IntParam(q, "limit", 10, 1, 50),
 			platform.IntParam(q, "skip", 0, 0, 1<<31))
 		if err != nil {

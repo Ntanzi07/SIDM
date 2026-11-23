@@ -58,7 +58,8 @@ Erros de regra viram tipos (`InvalidError{Msg}` → 400). `platform.ErrNotFound`
 
 Ordem: conexão → `annotation` → migrações das imagens (`Migrate`, `EnsureIndexes`) →
 `images` → `catalog` → migração dos arquivos (`MigrateFiles`) → `boxes` → `imports` →
-`exports` → `api.New(ping, módulos...)`. Um módulo novo é criado ali e entra como mais um
+`exports` → `api.New(ping, módulos...)`. O `images` nasce antes do `imports` e busca o
+perfil de INI do upload por `imports.Profiles{Repo}` (os padrão do código primeiro, depois o banco). Um módulo novo é criado ali e entra como mais um
 argumento do `api.New`.
 
 ## Frontend (`frontend/src/`)
@@ -71,7 +72,8 @@ argumento do `api.New`.
 | `types/` | os tipos da API (`annotation.ts` espelha o módulo `annotation`) |
 | `utils/annotationForm.ts` | conversão API ↔ formulário dos campos do perfil |
 | `utils/boxes.ts` | caixas do CVAT: cor por label, tipo de objeto com caixa de uma label, pendência de atributo obrigatório |
-| `utils/importProfiles.ts` | ordem e rótulo dos perfis de import nas telas de pacote (os do perfil do pacote primeiro) |
+| `utils/importProfiles.ts` | ordem e rótulo dos perfis de import nas telas de pacote (os do perfil do pacote primeiro; o `splice-ini` vem escolhido) |
+| `utils/repeatFields.ts` | os valores da última imagem salva por pacote (campos com `repeat`), no `localStorage` |
 | `pages/<Tela>/` | uma pasta por tela, com o `.tsx` e o `.css` |
 | `components/` | o que é usado por mais de uma tela (`ImageWithBoxes`: as caixas por cima da imagem; `BoxAttributes`: ver e editar os atributos das caixas) |
 

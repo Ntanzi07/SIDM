@@ -32,7 +32,10 @@ export type FieldRule = {
   template?: string
   map?: Record<string, string>
   split?: string
-  date_format?: string
+  date_format?: string // opcional: sem ele, a data é lida sem formato fixo
+  time_column?: string // hora numa coluna/chave separada
+  ms_column?: string // milissegundo numa coluna/chave separada
+  date_order?: 'dmy' | 'mdy'
   timezone?: string
 }
 
@@ -64,6 +67,7 @@ export type ImportProfile = {
   annotation_profile?: string
   fields?: Record<string, FieldRule>
   objects?: Record<string, ObjectRules> // tipo de objeto -> regras
+  builtin?: boolean // vem com o SIDM (ex. splice-ini): não dá para editar nem apagar
   created_by?: string
   updated_at?: string
 }
@@ -429,10 +433,11 @@ export function searchCameras(q: string, limit = 50) {
 }
 
 // Lista completa (de 50 em 50, o máximo por página), para a tela de cadastros.
-async function listAllNames(path: string): Promise<string[]> {
+// inactive: os desativados em vez dos ativos.
+async function listAllNames(path: string, inactive = false): Promise<string[]> {
   const names: string[] = []
   for (let skip = 0; ; skip += 50) {
-    const response = await request<PageResponse<NameItem>>(`${path}?limit=50&skip=${skip}`)
+    const response = await request<PageResponse<NameItem>>(`${path}?limit=50&skip=${skip}${inactive ? '&inactive=true' : ''}`)
     names.push(...response.items.map((item) => item.name))
     if (response.items.length < 50 || names.length >= response.total) return names
   }
@@ -440,6 +445,17 @@ async function listAllNames(path: string): Promise<string[]> {
 
 export const listEquipments = () => listAllNames('/equipments')
 export const listCameras = () => listAllNames('/cameras')
+export const listInactiveEquipments = () => listAllNames('/equipments', true)
+export const listInactiveCameras = () => listAllNames('/cameras', true)
+
+// Reativa um equipamento/câmera desativado (volta ao autocomplete e à verificação).
+export async function reactivateEquipment(name: string): Promise<void> {
+  await request(`/equipments/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify({ active: true }) })
+}
+
+export async function reactivateCamera(name: string): Promise<void> {
+  await request(`/cameras/${encodeURIComponent(name)}`, { method: 'PATCH', body: JSON.stringify({ active: true }) })
+}
 
 // Devolvem o nome como ficou cadastrado ("hikvision 233" -> "hikvision-233").
 export async function createEquipment(name: string): Promise<string> {

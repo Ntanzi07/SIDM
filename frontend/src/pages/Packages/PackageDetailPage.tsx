@@ -6,7 +6,7 @@ import type { ChangeEvent, FormEvent } from 'react'
 import { UploadStatus } from './UploadStatus'
 import { BoxesSection } from './BoxesSection'
 import { ImportWarnings } from './ImportWarnings'
-import { forPackage, optionLabel } from '../../utils/importProfiles'
+import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import './Packages.css'
 
 const PAGE_SIZE = 100
@@ -92,7 +92,10 @@ export function PackageDetailPage() {
   }
 
   useEffect(() => {
-    listIniProfiles().then(setIniProfiles).catch(() => { /* sem perfis de INI: a opção some */ })
+    listIniProfiles().then((list) => {
+      setIniProfiles(list)
+      setUploadIniProfile((current) => current || defaultIniProfile(list))
+    }).catch(() => { /* sem perfis de INI: a opção some */ })
     listImportProfiles()
       .then(setProfiles)
       .catch((requestError: unknown) => setImportError(

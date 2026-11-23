@@ -110,6 +110,11 @@ func (s *Service) handleRenameProfile(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleDeleteProfile(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	err := s.DeleteProfile(r.Context(), name)
+	var invalid *InvalidError
+	if errors.As(err, &invalid) {
+		platform.WriteError(w, http.StatusBadRequest, invalid.Msg)
+		return
+	}
 	if errors.Is(err, platform.ErrNotFound) {
 		platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
 		return
@@ -133,6 +138,7 @@ func (s *Service) decodeProfile(w http.ResponseWriter, r *http.Request) (*import
 		platform.WriteError(w, http.StatusBadRequest, "JSON inválido: "+err.Error())
 		return nil, false
 	}
+	p.Builtin = false // só o código marca perfil padrão
 	var invalid *InvalidError
 	if err := s.Validate(r.Context(), &p); errors.As(err, &invalid) {
 		platform.WriteError(w, http.StatusBadRequest, invalid.Msg)

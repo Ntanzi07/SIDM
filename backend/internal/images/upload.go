@@ -330,7 +330,12 @@ func (s *Service) SanitizeAndRegister(ctx context.Context, ap *annotation.Profil
 		}
 		v.Fields[f.Key] = name
 		if ok, err := exists(ctx, name); err == nil && !ok {
-			if err := create(ctx, name); err != nil && !errors.Is(err, platform.ErrDuplicate) {
+			switch err := create(ctx, name); {
+			case errors.Is(err, platform.ErrDuplicate):
+				// Existe, mas desativado: o valor fica (é o que o arquivo diz),
+				// e o aviso explica por que a anotação vai reclamar dele.
+				warnings = append(warnings, fmt.Sprintf("%s %q está desativado: reative em Configurar para verificar esta imagem", what, name))
+			case err != nil:
 				warnings = append(warnings, fmt.Sprintf("não foi possível cadastrar %s %q", what, name))
 				platform.LogError(err)
 			}

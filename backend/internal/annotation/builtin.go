@@ -65,19 +65,25 @@ func Vehicles() Profile {
 		}
 		return f
 	}
+	repeat := func(f Field) Field {
+		f.Repeat = true
+		return f
+	}
 	return Profile{
 		Name:        DefaultProfile,
 		Description: "Veículos e placas (o padrão do SIDM, com o nome de arquivo v2)",
 		Builtin:     true,
 		Fields: []Field{
-			{Key: "equipment", Label: "Equipamento", Type: TypeRef, Ref: RefEquipment},
-			{Key: "camera", Label: "Câmera", Type: TypeRef, Ref: RefCamera},
-			choice("direction", "Direção", "direction", "rear"),
+			// Repeat: equipamento, câmera, direção, ângulo e clima quase não
+			// mudam de uma foto para a outra do mesmo pacote.
+			{Key: "equipment", Label: "Equipamento", Type: TypeRef, Ref: RefEquipment, Repeat: true},
+			{Key: "camera", Label: "Câmera", Type: TypeRef, Ref: RefCamera, Repeat: true},
+			repeat(choice("direction", "Direção", "direction", "rear")),
 			choice("resolution", "Resolução", "resolution"),
-			choice("capture_angle", "Ângulo de captura", "capture_angle", "lateral"),
+			repeat(choice("capture_angle", "Ângulo de captura", "capture_angle", "lateral")),
 			choice("day_time", "Período", "day_time", "day"),
 			choice("image_range", "Abrangência", "image_range", "narrow"),
-			choice("weather", "Clima", "weather", "clear"),
+			repeat(choice("weather", "Clima", "weather", "clear")),
 			{Key: "conditions", Label: "Condições", Type: TypeMulti, Options: codedOptions("conditions"), Default: []string{"no_damage"}},
 			{Key: "captured_at", Label: "Data e hora da captura", Type: TypeDateTime},
 		},

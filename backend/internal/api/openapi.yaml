@@ -94,9 +94,10 @@ paths:
     get:
       tags: [cadastros]
       summary: Buscar equipamentos (autocomplete)
-      description: Busca por "contém", sem diferenciar maiúscula. `mf47` encontra `8003-MF4739`.
+      description: Busca por "contém", sem diferenciar maiúscula. `mf47` encontra `8003-MF4739`. Só os ativos; com `inactive=true`, só os desativados (para reativar com o PATCH).
       parameters:
         - $ref: "#/components/parameters/SearchQ"
+        - $ref: "#/components/parameters/Inactive"
         - $ref: "#/components/parameters/LimitNames"
         - $ref: "#/components/parameters/Skip"
       responses:
@@ -116,8 +117,10 @@ paths:
     get:
       tags: [cadastros]
       summary: Buscar câmeras (autocomplete)
+      description: Só as ativas; com `inactive=true`, só as desativadas.
       parameters:
         - $ref: "#/components/parameters/SearchQ"
+        - $ref: "#/components/parameters/Inactive"
         - $ref: "#/components/parameters/LimitNames"
         - $ref: "#/components/parameters/Skip"
       responses:
@@ -1667,6 +1670,7 @@ paths:
     get:
       tags: [import]
       summary: Listar perfis de import
+      description: Os perfis padrão (builtin, ex. splice-ini) vêm primeiro, depois os salvos, em ordem alfabética.
       parameters:
         - $ref: "#/components/parameters/SearchQ"
         - name: limit
@@ -1769,10 +1773,16 @@ paths:
                 properties:
                   name: { type: string }
                   deleted: { type: boolean }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   parameters:
+    Inactive:
+      name: inactive
+      in: query
+      description: "true: lista os desativados em vez dos ativos."
+      schema: { type: boolean, default: false }
     XUser:
       name: X-User
       in: header
@@ -2043,6 +2053,7 @@ components:
         required: { type: boolean, description: Obrigatório para verificar. }
         help: { type: string }
         default: { description: "O valor que a tela já traz numa imagem sem rascunho (tem que ser válido no campo)." }
+        repeat: { type: boolean, description: "Só nos campos da imagem: na anotação, a próxima imagem pendente do pacote já vem com o valor da última salva (no veiculos: equipamento, câmera, direção, ângulo e clima)." }
         options:
           type: array
           description: "choice e multi. `code` é a forma curta no nome do arquivo (se uma opção tem, todas têm)."
@@ -2558,8 +2569,22 @@ components:
             true/false, sim/não, 1/0.
           additionalProperties: { type: string }
         split: { type: string, description: "Só em campo de vários valores (multi), como conditions." }
-        date_format: { type: string, description: "Só em campo de data e hora (como captured_at). Layout do Go, ex. 2006-01-02 15:04:05.000" }
-        timezone: { type: string, example: America/Sao_Paulo }
+        time_column: { type: string, description: "Só em data e hora, junto com column: a hora em outra coluna (no INI, \"Metrologico.Hora\")." }
+        ms_column: { type: string, description: "Só em data e hora, junto com column: o milissegundo em outra coluna (número de ms: 12 = 12 ms)." }
+        date_order:
+          type: string
+          enum: [dmy, mdy]
+          description: "Só em data e hora: dmy (padrão, 03/04/2026 = 3 de abril) ou mdy. Uma data que começa pelo ano é sempre ano-mês-dia."
+        timezone: { type: string, example: America/Sao_Paulo, description: "Só em data e hora: o fuso de quando o texto não traz um (vazio = UTC)." }
+        date_format:
+          type: string
+          description: |
+            Opcional (perfis antigos): layout do Go, ex. 02/01/2006 15:04:05.
+            Tentado primeiro; se não bater, vale a leitura automática: data
+            DD/MM/AAAA, DD-MM-AAAA, DD.MM.AAAA, DD/MM/AA, AAAA-MM-DD ou AAAAMMDD;
+            hora HH:MM[:SS[.fff]], HHMMSS ou com AM/PM; ISO com fuso; epoch em s
+            ou ms. Vários valores ("10:03:24;10:03:24"): vale o primeiro. A data
+            tem que estar entre 2000 e amanhã.
 
     Profile:
       type: object
@@ -2609,6 +2634,10 @@ components:
           type: object
           deprecated: true
           description: "Formato antigo: o mesmo que objects.vehicle com key plate. Aceito na entrada; volta como objects."
+        builtin:
+          type: boolean
+          readOnly: true
+          description: Perfil padrão que vem com o SIDM (ex. splice-ini). Fica no código, não pode ser criado, alterado, renomeado nem apagado; para mudar, copie com outro nome.
         created_by: { type: string, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 

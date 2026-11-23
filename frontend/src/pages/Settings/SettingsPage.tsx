@@ -14,6 +14,10 @@ import {
   listAnnotationProfiles,
   listCameras,
   listEquipments,
+  listInactiveCameras,
+  listInactiveEquipments,
+  reactivateCamera,
+  reactivateEquipment,
   renameCamera,
   renameEquipment,
   renameImportProfile,
@@ -25,18 +29,23 @@ import {
 } from '../../services/api'
 import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { AnnotationProfilesSection } from './AnnotationProfilesSection'
+import { ColumnPicker } from './ColumnPicker'
 import './Settings.css'
 
 const DEFAULT_ANNOTATION_PROFILE = 'veiculos'
 
 // O que a tela guarda de um campo de data e hora: o formato, o fuso e,
 // opcionalmente, a hora numa coluna separada (comum no INI: Data= e Hora=).
-type DateSetting = { format: string; custom: boolean; timezone: string; timeColumn: string }
+// format vazio = automático (o backend reconhece os formatos comuns).
+type DateSetting = { format: string; custom: boolean; timezone: string; timeColumn: string; msColumn: string }
 type ObjectSetting = { mode: ObjectRules['mode']; max?: number; key?: string }
 
-// Formatos de data mais comuns. O backend usa o layout do Go: a data de
-// referência 2006-01-02 15:04:05 escrita do jeito que aparece no CSV.
+// Formatos de data. O padrão é o automático (sem formato fixo: o backend
+// reconhece dia/mês/ano, ano-mês-dia, hora com ou sem segundos...). Os
+// outros usam o layout do Go: a data de referência 2006-01-02 15:04:05
+// escrita do jeito que aparece no arquivo.
 const DATE_PRESETS = [
+  ['', 'Automático (recomendado)'],
   ['02/01/2006 15:04:05', 'DD/MM/AAAA HH:MM:SS'],
   ['02/01/2006 15:04', 'DD/MM/AAAA HH:MM'],
   ['02/01/2006', 'DD/MM/AAAA'],
@@ -69,11 +78,17 @@ function mergeRules(
     delete previous.column
     const date = dates[datePrefix + field]
     if (date) {
-      // Uma coluna só (column) ou data + hora juntas (template "{Data} {Hora}").
+      // Data, hora e milissegundo em partes (column, time_column, ms_column).
+      delete previous.time_column
+      delete previous.ms_column
+      delete previous.date_format
+      delete previous.timezone
       out[field] = {
         ...previous,
-        ...(date.timeColumn ? { template: `{${column}} {${date.timeColumn}}` } : { column }),
-        date_format: date.format.trim(),
+        column,
+        ...(date.timeColumn ? { time_column: date.timeColumn } : {}),
+        ...(date.msColumn ? { ms_column: date.msColumn } : {}),
+        ...(date.format.trim() ? { date_format: date.format.trim() } : {}),
         timezone: date.timezone.trim() || undefined,
       }
     } else {
@@ -96,12 +111,18 @@ function readRules(
       columns[field] = rule.column
       cols.add(rule.column)
     }
-    if (rule.date_format) {
+    if (rule.date_format || rule.time_column || rule.ms_column || rule.timezone) {
       const date = newDateSetting()
-      date.format = rule.date_format
-      date.custom = !DATE_PRESETS.some(([layout]) => layout === rule.date_format)
+      date.format = rule.date_format ?? ''
+      date.custom = !DATE_PRESETS.some(([layout]) => layout === date.format)
       if (rule.timezone) date.timezone = rule.timezone
-      // Data e hora separadas ficam num template "{Data} {Hora}".
+      for (const [key, value] of [['timeColumn', rule.time_column], ['msColumn', rule.ms_column]] as const) {
+        if (value) {
+          date[key] = value
+          cols.add(value)
+        }
+      }
+      // Formato antigo: data e hora num template "{Data} {Hora}".
       const parts = rule.template?.match(/^\{([^{}]+)\} \{([^{}]+)\}$/)
       if (parts) {
         columns[field] = parts[1]
@@ -116,7 +137,7 @@ function readRules(
 }
 
 function newDateSetting(): DateSetting {
-  return { format: DATE_PRESETS[0][0], custom: false, timezone: 'America/Sao_Paulo', timeColumn: '' }
+  return { format: '', custom: false, timezone: 'America/Sao_Paulo', timeColumn: '', msColumn: '' }
 }
 
 const fieldLabel = (field: { key: string; label?: string }) => field.label || field.key
@@ -146,9 +167,14 @@ type EditingRegistry = { type: 'equipment' | 'camera'; name: string; newName: st
 export function SettingsPage() {
   const [equipments, setEquipments] = useState<string[]>([])
   const [cameras, setCameras] = useState<string[]>([])
+  // Desativados: apagados em Configurar quando ainda havia imagens usando.
+  const [inactiveEquipments, setInactiveEquipments] = useState<string[]>([])
+  const [inactiveCameras, setInactiveCameras] = useState<string[]>([])
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
   const [editingProfile, setEditingProfile] = useState<string | null>(null)
   const [editingOriginal, setEditingOriginal] = useState<ImportProfile | null>(null)
+  // Vendo um perfil padrão (vem com o SIDM): o formulário fica só leitura.
+  const [viewOnly, setViewOnly] = useState(false)
   // csv: os dados vêm de um CSV. jpeg-ini: do INI gravado dentro de cada JPEG.
   const [profileType, setProfileType] = useState<'csv' | 'jpeg-ini'>('csv')
   const [profileImages, setProfileImages] = useState<File[]>([])
@@ -175,16 +201,20 @@ export function SettingsPage() {
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const [saving, setSaving] = useState<'equipment' | 'camera' | 'inspect' | 'profile' | 'registry' | ''>('')
-  const [activeTab, setActiveTab] = useState<'equipments' | 'cameras' | 'annotation_profiles' | 'profiles_list' | 'profile_editor'>('equipments')
+  const [activeTab, setActiveTab] = useState<'equipments' | 'cameras' | 'annotation_profiles' | 'annotation_editor' | 'profiles_list' | 'profile_editor'>('equipments')
+  // Quantidade e nome do editor dos perfis de anotação, para o menu.
+  const [annotationSummary, setAnnotationSummary] = useState({ count: 0, editorLabel: 'Criar novo perfil' })
 
   // Inline edit/rename state for equipment and camera
   const [editingRegistry, setEditingRegistry] = useState<EditingRegistry>(null)
 
   function loadCodes() {
-    Promise.all([listEquipments(), listCameras()])
-      .then(([equipmentNames, cameraNames]) => {
+    Promise.all([listEquipments(), listCameras(), listInactiveEquipments(), listInactiveCameras()])
+      .then(([equipmentNames, cameraNames, offEquipments, offCameras]) => {
         setEquipments(equipmentNames)
         setCameras(cameraNames)
+        setInactiveEquipments(offEquipments)
+        setInactiveCameras(offCameras)
       })
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar as configurações.'))
   }
@@ -316,6 +346,21 @@ export function SettingsPage() {
     }
   }
 
+  async function handleReactivateRegistry(type: 'equipment' | 'camera', name: string) {
+    setSaving('registry')
+    setError('')
+    setMessage('')
+    try {
+      await (type === 'equipment' ? reactivateEquipment(name) : reactivateCamera(name))
+      setMessage(`${type === 'equipment' ? 'Equipamento' : 'Câmera'} "${name}" reativado.`)
+      loadCodes()
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível reativar.')
+    } finally {
+      setSaving('')
+    }
+  }
+
   async function inspectProfileFile() {
     const isIni = profileType === 'jpeg-ini'
     if (isIni ? profileImages.length === 0 : !profileFile) {
@@ -346,6 +391,7 @@ export function SettingsPage() {
   }
 
   function handleEditProfile(profile: ImportProfile) {
+    setViewOnly(false)
     setEditingProfile(profile.name)
     setEditingOriginal(profile)
     setProfileType(profile.reader.type)
@@ -381,9 +427,27 @@ export function SettingsPage() {
     setActiveTab('profile_editor')
   }
 
+  // Perfil padrão: abre o mesmo formulário, só para ler.
+  function handleViewProfile(profile: ImportProfile) {
+    handleEditProfile(profile)
+    setViewOnly(true)
+    setMessage(`"${profile.name}" é um perfil padrão do SIDM: só leitura. Para mudar, use Duplicar.`)
+  }
+
+  // Duplicar: o formulário de um perfil NOVO, já preenchido com a cópia.
+  // As regras que a tela não mostra (map, split...) vão junto ao salvar.
+  function handleDuplicateProfile(profile: ImportProfile) {
+    handleEditProfile(profile)
+    setViewOnly(false)
+    setEditingProfile(null)
+    setProfileName(`${profile.name}-copia`)
+    setMessage(`Cópia de "${profile.name}". Troque o nome, ajuste e crie o perfil.`)
+  }
+
   function handleCancelEdit() {
     setEditingProfile(null)
     setEditingOriginal(null)
+    setViewOnly(false)
     setProfileType('csv')
     setProfileImages([])
     setDateSettings({})
@@ -450,13 +514,6 @@ export function SettingsPage() {
       setError('O nome do perfil deve usar apenas letras sem acento, números e hífens.')
       return
     }
-    const badDate = Object.entries(dateSettings).find(([path, date]) => !date.format.trim() && (
-      path.includes('.') ? objectColumns[path.split('.')[0]]?.[path.split('.')[1]] : fieldColumns[path]))
-    if (badDate) {
-      setError(`Informe o formato da data/hora de ${badDate[0]}.`)
-      return
-    }
-
     setSaving('profile')
     setError('')
     setMessage('')
@@ -496,8 +553,9 @@ export function SettingsPage() {
     }
   }
 
-  // Um campo de destino: de qual coluna vem. No modo de colunas numeradas, o
-  // nome é digitado (com {n}).
+  // Um campo de destino: de qual coluna vem, escolhida numa busca entre as
+  // colunas/chaves lidas (não dá para inventar uma). No modo de colunas
+  // numeradas, o nome é digitado (com {n}).
   function renderTarget(field: ProfileField, path: string, value: string, onChange: (column: string) => void, original: FieldRule | undefined, typed: boolean) {
     return (
       <label className="form-field" key={path}>
@@ -505,11 +563,7 @@ export function SettingsPage() {
         {typed ? (
           <input list="profile-columns" onChange={(event) => onChange(event.target.value.trim())} placeholder="Não mapear" value={value} />
         ) : (
-          <select onChange={(event) => onChange(event.target.value)} value={value}>
-            <option value="">Não mapear</option>
-            {availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
-            {value && !availableColumns.includes(value) && <option value={value}>{value}</option>}
-          </select>
+          <ColumnPicker columns={availableColumns} onChange={onChange} value={value} />
         )}
         {TYPE_HINTS[field.type] && <small className="profile-name-hint">{TYPE_HINTS[field.type]}</small>}
         {advancedLabel(original) && <small className="profile-name-hint">Mantido ao salvar: {advancedLabel(original)}</small>}
@@ -528,7 +582,13 @@ export function SettingsPage() {
             <option value="">A data já tem a hora</option>
             {availableColumns.filter((c) => c !== column).map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-          <small className="profile-name-hint">Junta as duas com um espaço: "data hora".</small>
+        </label>
+        <label className="form-field">
+          <span>{fieldLabel(field)}: milissegundo em outra {profileType === 'csv' ? 'coluna' : 'chave'} (opcional)</span>
+          <select onChange={(event) => changeDate(path, { msColumn: event.target.value })} value={date.msColumn}>
+            <option value="">Sem milissegundo separado</option>
+            {availableColumns.filter((c) => c !== column && c !== date.timeColumn).map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
         </label>
         <label className="form-field">
           <span>{fieldLabel(field)}: formato</span>
@@ -546,11 +606,12 @@ export function SettingsPage() {
           )}
           <small className="profile-name-hint">
             {date.custom
-              ? 'Escreva a data de referência 2006-01-02 15:04:05 no formato do CSV (não uma data do seu arquivo). Ex.: 02/01/2006 15:04:05.000'
-              : `Layout: ${date.format}`}
+              ? 'Escreva a data de referência 2006-01-02 15:04:05 no formato do arquivo (não uma data do seu arquivo). Ex.: 02/01/2006 15:04:05.000'
+              : date.format ? `Layout: ${date.format}` : 'Dia antes do mês (DD/MM/AAAA) ou ano-mês-dia; hora com ou sem segundos.'}
             {inspection?.sample[0]?.[column] && ` · Exemplo: ${[
               inspection.sample[0][column],
               date.timeColumn ? inspection.sample[0][date.timeColumn] : '',
+              date.msColumn ? inspection.sample[0][date.msColumn] : '',
             ].filter(Boolean).join(' ')}`}
           </small>
         </label>
@@ -631,6 +692,37 @@ export function SettingsPage() {
     )
   }
 
+  // Os desativados: continuam nas imagens que já os usam, mas não aparecem na
+  // anotação nem passam na verificação até serem reativados.
+  function renderInactiveList(type: 'equipment' | 'camera', items: string[]) {
+    if (items.length === 0) return null
+    return (
+      <div className="settings-inactive">
+        <h3>Desativados</h3>
+        <p className="profile-editor__hint">
+          Foram apagados quando ainda havia imagens usando. Reative para usar na anotação e na verificação.
+        </p>
+        <ul className="settings-list settings-list--actions">
+          {items.map((item) => (
+            <li key={item} className="settings-list__item settings-list__item--inactive">
+              <span className="settings-list__name">{item}</span>
+              <div className="settings-list__actions">
+                <button
+                  className="button button--secondary button--sm"
+                  disabled={saving !== ''}
+                  onClick={() => void handleReactivateRegistry(type, item)}
+                  type="button"
+                >
+                  Reativar
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
+
   return (
     <section className="package-page settings-page">
       <div className="page-heading">
@@ -664,13 +756,21 @@ export function SettingsPage() {
             </button>
 
             <div className="settings-nav-divider" />
-            <span className="settings-nav-section-title">Anotação</span>
+            <span className="settings-nav-section-title">Perfis de anotação</span>
             <button
               className={`settings-nav-item ${activeTab === 'annotation_profiles' ? 'settings-nav-item--active' : ''}`}
               onClick={() => setActiveTab('annotation_profiles')}
               type="button"
             >
-              <span className="settings-nav-text">Perfis de anotação</span>
+              <span className="settings-nav-text">Perfis cadastrados</span>
+              <span className="settings-nav-badge">{annotationSummary.count}</span>
+            </button>
+            <button
+              className={`settings-nav-item ${activeTab === 'annotation_editor' ? 'settings-nav-item--active' : ''}`}
+              onClick={() => setActiveTab('annotation_editor')}
+              type="button"
+            >
+              <span className="settings-nav-text">{annotationSummary.editorLabel}</span>
             </button>
 
             <div className="settings-nav-divider" />
@@ -688,7 +788,7 @@ export function SettingsPage() {
               onClick={() => setActiveTab('profile_editor')}
               type="button"
             >
-              <span className="settings-nav-text">{editingProfile ? 'Editar perfil' : 'Criar novo perfil'}</span>
+              <span className="settings-nav-text">{viewOnly ? 'Ver perfil' : editingProfile ? 'Editar perfil' : 'Criar novo perfil'}</span>
             </button>
           </nav>
         </aside>
@@ -704,6 +804,7 @@ export function SettingsPage() {
               </label>
               <button className="button button--primary" disabled={saving === 'equipment'} type="submit">{saving === 'equipment' ? 'Salvando...' : 'Cadastrar equipamento'}</button>
               {renderRegistryList('equipment', equipments)}
+              {renderInactiveList('equipment', inactiveEquipments)}
             </form>
           )}
 
@@ -717,10 +818,16 @@ export function SettingsPage() {
               </label>
               <button className="button button--primary" disabled={saving === 'camera'} type="submit">{saving === 'camera' ? 'Salvando...' : 'Cadastrar câmera'}</button>
               {renderRegistryList('camera', cameras)}
+              {renderInactiveList('camera', inactiveCameras)}
             </form>
           )}
 
-          {activeTab === 'annotation_profiles' && <AnnotationProfilesSection />}
+          {/* Sempre montada: o rascunho não se perde ao trocar de tela. */}
+          <AnnotationProfilesSection
+            onSummary={setAnnotationSummary}
+            onView={(view) => setActiveTab(view === 'list' ? 'annotation_profiles' : 'annotation_editor')}
+            view={activeTab === 'annotation_profiles' ? 'list' : activeTab === 'annotation_editor' ? 'editor' : null}
+          />
 
           {activeTab === 'profiles_list' && (
             <div className="create-card settings-card">
@@ -754,26 +861,36 @@ export function SettingsPage() {
                             <strong className="profile-item__name">
                               {p.name}
                               <span className="profile-type-badge">{p.reader.type === 'jpeg-ini' ? 'INI' : 'CSV'}</span>
+                              {p.builtin && <span className="profile-type-badge">padrão</span>}
                             </strong>
                             {p.description && <span className="profile-item__desc">{p.description}</span>}
                           </div>
+                          {/* Perfil padrão: vem com o SIDM, só dá para ver e duplicar. */}
                           <div className="profile-item__actions">
                             <button
                               className="button button--secondary button--sm"
                               disabled={saving !== ''}
-                              onClick={() => handleEditProfile(p)}
+                              onClick={() => (p.builtin ? handleViewProfile(p) : handleEditProfile(p))}
                               type="button"
                             >
-                              Editar
+                              {p.builtin ? 'Ver' : 'Editar'}
                             </button>
                             <button
+                              className="button button--secondary button--sm"
+                              disabled={saving !== ''}
+                              onClick={() => handleDuplicateProfile(p)}
+                              type="button"
+                            >
+                              Duplicar
+                            </button>
+                            {!p.builtin && <button
                               className="button button--danger button--sm"
                               disabled={saving !== ''}
                               onClick={() => void handleDeleteProfile(p.name)}
                               type="button"
                             >
                               Apagar
-                            </button>
+                            </button>}
                           </div>
                         </div>
                         {p.reader.type === 'jpeg-ini' ? (
@@ -802,14 +919,24 @@ export function SettingsPage() {
             <form className="create-card settings-card" onSubmit={(event) => void submitProfile(event)}>
               <div className="profile-header-flex">
                 <div>
-                  <h2>{editingProfile ? `Editar perfil: ${editingProfile}` : `Criar novo perfil ${profileType === 'jpeg-ini' ? 'de INI' : 'CSV'}`}</h2>
+                  <h2>{viewOnly ? `Perfil padrão: ${editingProfile}` : editingProfile ? `Editar perfil: ${editingProfile}` : `Criar novo perfil ${profileType === 'jpeg-ini' ? 'de INI' : 'CSV'}`}</h2>
                   <p>
                     {profileType === 'jpeg-ini'
                       ? 'Relacione as chaves do INI gravado dentro das imagens (Secao.Chave) aos campos de anotação.'
                       : 'Relacione as colunas do seu CSV aos campos de anotação.'}
                   </p>
                 </div>
-                {editingProfile && (
+                {viewOnly && editingOriginal && (
+                  <div className="profile-item__actions">
+                    <button className="button button--secondary button--sm" onClick={() => handleDuplicateProfile(editingOriginal)} type="button">
+                      Duplicar
+                    </button>
+                    <button className="button button--secondary button--sm" onClick={handleCancelEdit} type="button">
+                      Fechar
+                    </button>
+                  </div>
+                )}
+                {editingProfile && !viewOnly && (
                   <button className="button button--secondary button--sm" onClick={handleCancelEdit} type="button">
                     Cancelar edição
                   </button>
@@ -839,6 +966,7 @@ export function SettingsPage() {
                   ))}
                 </div>
               )}
+              <fieldset className="profile-fieldset" disabled={viewOnly}>
               <div className="profile-form-grid">
                 <label className="form-field">
                   <span>Nome do perfil</span>
@@ -941,7 +1069,7 @@ export function SettingsPage() {
                   )}
                   <h3>Campos da imagem</h3>
                   <p className="profile-editor__hint">
-                    Os campos do perfil de anotação {annotationProfileName}. Escolha "Não mapear" para os que não existem no {profileType === 'csv' ? 'CSV' : 'INI'}.
+                    Os campos do perfil de anotação {annotationProfileName}. Digite para buscar a {profileType === 'csv' ? 'coluna do CSV' : 'chave do INI'} de cada um; deixe em "Não mapear" os que não existem nele.
                   </p>
                   {imageTargets.length === 0 && <p className="profile-empty-hint">Este perfil não tem campos na imagem.</p>}
                   <div className="profile-fields">
@@ -954,7 +1082,6 @@ export function SettingsPage() {
                   {objectTargets.map((target) => {
                     const setting = objectSetting(target.key)
                     const columns = objectColumns[target.key] ?? {}
-                    const mapped = target.fields.filter((field) => columns[field.key])
                     const setSetting = (patch: Partial<ObjectSetting>) =>
                       setObjectSettings((current) => ({ ...current, [target.key]: { ...setting, ...patch } }))
                     return (
@@ -980,13 +1107,6 @@ export function SettingsPage() {
                               <input max={20} min={1} onChange={(event) => setSetting({ max: Number.parseInt(event.target.value, 10) || 1 })} type="number" value={setting.max ?? 3} />
                             </label>
                           )}
-                          <label className="form-field">
-                            <span>O objeto existe quando…</span>
-                            <select onChange={(event) => setSetting({ key: event.target.value || undefined })} value={setting.key && columns[setting.key] ? setting.key : ''}>
-                              <option value="">algum campo tem valor</option>
-                              {mapped.map((field) => <option key={field.key} value={field.key}>{fieldLabel(field)} tem valor</option>)}
-                            </select>
-                          </label>
                         </div>
                         {setting.mode === 'columns' && (
                           <p className="profile-editor__hint">Escreva o nome da coluna com {'{n}'} no lugar do número, ex.: Placa{'{n}'}.</p>
@@ -1000,7 +1120,7 @@ export function SettingsPage() {
                       </div>
                     )
                   })}
-                  <div className="profile-submit-row">
+                  {!viewOnly && <div className="profile-submit-row">
                     <button className="button button--primary" disabled={saving !== ''} type="submit">
                       {saving === 'profile' ? 'Salvando...' : editingProfile ? 'Salvar alterações' : 'Criar perfil CSV'}
                     </button>
@@ -1009,9 +1129,10 @@ export function SettingsPage() {
                         Cancelar
                       </button>
                     )}
-                  </div>
+                  </div>}
                 </div>
               )}
+              </fieldset>
             </form>
           )}
         </main>

@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createCamera,
   createEquipment,
+  listInactiveCameras,
+  listInactiveEquipments,
+  reactivateCamera,
+  reactivateEquipment,
   deleteImage,
   getAnnotationProfile,
   getImage,
@@ -20,6 +24,7 @@ import {
 import { getUser } from '../services/user'
 import type { AnnotationForm, AnnotationProfile, FormValue, ImageDetail } from '../types/annotation'
 import { formFromImage, formToAPI, listObjectTypes, newObject } from '../utils/annotationForm'
+import { isEmptyValue, loadLast, saveLast } from '../utils/repeatFields'
 
 // A anotação segue a FILA do backend (POST /packages/{nome}/next): cada
 // imagem fica reservada para quem pegou por 15 minutos, então duas pessoas
@@ -50,18 +55,29 @@ const emptyForm: AnnotationForm = { fields: {}, objects: [] }
 const normalizeName = (name: string) => name.trim().replace(/\s+/g, '-').toLowerCase()
 
 const registries = {
-  equipment: { label: 'equipamento', search: searchEquipments, create: createEquipment },
-  camera: { label: 'câmera', search: searchCameras, create: createCamera },
+  equipment: { label: 'equipamento', search: searchEquipments, create: createEquipment, inactive: listInactiveEquipments, reactivate: reactivateEquipment },
+  camera: { label: 'câmera', search: searchCameras, create: createCamera, inactive: listInactiveCameras, reactivate: reactivateCamera },
 } as const
 
-// Garante que o equipamento/câmera existe. Se já existe (mesmo com outra
-// maiúscula), devolve o nome cadastrado. Se não existe, PERGUNTA antes de
+// Garante que o equipamento/câmera existe e está ativo. Se já existe (mesmo
+// com outra maiúscula), devolve o nome cadastrado. Desativado (apagado em
+// Configurar quando ainda havia imagens usando, e o INI de uma imagem nova
+// trouxe ele de novo): pergunta se reativa. Se não existe, PERGUNTA antes de
 // cadastrar: um erro de digitação não pode virar cadastro sem ninguém ver.
 async function ensureRegistered(kind: keyof typeof registries, typed: string): Promise<string> {
   const registry = registries[kind]
   const found = await registry.search(typed, 50)
   const existing = found.items.find((name) => normalizeName(name) === normalizeName(typed))
   if (existing) return existing
+
+  const inactive = (await registry.inactive()).find((name) => normalizeName(name) === normalizeName(typed))
+  if (inactive) {
+    if (!window.confirm(`O ${registry.label} "${inactive}" está desativado. Reativar agora?`)) {
+      throw new Error(`O ${registry.label} "${inactive}" está desativado. Reative para verificar, ou escolha outro.`)
+    }
+    await registry.reactivate(inactive)
+    return inactive
+  }
 
   if (!window.confirm(`"${typed}" não está cadastrado como ${registry.label}. Cadastrar agora?`)) {
     throw new Error(`Escolha um ${registry.label} da lista ou confirme o cadastro de "${typed}".`)
@@ -115,13 +131,24 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       return
     }
     const base = formFromImage(p, detail)
+    // Campos com "repeat" no perfil: a pendente vem com o valor da última
+    // imagem salva no pacote, só no que ela não tem guardado (o que veio do
+    // INI/CSV ou já foi anotado fica). Ganha do valor padrão do perfil.
+    if (detail.status === 'pending') {
+      const last = loadLast(packageName)
+      for (const field of p.fields) {
+        if (field.repeat && isEmptyValue(detail.fields?.[field.key]) && !isEmptyValue(last[field.key])) {
+          base.fields[field.key] = last[field.key]
+        }
+      }
+    }
     const resolution = p.fields.find((field) => field.key === 'resolution' && field.type === 'choice')
     if (resolution && !base.fields.resolution) {
       const known = new Set((resolution.options ?? []).map((option) => option.value))
       base.fields.resolution = await detectResolution(imageFileUrl(detail.sha1), known)
     }
     setForm(base)
-  }, [])
+  }, [packageName])
 
   // Pega a próxima da fila (pulando `skip`, se vier) e registra no histórico.
   const pull = useCallback(async (skip: string | undefined, p: AnnotationProfile) => {
@@ -279,6 +306,8 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     const next = { ...form, fields }
     setForm(next)
     await saveAnnotation(image.sha1, formToAPI(profile, next))
+    // Os valores da última imagem salva, para os campos com "repeat".
+    saveLast(packageName, next.fields)
     const wasRevisiting = position < history.length - 1
     if (wasRevisiting) {
       // Corrigiu uma anterior: volta para onde estava.
@@ -290,7 +319,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       await pull(undefined, profile)
     }
     setMessage('Anotação salva.')
-  }, 'Não foi possível salvar a anotação.'), [form, history, image, position, profile, pull, refreshSummary, run, show])
+  }, 'Não foi possível salvar a anotação.'), [form, history, image, packageName, position, profile, pull, refreshSummary, run, show])
 
   const progress = {
     done: summary?.verified ?? 0,

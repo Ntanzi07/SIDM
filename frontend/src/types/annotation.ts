@@ -16,6 +16,7 @@ export type ProfileField = {
   required?: boolean
   help?: string
   default?: unknown // o valor que a tela já traz numa imagem sem rascunho
+  repeat?: boolean // a próxima imagem pendente do pacote vem com o valor da última salva
   options?: ProfileOption[] // choice, multi
   pattern?: string // text: o valor inteiro
   max_len?: number

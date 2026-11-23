@@ -85,7 +85,11 @@ func TestValidateErros(t *testing.T) {
 		"column e value juntos":  {func(p *Profile) { p.Fields["camera"] = FieldRule{Column: "Cam", Value: "x"} }, "fields.camera"},
 		"nem column nem value":   {func(p *Profile) { p.Fields["camera"] = FieldRule{} }, "fields.camera"},
 		"map com valor inválido": {func(p *Profile) { p.Fields["weather"].Map["Garoa"] = "garoa" }, `map["Garoa"]`},
-		"data sem formato":       {func(p *Profile) { p.Fields["captured_at"] = FieldRule{Column: "D"} }, "date_format"},
+		"ordem de data errada":   {func(p *Profile) { p.Fields["captured_at"] = FieldRule{Column: "D", DateOrder: "ymd"} }, "date_order"},
+		"hora separada sem a coluna da data": {func(p *Profile) {
+			p.Fields["captured_at"] = FieldRule{Template: "{D}", TimeColumn: "H"}
+		}, "time_column"},
+		"hora separada fora de data": {func(p *Profile) { p.Fields["camera"] = FieldRule{Column: "Cam", TimeColumn: "H"} }, "time_column"},
 		"data de exemplo no lugar do layout": {func(p *Profile) {
 			p.Fields["captured_at"] = FieldRule{Column: "D", DateFormat: "2026-08-12 09:23:23.000"}
 		}, "não é um layout do Go"},

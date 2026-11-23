@@ -175,7 +175,7 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 |---|---|
 | `GET /health` | `ok` se o Mongo responde |
 | `GET /codes` | tabelas fixas do padrão (direção, clima, cor...) para os dropdowns |
-| `GET /equipments?q=mf47` | busca equipamentos para o autocomplete (contém, ignora maiúscula) |
+| `GET /equipments?q=mf47` | busca equipamentos para o autocomplete (contém, ignora maiúscula); com `inactive=true`, só os desativados |
 | `POST /equipments` | cadastra equipamento `{"name": "8003 MF4739"}` → `8003-MF4739` |
 | `PATCH /equipments/{name}` | renomeia em cascata (`{"name"}`) ou ativa/desativa (`{"active"}`) |
 | `DELETE /equipments/{name}` | apaga; se estiver em uso, só desativa |
@@ -216,7 +216,7 @@ Cada módulo segue o mesmo formato (veja `internal/catalog/`):
 | `GET`/`PUT`/`DELETE /annotation-profiles/{name}` | um perfil de anotação (o padrão não muda) |
 | `POST /annotation-profiles/{name}/check` | confere uma anotação contra o perfil, sem gravar: valores limpos ou problemas |
 | `GET /export-folder-fields?annotation_profile=` | metadados de um perfil de anotação que podem virar pasta (VOC ou só imagens, por pastas) ou parte do nome, com o nome padrão de cada valor |
-| `GET /import-profiles` | lista os perfis de import |
+| `GET /import-profiles` | lista os perfis de import (os padrão, como `splice-ini`, primeiro; não dá para alterar nem apagar) |
 | `POST /import-profiles` | cria um perfil de import |
 | `GET /import-profiles/{name}` | um perfil |
 | `PUT /import-profiles/{name}` | atualiza um perfil (manda o JSON inteiro de novo) |
@@ -309,6 +309,10 @@ na fila no meio. A reabertura vai para o histórico. As caixas não mudam.
   novas verificações. As imagens que já usam ficam como estão.
 - **Apagar** (`DELETE`): se nenhuma imagem usa, apaga de vez. Se alguma usa, só
   **desativa**, para a busca por aquele equipamento continuar funcionando.
+- **Reativar** (`PATCH {"active": true}`): em **Configurar**, os desativados aparecem
+  numa lista própria com o botão "Reativar". Se o INI de uma imagem nova trouxer um
+  equipamento desativado, ele fica na imagem e o upload avisa; ao verificar, a tela de
+  anotação pergunta se quer reativar.
 
 **Pacotes**
 
@@ -393,7 +397,7 @@ Num perfil como o `capacete-moto`, os destinos são os campos dele:
 
 O valor vira o tipo do campo: lista (sem `map`, aceita o valor, o código ou o nome
 da opção na tela: `night`, `N` ou `Noite`), número (`2` ou `2,5`), sim/não
-(`true`/`false`, `sim`/`não`, `1`/`0`), data (com `date_format`). Num texto com
+(`true`/`false`, `sim`/`não`, `1`/`0`), data (lida sozinha, veja abaixo). Num texto com
 formato, como a placa, os separadores saem se só assim o valor passa
 (`ABC-1234` → `ABC1234`).
 
@@ -406,7 +410,21 @@ Cada campo usa **um** de:
 E pode ter ainda:
 - `map`: traduz o valor de origem para o nosso (ignora maiúscula);
 - `split`: separa uma lista numa célula só (só em `conditions`);
-- `date_format` + `timezone`: o formato da data no layout do Go, e o fuso em que ela foi escrita (só em `captured_at`).
+- só em data e hora: `time_column` e `ms_column` (a hora e o milissegundo em outras
+  colunas, junto com `column`), `timezone` (o fuso de quando o texto não traz um;
+  vazio = UTC) e `date_order` (`dmy`, o padrão, ou `mdy`).
+
+**A data é lida sem formato fixo.** Data: `DD/MM/AAAA`, `DD-MM-AAAA`, `DD.MM.AAAA`,
+`DD/MM/AA`, `AAAA-MM-DD`, `AAAAMMDD`; o dia vem antes do mês (`03/04/2026` = 3 de abril),
+a não ser com `date_order: "mdy"`; começando pelo ano, é sempre ano-mês-dia. Hora:
+`HH:MM`, `HH:MM:SS`, `HH:MM:SS.fff` (qualquer número de casas), `HHMMSS`, com AM/PM
+opcional. Milissegundo numa coluna própria é um número de ms (`12` = 12 ms). Também
+valem a data e a hora juntas (`17/09/2026 08:35:42`, ISO com `T`), ISO com fuso (o fuso
+do texto vale) e epoch em segundos ou ms. Com vários valores no campo
+(`10:03:24;10:03:24`, um por câmera), vale o primeiro. A data tem que estar entre 2000
+e amanhã: fora disso é relógio errado e vira erro no relatório (o campo fica vazio, o
+resto da imagem é aproveitado). O `date_format` dos perfis antigos (layout do Go) ainda
+vale: é tentado primeiro e, se não bater, vale a leitura automática.
 
 ### Regras do import
 
@@ -444,6 +462,25 @@ Equip = MFR1-0001
 Placa = GGB5H24
 ```
 
+Alguns equipamentos (o MFR1) gravam **duas imagens** no mesmo arquivo, cada uma com o
+seu bloco: `[JPEG 1] FF D9 [Metrologico]... [JPEG 2] FF D9 [NMetrologico]...`. O SIDM lê
+o texto depois de **cada** fim de imagem e junta os blocos; o que vem depois do fim de
+uma miniatura EXIF é binário e fica de fora.
+
+### Perfil padrão `splice-ini`
+
+O SIDM já vem com o perfil **`splice-ini`**, para o INI dos equipamentos Splice. Como os
+perfis padrão de export, ele fica no código: aparece em toda instalação, vem escolhido no
+upload e não pode ser alterado, renomeado nem apagado (em **Configurar** ele tem **Ver** e
+**Duplicar**; para mudar, duplique com outro nome).
+
+| Campo | Chave do INI |
+|---|---|
+| `captured_at` | `Metrologico.Data` + `Metrologico.Hora` + `Metrologico.Milisegundo` (fuso de São Paulo) |
+| `equipment` | `NMetrologico.NSerie` |
+| `vehicle.plate` | `NMetrologico.Placa` |
+| `vehicle.type` | `NMetrologico.TipoVeiculo`, pela classe do Denatran (AUTOMOVEL → `car`, MOTOCICLETA → `motorcycle`, CAMINHAO → `truck`, ONIBUS → `bus`...) |
+
 | Momento | O que acontece |
 |---|---|
 | **Todo upload** | se o JPEG tem INI, ele é **guardado no banco** (campo `ini` da imagem), na ordem original. Não precisa de perfil. |
@@ -465,9 +502,8 @@ A `Assinatura` também **não** vai para o banco, porque só faz sentido junto d
   "reader": { "type": "jpeg-ini" },
   "fields": {
     "equipment":   { "column": "NMetrologico.Equip" },
-    "captured_at": { "template": "{Metrologico.Data} {Metrologico.Hora}.{Metrologico.Milisegundo}",
-                     "date_format": "02/01/2006 15:04:05.000",
-                     "timezone": "America/Sao_Paulo" }
+    "captured_at": { "column": "Metrologico.Data", "time_column": "Metrologico.Hora",
+                     "ms_column": "Metrologico.Milisegundo", "timezone": "America/Sao_Paulo" }
   },
   "objects": { "vehicle": { "mode": "single", "key": "plate", "fields": {
     "plate": { "column": "NMetrologico.Placa" },
@@ -622,8 +658,9 @@ alterado: para mudar, salve uma cópia com outro nome.
 }
 ```
 
-Na tela, os perfis ficam em **Configurar → Perfis de anotação**: criar, editar, duplicar
-(o `veiculos` só pode ser duplicado) e apagar. Os erros do perfil voltam todos juntos
+Na tela, os perfis ficam em **Configurar → Perfis de anotação**, como os de import:
+**Perfis cadastrados** (com a quantidade) e **Criar novo perfil**, numa tela própria.
+Dá para criar, editar, duplicar (o `veiculos` só pode ser visto e duplicado) e apagar. Os erros do perfil voltam todos juntos
 e a linha de cada campo com problema fica marcada. Um perfil **em uso** por algum
 pacote não pode ser apagado: troque o perfil desses pacotes antes.
 
@@ -632,6 +669,12 @@ uma anotação sem gravar nada.
 
 Um campo pode ter **valor inicial** (`default`): é o que a tela já traz numa imagem
 sem rascunho (no `veiculos`: traseira, diurno, sem chuva...).
+
+Um campo da imagem pode ter **`repeat: true`**: no mesmo pacote, a próxima imagem
+pendente já vem com o valor da última que a pessoa salvou (sem nada na tela; ganha do
+`default`, mas não do que veio do INI/CSV). No `veiculos`: equipamento, câmera, direção,
+ângulo de captura e clima. Os valores ficam no navegador, por pacote. Campo de objeto não
+aceita `repeat`.
 
 ### O perfil no pacote e nas imagens
 

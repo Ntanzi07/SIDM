@@ -6,7 +6,7 @@ import { useFolderReading } from '../../hooks/useFolderReading'
 import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
 import { UploadStatus } from './UploadStatus'
-import { forPackage, optionLabel } from '../../utils/importProfiles'
+import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import './Packages.css'
 
 export function CreatePackagePage() {
@@ -31,7 +31,10 @@ export function CreatePackagePage() {
 
   useEffect(() => {
     listAnnotationProfiles().then(setAnnotationProfiles).catch(() => { /* sem a lista: fica o padrão */ })
-    listIniProfiles().then(setIniProfiles).catch(() => { /* sem perfis de INI: o seletor não aparece */ })
+    listIniProfiles().then((list) => {
+      setIniProfiles(list)
+      setIniProfile((current) => current || defaultIniProfile(list))
+    }).catch(() => { /* sem perfis de INI: o seletor não aparece */ })
     listImportProfiles()
       .then(setProfiles)
       .catch((requestError: unknown) => setProfileError(

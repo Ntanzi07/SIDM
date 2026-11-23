@@ -140,9 +140,9 @@ func (m *MongoRepo) DeletePackage(ctx context.Context, name string) error {
 
 // Search: ativos cujo nome CONTÉM q (sem diferenciar maiúscula), em ordem
 // alfabética, paginado. q vazio = todos. "mf47" encontra "8003-MF4739".
-func (m *MongoRepo) Search(ctx context.Context, reg Registry, q string, limit, skip int64) ([]string, int64, error) {
+func (m *MongoRepo) Search(ctx context.Context, reg Registry, q string, active bool, limit, skip int64) ([]string, int64, error) {
 	coll := m.db.Collection(string(reg))
-	filter := bson.D{{Key: "active", Value: true}}
+	filter := bson.D{{Key: "active", Value: active}}
 	if q != "" {
 		filter = append(filter, platform.NameContains(q))
 	}

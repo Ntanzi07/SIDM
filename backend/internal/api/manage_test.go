@@ -148,6 +148,10 @@ func TestDesativarEReativar(t *testing.T) {
 	if p.Total != 0 {
 		t.Error("desativado não aparece no autocomplete")
 	}
+	decode(t, env.do("GET", "/equipments?inactive=true", nil, nil), &p)
+	if p.Total != 1 || p.Items[0].Name != "8003-MF4739" {
+		t.Errorf("?inactive=true deveria listar o desativado (para reativar): %+v", p)
+	}
 
 	sha := env.seedPending(t, "x")
 	rec := env.doJSON("PUT", "/images/"+sha, completeBody())

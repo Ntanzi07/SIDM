@@ -77,7 +77,7 @@ func main() {
 	}
 
 	impRepo := imports.NewMongoRepo(db)
-	img := images.New(imgRepo, fs, nil, impRepo, ann) // impRepo: o perfil jpeg-ini do upload
+	img := images.New(imgRepo, fs, nil, imports.Profiles{Repo: impRepo}, ann) // o perfil jpeg-ini do upload (padrão ou do banco)
 	cat := catalog.New(catalog.NewMongoRepo(db), fs, img, ann)
 	img.SetCatalog(cat)
 	// No disco toda imagem é <sha1>.ext: as verificadas de antes, com o nome

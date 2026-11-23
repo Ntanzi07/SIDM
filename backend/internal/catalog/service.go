@@ -228,7 +228,7 @@ func (s *Service) DeletePackage(ctx context.Context, name string) (*DeleteResult
 
 // Search busca os itens ativos (autocomplete).
 func (s *Service) Search(ctx context.Context, reg Registry, q string, limit, skip int64) ([]string, int64, error) {
-	return s.repo.Search(ctx, reg, q, limit, skip)
+	return s.repo.Search(ctx, reg, q, true, limit, skip)
 }
 
 // Create cadastra um item (nome já sanitizado). platform.ErrDuplicate se existe.

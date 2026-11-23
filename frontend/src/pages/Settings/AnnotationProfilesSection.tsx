@@ -39,7 +39,7 @@ function newField(): ProfileField {
 
 // Ao trocar o tipo, some o que só valia para o tipo antigo.
 function withType(field: ProfileField, type: FieldType): ProfileField {
-  const base: ProfileField = { key: field.key, label: field.label, type, required: field.required, help: field.help }
+  const base: ProfileField = { key: field.key, label: field.label, type, required: field.required, help: field.help, repeat: field.repeat }
   if (type === 'choice' || type === 'multi') base.options = field.options ?? []
   if (type === 'ref') {
     base.ref = 'equipment'
@@ -275,7 +275,18 @@ function FieldsEditor({ base, fields, onChange, problems, readOnly }: FieldsEdit
 
 const empty = (): AnnotationProfile => ({ name: '', description: '', fields: [], objects: [] })
 
-export function AnnotationProfilesSection() {
+// A seção tem duas telas no menu de Configurar, como os perfis de import:
+// a lista (com a quantidade no menu) e o editor ("Criar novo perfil"). Ela
+// fica montada o tempo todo (view null = escondida) para o rascunho não se
+// perder ao trocar de tela.
+type View = 'list' | 'editor'
+type Props = {
+  view: View | null
+  onView: (view: View) => void
+  onSummary: (summary: { count: number; editorLabel: string }) => void
+}
+
+export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
   const [profiles, setProfiles] = useState<AnnotationProfile[]>([])
   const [draft, setDraft] = useState<AnnotationProfile | null>(null)
   const [isNew, setIsNew] = useState(false)
@@ -289,12 +300,29 @@ export function AnnotationProfilesSection() {
 
   const readOnly = Boolean(draft?.builtin)
 
+  // O menu mostra a quantidade e o nome do editor ("Ver", "Editar"...).
+  const editorLabel = !draft || isNew ? 'Criar novo perfil' : readOnly ? 'Ver perfil' : 'Editar perfil'
+  useEffect(() => { onSummary({ count: profiles.length, editorLabel }) }, [profiles.length, editorLabel, onSummary])
+
+  // Abriu "Criar novo perfil" pelo menu sem nada aberto: um perfil em branco.
+  if (view === 'editor' && !draft) {
+    setDraft(empty())
+    setIsNew(true)
+  }
+
+  function close() {
+    setDraft(null)
+    setProblems([])
+    onView('list')
+  }
+
   function open(profile: AnnotationProfile, asNew: boolean) {
     setDraft(structuredClone(profile))
     setIsNew(asNew)
     setProblems([])
     setError('')
     setMessage('')
+    onView('editor')
   }
 
   // Uma cópia editável (do padrão, por exemplo): o nome muda e sai o "padrão".
@@ -311,8 +339,9 @@ export function AnnotationProfilesSection() {
     setMessage('')
     try {
       const saved = isNew ? await createAnnotationProfile(draft) : await updateAnnotationProfile(draft)
-      open(saved, false) // limpa as mensagens: a de "salvo" vem depois
-      setMessage(`Perfil "${saved.name}" salvo.`)
+      // Como nos perfis de import: salvou, volta para a lista.
+      close()
+      setMessage(`Perfil "${saved.name}" ${isNew ? 'criado' : 'salvo'}.`)
       await load()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Não foi possível salvar o perfil.')
@@ -338,17 +367,25 @@ export function AnnotationProfilesSection() {
   const setObject = (i: number, patch: Partial<ObjectType>) =>
     draft && setDraft({ ...draft, objects: draft.objects.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
 
-  return (
+  if (view === null) return null
+
+  const notices = (
+    <>
+      {error && !problems.length && <p className="form-error">{error}</p>}
+      {message && <p className="settings-message">{message}</p>}
+    </>
+  )
+
+  if (view === 'list') return (
     <div className="create-card settings-card">
       <div className="profile-header-flex">
         <div>
-          <h2>Perfis de anotação</h2>
+          <h2>Perfis de anotação cadastrados</h2>
           <p>O que se anota em cada imagem de um pacote: os campos da imagem e os tipos de objeto.</p>
         </div>
         <button className="button button--primary button--sm" onClick={() => open(empty(), true)} type="button">+ Novo perfil</button>
       </div>
-      {error && !problems.length && <p className="form-error">{error}</p>}
-      {message && <p className="settings-message">{message}</p>}
+      {notices}
 
       <div className="profile-items-list">
         {profiles.map((p) => (
@@ -374,10 +411,26 @@ export function AnnotationProfilesSection() {
           </div>
         ))}
       </div>
+    </div>
+  )
 
+  return (
+    <div className="create-card settings-card">
+      {notices}
       {draft && (
         <div className="ap-editor">
-          <h3>{isNew ? 'Novo perfil' : readOnly ? `${draft.name} (padrão: só leitura; use Duplicar para mudar)` : `Editar ${draft.name}`}</h3>
+          <div className="profile-header-flex">
+            <div>
+              <h2>{isNew ? 'Criar novo perfil de anotação' : readOnly ? `Perfil padrão: ${draft.name}` : `Editar perfil: ${draft.name}`}</h2>
+              <p>{readOnly ? 'Só leitura. Para mudar, use Duplicar.' : 'Os campos da imagem e os tipos de objeto que se anotam nos pacotes deste perfil.'}</p>
+            </div>
+            {readOnly && (
+              <div className="profile-item__actions">
+                <button className="button button--secondary button--sm" onClick={() => duplicate(draft)} type="button">Duplicar</button>
+                <button className="button button--secondary button--sm" onClick={close} type="button">Fechar</button>
+              </div>
+            )}
+          </div>
           <div className="ap-row">
             <label className="ap-inline">
               <span>Nome</span>
@@ -469,7 +522,7 @@ export function AnnotationProfilesSection() {
           )}
 
           <div className="profile-submit-row">
-            <button className="button button--secondary" onClick={() => { setDraft(null); setProblems([]) }} type="button">Fechar</button>
+            <button className="button button--secondary" onClick={close} type="button">{isNew ? 'Cancelar' : 'Fechar'}</button>
             {!readOnly && (
               <button className="button button--primary" disabled={saving} onClick={() => void save()} type="button">
                 {saving ? 'Salvando...' : isNew ? 'Criar perfil' : 'Salvar perfil'}

@@ -110,7 +110,23 @@ func (tr *transformer) raw(row Row, rule FieldRule, n int) string {
 	if rule.Template != "" {
 		return fillTemplate(num(rule.Template), row.Values)
 	}
-	return strings.TrimSpace(row.Values[num(rule.Column)])
+	return column(row, num(rule.Column))
+}
+
+// column: o valor de uma coluna, sem espaços nas pontas ("" = sem coluna).
+func column(row Row, name string) string {
+	if name == "" {
+		return ""
+	}
+	return strings.TrimSpace(row.Values[name])
+}
+
+// numbered troca o {n} do modo "columns" (n=0: fora dele).
+func numbered(s string, n int) string {
+	if n > 0 {
+		return strings.ReplaceAll(s, "{n}", strconv.Itoa(n))
+	}
+	return s
 }
 
 var placeholderRe = regexp.MustCompile(`\{([^{}]+)\}`)
@@ -203,7 +219,7 @@ func (tr *transformer) value(row Row, where string, f *annotation.Field, rule Fi
 	}
 	switch f.Type {
 	case annotation.TypeDateTime:
-		t, err := parseDate(raw, rule)
+		t, err := parseDate(raw, column(row, numbered(rule.TimeColumn, n)), column(row, numbered(rule.MsColumn, n)), rule)
 		if err != nil {
 			tr.addError(row.Line, where, err.Error())
 			return nil
@@ -343,8 +359,10 @@ func sortedRules(m map[string]FieldRule) []string {
 	return out
 }
 
-// parseDate lê a data no formato do perfil, no fuso do perfil, e devolve em UTC.
-func parseDate(value string, rule FieldRule) (time.Time, error) {
+// parseDate lê a data (e a hora e o milissegundo, se vierem de outras
+// colunas) no fuso do perfil e devolve em UTC. Um date_format de perfil
+// antigo é tentado primeiro; se não bater, vale a leitura automática.
+func parseDate(date, clock, ms string, rule FieldRule) (time.Time, error) {
 	loc := time.UTC
 	if rule.Timezone != "" {
 		l, err := time.LoadLocation(rule.Timezone)
@@ -353,9 +371,10 @@ func parseDate(value string, rule FieldRule) (time.Time, error) {
 		}
 		loc = l
 	}
-	t, err := time.ParseInLocation(rule.DateFormat, value, loc)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("data %q não está no formato %q", value, rule.DateFormat)
+	if rule.DateFormat != "" && clock == "" && ms == "" {
+		if t, err := time.ParseInLocation(rule.DateFormat, date, loc); err == nil {
+			return plausible(t, loc)
+		}
 	}
-	return t.UTC(), nil
+	return ParseDateTime(date, clock, ms, rule.DateOrder, loc)
 }

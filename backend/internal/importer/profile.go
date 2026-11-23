@@ -49,6 +49,7 @@ type Profile struct {
 	// Objects, e ele nunca é gravado de novo.
 	Vehicles *ObjectRules `json:"vehicles,omitempty" bson:"vehicles,omitempty"`
 
+	Builtin   bool      `json:"builtin,omitempty" bson:"-"` // perfil padrão do sistema (vem no código, não dá para editar)
 	CreatedBy string    `json:"created_by,omitempty" bson:"created_by,omitempty"`
 	UpdatedAt time.Time `json:"updated_at" bson:"updated_at"`
 }
@@ -90,11 +91,22 @@ type FieldRule struct {
 	// vários valores (multi), como conditions.
 	Split string `json:"split,omitempty" bson:"split,omitempty"`
 
-	// Só em campo de data e hora (como captured_at): layout no formato do Go
-	// (ex: "02/01/2006 15:04:05") e o fuso em que a data foi escrita (ex:
-	// "America/Sao_Paulo").
+	// Só em campo de data e hora (como captured_at). A data é lida sem formato
+	// fixo (veja datetime.go): basta dizer de onde vêm as partes.
+	//
+	// TimeColumn e MsColumn: a hora e o milissegundo, quando estão em outra
+	// coluna (no INI: Data=, Hora=, Milisegundo=). Só junto com Column.
+	TimeColumn string `json:"time_column,omitempty" bson:"time_column,omitempty"`
+	MsColumn   string `json:"ms_column,omitempty" bson:"ms_column,omitempty"`
+	// DateOrder: "dmy" (padrão, 03/04 = 3 de abril) ou "mdy" (americano).
+	DateOrder string `json:"date_order,omitempty" bson:"date_order,omitempty"`
+	// Timezone: o fuso em que a data foi escrita (ex: "America/Sao_Paulo"),
+	// quando o texto não traz um. Vazio = UTC.
+	Timezone string `json:"timezone,omitempty" bson:"timezone,omitempty"`
+	// DateFormat: layout do Go (ex: "02/01/2006 15:04:05"), dos perfis
+	// antigos. Opcional: se a data não bater com ele, vale a leitura
+	// automática.
 	DateFormat string `json:"date_format,omitempty" bson:"date_format,omitempty"`
-	Timezone   string `json:"timezone,omitempty" bson:"timezone,omitempty"`
 }
 
 // ObjectRules: como achar os objetos de um tipo no arquivo. Três jeitos:
@@ -187,6 +199,9 @@ func (p *Profile) Validate(ap *annotation.Profile) error {
 
 	if !ValidProfileName(p.Name) {
 		add("name: use só letras, números e \"-\" (ex: csv-equipamento-8003)")
+	}
+	if _, builtin := Builtin(p.Name); builtin && !p.Builtin {
+		add("name: %q é um perfil padrão do sistema; use outro nome", p.Name)
 	}
 	if p.Vehicles != nil {
 		add("vehicles: formato antigo; chame o Normalize (vira objects.vehicle)")
@@ -312,9 +327,13 @@ func validateRule(add func(string, ...any), path string, f *annotation.Field, r 
 	}
 
 	if f.Type == annotation.TypeDateTime {
-		if r.DateFormat == "" {
-			add("%s.date_format: obrigatório (layout do Go, ex: \"02/01/2006 15:04:05\")", path)
-		} else if !ValidDateLayout(r.DateFormat) {
+		if (r.TimeColumn != "" || r.MsColumn != "") && r.Column == "" {
+			add("%s: time_column/ms_column só valem junto com \"column\" (a coluna da data)", path)
+		}
+		if r.DateOrder != "" && r.DateOrder != DateOrderDMY && r.DateOrder != DateOrderMDY {
+			add("%s.date_order: use %q (dia/mês, o padrão) ou %q (mês/dia)", path, DateOrderDMY, DateOrderMDY)
+		}
+		if r.DateFormat != "" && !ValidDateLayout(r.DateFormat) {
 			add("%s.date_format: %q não é um layout do Go. Escreva a data de referência "+
 				"(2006-01-02 15:04:05) no mesmo formato do CSV, ex: \"2006-01-02 15:04:05.000\" ou \"02/01/2006 15:04:05\"",
 				path, r.DateFormat)
@@ -325,12 +344,12 @@ func validateRule(add func(string, ...any), path string, f *annotation.Field, r 
 			}
 		}
 		if len(r.Map) > 0 {
-			add("%s.map: não se usa em data e hora (use date_format)", path)
+			add("%s.map: não se usa em data e hora (a data é lida sozinha)", path)
 		}
 		return
 	}
-	if r.DateFormat != "" || r.Timezone != "" {
-		add("%s: date_format/timezone só valem para campos de data e hora", path)
+	if r.DateFormat != "" || r.Timezone != "" || r.TimeColumn != "" || r.MsColumn != "" || r.DateOrder != "" {
+		add("%s: date_format/timezone/time_column/ms_column/date_order só valem para campos de data e hora", path)
 	}
 
 	// Os valores de destino do Map (e o valor fixo) têm que ser valores

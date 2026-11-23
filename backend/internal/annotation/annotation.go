@@ -56,6 +56,10 @@ type Field struct {
 	// Default é o valor que a tela já traz numa imagem sem rascunho (ex.:
 	// "rear"). Tem que ser um valor válido do campo.
 	Default any `json:"default,omitempty" bson:"default,omitempty"`
+	// Repeat: na anotação, a próxima imagem pendente do pacote já vem com o
+	// valor da última salva (ex.: equipamento, câmera, direção, que mudam
+	// pouco de uma foto para a outra). Só nos campos da imagem.
+	Repeat bool `json:"repeat,omitempty" bson:"repeat,omitempty"`
 
 	Options []Option `json:"options,omitempty" bson:"options,omitempty"` // choice, multi
 

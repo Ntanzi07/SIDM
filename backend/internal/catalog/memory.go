@@ -136,7 +136,7 @@ func (m *Memory) DeletePackage(ctx context.Context, name string) error {
 
 // Search imita o Mongo: contém, sem diferenciar maiúscula, só os ativos,
 // em ordem alfabética, paginado.
-func (m *Memory) Search(ctx context.Context, reg Registry, q string, limit, skip int64) ([]string, int64, error) {
+func (m *Memory) Search(ctx context.Context, reg Registry, q string, active bool, limit, skip int64) ([]string, int64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.LastSearch.Q, m.LastSearch.Limit, m.LastSearch.Skip = q, limit, skip
@@ -144,8 +144,8 @@ func (m *Memory) Search(ctx context.Context, reg Registry, q string, limit, skip
 		return nil, 0, m.Err
 	}
 	all := []string{}
-	for n, active := range m.set(reg) {
-		if active && strings.Contains(strings.ToLower(n), strings.ToLower(q)) {
+	for n, on := range m.set(reg) {
+		if on == active && strings.Contains(strings.ToLower(n), strings.ToLower(q)) {
 			all = append(all, n)
 		}
 	}

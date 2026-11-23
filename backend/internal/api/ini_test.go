@@ -29,6 +29,7 @@ Assinatura=wsBcBAABCAAQBQ
 
 [NMetrologico]
 Equip = MFR1 0001
+NSerie = 0001
 Placa = ` + plate + `
 TipoVeiculo = AUTOMOVEL
 `
@@ -112,6 +113,44 @@ func TestUploadComPerfilDeINI(t *testing.T) {
 	}
 }
 
+// O splice-ini vem com o SIDM: sem cadastrar nada, o upload já usa ele. Ele
+// aparece na lista e não dá para editar, renomear nem apagar.
+func TestPerfilPadraoSpliceINI(t *testing.T) {
+	env := newTestEnv(t)
+
+	res := env.uploadToWithQuery(t, testPkg, "&profile=splice-ini", upFile{"foto.jpg", jpegWithINI("a", "GGB5H24")})
+	if res[0].Status != "created" || !res[0].Prefilled {
+		t.Fatalf("resultado = %+v", res[0])
+	}
+	img := env.img.Images[res[0].SHA1]
+	if fv(img.Fields, "equipment") != "0001" {
+		t.Errorf("equipment = %q (vem do NSerie)", fv(img.Fields, "equipment"))
+	}
+	want := time.Date(2026, 9, 18, 13, 32, 28, 321e6, time.UTC) // data, hora e ms do Metrologico, em São Paulo
+	if img.Fields["captured_at"] != want {
+		t.Errorf("captured_at = %v, want %v", img.Fields["captured_at"], want)
+	}
+	if len(img.Objects) != 1 || fv(img.Objects[0].Fields, "plate") != "GGB5H24" || fv(img.Objects[0].Fields, "type") != "car" {
+		t.Errorf("veículo = %+v", img.Objects)
+	}
+
+	list := env.doJSON("GET", "/import-profiles", "")
+	assertStatus(t, list, http.StatusOK)
+	if !strings.Contains(list.Body.String(), `"name":"splice-ini"`) || !strings.Contains(list.Body.String(), `"builtin":true`) {
+		t.Errorf("lista sem o padrão: %s", list.Body.String())
+	}
+	assertStatus(t, env.doJSON("GET", "/import-profiles/splice-ini", ""), http.StatusOK)
+
+	same := strings.Replace(iniProfileJSON, `"ini-mfr1"`, `"splice-ini"`, 1)
+	assertStatus(t, env.doJSON("POST", "/import-profiles", same), http.StatusBadRequest)
+	assertStatus(t, env.doJSON("PUT", "/import-profiles/splice-ini", same), http.StatusBadRequest)
+	assertStatus(t, env.doJSON("PATCH", "/import-profiles/splice-ini", `{"name":"outro"}`), http.StatusBadRequest)
+	assertStatus(t, env.doJSON("DELETE", "/import-profiles/splice-ini", ""), http.StatusBadRequest)
+	// "builtin": true no JSON não engana: só o código marca perfil padrão.
+	forged := strings.Replace(same, `"name": "splice-ini",`, `"name": "splice-ini", "builtin": true,`, 1)
+	assertStatus(t, env.doJSON("POST", "/import-profiles", forged), http.StatusBadRequest)
+}
+
 func TestUploadPerfilDeINIComAvisos(t *testing.T) {
 	env := newTestEnv(t)
 	env.withINIProfile(t)
@@ -126,6 +165,26 @@ func TestUploadPerfilDeINIComAvisos(t *testing.T) {
 	}
 	if res[0].Status != "created" {
 		t.Error("aviso não pode impedir o upload")
+	}
+}
+
+// O equipamento do INI existe, mas foi desativado (apagado em Configurar
+// quando ainda havia imagens usando): o valor fica e o upload avisa, em vez
+// de a anotação reclamar depois sem explicação.
+func TestUploadPerfilDeINIComEquipamentoDesativado(t *testing.T) {
+	env := newTestEnv(t)
+	env.withINIProfile(t)
+	env.cat.Equipments["MFR1-0001"] = false
+
+	res := env.uploadToWithQuery(t, testPkg, "&profile=ini-mfr1", upFile{"foto.jpg", jpegWithINI("a", "GGB5H24")})
+	if res[0].Status != "created" {
+		t.Fatalf("resultado = %+v", res[0])
+	}
+	if fv(env.img.Images[res[0].SHA1].Fields, "equipment") != "MFR1-0001" {
+		t.Error("o equipamento do arquivo continua na imagem")
+	}
+	if joined := strings.Join(res[0].Warnings, " | "); !strings.Contains(joined, "desativado") {
+		t.Errorf("deveria avisar que o equipamento está desativado: %v", res[0].Warnings)
 	}
 }
 
@@ -221,7 +280,7 @@ func TestInspectINI(t *testing.T) {
 	if ins.Rows != 2 {
 		t.Errorf("rows = %d, want 2 (a imagem sem INI fica de fora)", ins.Rows)
 	}
-	want := []string{"Metrologico.Data", "Metrologico.Hora", "Metrologico.Milisegundo", "NMetrologico.Equip", "NMetrologico.Placa", "NMetrologico.TipoVeiculo"}
+	want := []string{"Metrologico.Data", "Metrologico.Hora", "Metrologico.Milisegundo", "NMetrologico.Equip", "NMetrologico.NSerie", "NMetrologico.Placa", "NMetrologico.TipoVeiculo"}
 	if strings.Join(ins.Columns, ",") != strings.Join(want, ",") {
 		t.Errorf("colunas = %v\nwant %v (sem a Assinatura)", ins.Columns, want)
 	}
