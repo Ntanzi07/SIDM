@@ -1,0 +1,93 @@
+.zoom-view {
+  position: relative;
+  width: 100%;
+}
+
+/* o quadro fica no tamanho da imagem inteira; o que passa dele com zoom é
+   cortado */
+.zoom-view__frame {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  touch-action: none;
+  user-select: none;
+}
+
+.zoom-view__frame--zoomed {
+  cursor: grab;
+}
+
+.zoom-view__frame--dragging {
+  cursor: grabbing;
+}
+
+.zoom-view__content {
+  transform-origin: center;
+  will-change: transform;
+}
+
+.zoom-view__frame:not(.zoom-view__frame--dragging) .zoom-view__content {
+  transition: transform 140ms var(--ease);
+}
+
+.zoom-view__content img {
+  -webkit-user-drag: none;
+}
+
+.zoom-view__controls {
+  position: absolute;
+  right: 10px;
+  bottom: 34px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface-glass);
+  backdrop-filter: blur(10px);
+}
+
+.zoom-view__controls button {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  transition: background 160ms var(--ease);
+}
+
+.zoom-view__controls button:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.zoom-view__controls button:disabled {
+  cursor: default;
+  opacity: 0.35;
+}
+
+.zoom-view__controls span {
+  min-width: 46px;
+  color: var(--text-2);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.zoom-view__controls .zoom-view__fit {
+  font-size: 12px;
+}
+
+.zoom-view__hint {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: 11px;
+  text-align: center;
+}

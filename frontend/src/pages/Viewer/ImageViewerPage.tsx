@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
+import { ZoomView } from '../../components/ZoomView/ZoomView'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
 import { boxPending, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
@@ -97,17 +98,20 @@ export function ImageViewerPage() {
 
   return (
     <section className="viewer-page">
-      <div className="viewer-header">
-        <button className="back-button" onClick={back} type="button">← Voltar para o pacote</button>
-        <div className="viewer-header__title">
-          <h1>{packageName}</h1>
-          <p>
+      <button className="back-button" onClick={back} type="button">← Voltar para {packageName}</button>
+      <div className="page-heading viewer-heading">
+        <div>
+          <span className="eyebrow">{packageName}</span>
+          <h1>
             {shaParam
               ? 'Imagem verificada'
               : total !== null && total > 0
-                ? `Verificada ${(index + 1).toLocaleString('pt-BR')} de ${total.toLocaleString('pt-BR')}`
+                ? <>Verificada {(index + 1).toLocaleString('pt-BR')} <small>de {total.toLocaleString('pt-BR')}</small></>
                 : 'Imagens verificadas'}
-          </p>
+          </h1>
+          {!shaParam && total !== null && total > 0 && (
+            <span className="progress-line"><span style={{ width: `${((index + 1) / total) * 100}%` }} /></span>
+          )}
         </div>
         {!shaParam && (
           <div className="viewer-nav">
@@ -123,21 +127,24 @@ export function ImageViewerPage() {
 
       {image && (
         <div className="viewer-layout">
-          <div className="viewer-image">
-            <ImageWithBoxes
-              alt={image.original_name}
-              onSelect={selectBox}
-              pending={boxPending(profile, boxSets)}
-              selected={selectedBox}
-              sets={boxSets}
-              sha1={image.sha1}
-              show
-            />
+          <div className="viewer-main">
+            <div className="viewer-image">
+              <ZoomView resetKey={image.sha1}>
+                <ImageWithBoxes
+                  alt={image.original_name}
+                  onSelect={selectBox}
+                  pending={boxPending(profile, boxSets)}
+                  selected={selectedBox}
+                  sets={boxSets}
+                  sha1={image.sha1}
+                  show
+                />
+              </ZoomView>
+            </div>
             <p className="viewer-image__meta">
               {image.original_name}
               {boxSets.length > 0 && ` · ${describeBoxSets(boxSets)}`}
             </p>
-            <BoxAttributes onSelect={selectBox} profile={profile} readOnly selected={selectedBox} sets={boxSets} />
           </div>
 
           <div className="viewer-card">
@@ -179,6 +186,10 @@ export function ImageViewerPage() {
               )
             })}
 
+            {boxSets.some((set) => set.boxes.length > 0) && (
+              <BoxAttributes onSelect={selectBox} profile={profile} readOnly selected={selectedBox} sets={boxSets} />
+            )}
+
             {image.file_name && (
               <p className="viewer-filename" title={image.pattern_version ? 'Nome v2 (usado no export; no disco o arquivo é o sha1)' : 'Nome do arquivo'}>{image.file_name}</p>
             )}
@@ -196,7 +207,7 @@ export function ImageViewerPage() {
               <p>
                 A imagem volta para <strong>pendente</strong> e abre na tela de anotação, reservada para você.
                 A anotação atual fica como rascunho até ser verificada de novo, e as
-                caixas do CVAT não mudam.
+                caixas não mudam.
               </p>
             </div>
             <div className="modal-actions">

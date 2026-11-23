@@ -2,6 +2,8 @@ import { useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
+import { ZoomView } from '../../components/ZoomView/ZoomView'
+import { Toast } from '../../components/Toast/Toast'
 import { boxPending, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
@@ -10,7 +12,8 @@ import { FieldInput } from './AnnotationFields'
 import './Annotation.css'
 
 function formatSize(bytes: number) {
-  return `${(bytes / 1024 / 1024).toFixed(2)} MB`
+  if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024)).toLocaleString('pt-BR')} KB`
+  return `${(bytes / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 2 })} MB`
 }
 
 export function AnnotationPage() {
@@ -36,6 +39,9 @@ export function AnnotationPage() {
   const countOf = (type: string) => form.objects.filter((object) => object.type === type).length
   // Os problemas que não são de um campo só (ex.: "pelo menos 1 veículo").
   const generalProblems = annotator.problems.filter((problem) => problem.path === 'objects' || problem.path.endsWith('.type'))
+
+  const { done, total } = annotator.progress
+  const percent = total ? Math.round((done / total) * 100) : 0
 
   async function handleDeleteImage() {
     const ok = await annotator.deleteCurrentImage()
@@ -76,20 +82,20 @@ export function AnnotationPage() {
         </div>
       )}
 
-      <div className="annotation-header">
-        <button className="back-button" onClick={() => navigate(`/pacotes/${encodeURIComponent(packageName)}`)} type="button">← Voltar para {packageName}</button>
+      <button className="back-button" onClick={() => navigate(`/pacotes/${encodeURIComponent(packageName)}`)} type="button">← Voltar para {packageName}</button>
+      <div className="page-heading annotation-heading">
         <div>
-          <strong>{annotator.progress.done} de {annotator.progress.total} concluídas</strong>
-          <span>{annotator.progress.total ? Math.round((annotator.progress.done / annotator.progress.total) * 100) : 0}%</span>
+          <span className="eyebrow">{packageName} · anotação</span>
+          <h1>
+            {done.toLocaleString('pt-BR')} <small>de {total.toLocaleString('pt-BR')} concluídas · {percent}%</small>
+          </h1>
+          <span className="progress-line"><span style={{ width: `${percent}%` }} /></span>
         </div>
-      </div>
-
-      <div className="annotation-layout">
         <div className="annotation-navigation">
           <button className="button button--secondary" disabled={!annotator.canGoBack || annotator.saving} onClick={() => void annotator.previous()} type="button">← Anterior</button>
           <span>
             {annotator.revisiting
-              ? 'Revendo uma imagem anterior'
+              ? 'Revendo uma anterior'
               : `${annotator.progress.pending.toLocaleString('pt-BR')} pendente(s) na fila`}
           </span>
           {annotator.revisiting ? (
@@ -106,30 +112,21 @@ export function AnnotationPage() {
             </button>
           )}
         </div>
+      </div>
 
+      <div className="annotation-layout">
         <main className="annotation-main">
           {image ? (
             <div className="annotation-workspace">
               <div className="annotation-preview-column">
                 <div className="annotation-preview-card">
-                  <div className="annotation-preview">
-                    <ImageWithBoxes
-                      alt={image.original_name}
-                      onSelect={(box) => { setShowBoxes(true); selectBox(box) }}
-                      pending={boxPending(profile, boxSets)}
-                      selected={selectedBox}
-                      sets={boxSets}
-                      sha1={image.sha1}
-                      show={showBoxes}
-                    />
-                  </div>
                   <div className="annotation-image-meta">
                     <div>
                       <strong>{image.original_name}</strong>
                       <span>
                         {formatSize(image.size)} · {image.ext}
                         {boxSets.length > 0 && (
-                          <label className="annotation-boxes-toggle" title="Caixas do CVAT, por tarefa">
+                          <label className="annotation-boxes-toggle" title="Caixas, por tarefa">
                             <input checked={showBoxes} onChange={(event) => setShowBoxes(event.target.checked)} type="checkbox" />
                             {describeBoxSets(boxSets)}
                           </label>
@@ -145,8 +142,20 @@ export function AnnotationPage() {
                       Excluir imagem
                     </button>
                   </div>
+                  <div className="annotation-preview">
+                    <ZoomView resetKey={image.sha1}>
+                      <ImageWithBoxes
+                        alt={image.original_name}
+                        onSelect={(box) => { setShowBoxes(true); selectBox(box) }}
+                        pending={boxPending(profile, boxSets)}
+                        selected={selectedBox}
+                        sets={boxSets}
+                        sha1={image.sha1}
+                        show={showBoxes}
+                      />
+                    </ZoomView>
+                  </div>
                 </div>
-                <BoxAttributes onSaved={reloadBoxes} onSelect={selectBox} profile={profile} selected={selectedBox} sets={boxSets} />
               </div>
 
               <div className="annotation-form-card">
@@ -155,9 +164,8 @@ export function AnnotationPage() {
                     <h2>Dados da anotação</h2>
                     <p>Preencha os campos de acordo com o que aparece na imagem.</p>
                   </div>
-                  <span className={image.status === 'verified' ? 'annotation-status annotation-status--done' : 'annotation-status'}>
-                    {image.status === 'verified' ? 'Concluída' : 'Pendente'}
-                  </span>
+                  {/* pendente é o normal desta tela; só avisa ao rever uma já concluída */}
+                  {image.status === 'verified' && <span className="annotation-status annotation-status--done">Concluída</span>}
                 </div>
 
                 {annotator.error && <p className="annotation-feedback annotation-feedback--error">{annotator.error}</p>}
@@ -240,10 +248,14 @@ export function AnnotationPage() {
                   )
                 })}
 
-                {boxTypes.length > 0 && (
+                {boxTypes.length > 0 && !boxSets.some((set) => set.boxes.length > 0) && (
                   <p className="annotation-hint">
-                    {boxTypes.map((type) => fieldLabel(type)).join(', ')}: anotado(s) com caixas, no CVAT (tarefas); os atributos ficam em "Caixas do CVAT", abaixo da imagem.
+                    {boxTypes.map((type) => fieldLabel(type)).join(', ')}: rotulado(s) com caixas (Tarefas). Esta imagem ainda não tem caixas.
                   </p>
+                )}
+
+                {boxSets.some((set) => set.boxes.length > 0) && (
+                  <BoxAttributes onSaved={reloadBoxes} onSelect={selectBox} profile={profile} selected={selectedBox} sets={boxSets} />
                 )}
 
                 {generalProblems.length > 0 && (
@@ -270,6 +282,7 @@ export function AnnotationPage() {
           )}
         </main>
       </div>
+      <Toast notice={annotator.notice} />
     </section>
   )
 }

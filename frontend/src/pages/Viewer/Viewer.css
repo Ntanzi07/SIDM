@@ -1,36 +1,34 @@
 .viewer-page {
-  max-width: 1280px;
+  width: min(1280px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 28px 32px 48px;
+  padding: 56px 0 48px;
 }
 
-.viewer-page .back-button {
-  margin-bottom: 0;
+/* o título como nas outras telas, só mais baixo: a imagem precisa de altura */
+.viewer-heading {
+  margin-bottom: 24px;
 }
 
-.viewer-header {
-  display: flex;
-  align-items: center;
-  gap: 24px;
-  margin-bottom: 20px;
+.viewer-heading .eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  animation: rise 560ms var(--ease) both;
 }
 
-.viewer-header__title h1 {
-  margin: 0;
-  color: var(--text);
-  font-size: 20px;
+.viewer-heading h1 {
+  font-size: clamp(26px, 2.6vw, 34px);
 }
 
-.viewer-header__title p {
-  margin: 2px 0 0;
+.viewer-heading h1 small {
   color: var(--text-3);
-  font-size: 13px;
+  font-size: 0.6em;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .viewer-nav {
   display: flex;
   gap: 8px;
-  margin-left: auto;
 }
 
 .viewer-layout {
@@ -40,19 +38,40 @@
   align-items: start;
 }
 
+.viewer-main {
+  min-width: 0;
+}
+
+/* só a imagem tem o fundo; o nome fica embaixo, à esquerda */
 .viewer-image {
   display: grid;
   place-items: center;
   padding: 18px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: var(--surface-2);
 }
 
 .viewer-image__meta {
-  margin: 12px 0 0;
+  margin: 12px 2px 0;
+  overflow: hidden;
   color: var(--text-3);
   font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* as caixas no cartão da direita, como mais uma seção da anotação */
+.viewer-card .box-attributes {
+  margin-top: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.viewer-card .box-attributes h3 {
+  margin: 0 0 4px;
 }
 
 .viewer-card {

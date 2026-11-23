@@ -1,28 +1,29 @@
 .annotation-page {
   width: min(1400px, calc(100% - 48px));
   margin: 0 auto;
-  padding: 32px 0 64px;
+  padding: 56px 0 64px;
 }
 
-.annotation-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 20px;
+/* o título como na tela de verificadas (a barra é a .progress-line) */
+.annotation-heading {
+  margin-bottom: 24px;
 }
 
-.annotation-header > div {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  color: var(--accent);
-  font-size: 13px;
+.annotation-heading .eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  animation: rise 560ms var(--ease) both;
 }
 
-.annotation-header span {
-  padding: 6px 10px;
-  border-radius: 6px;
-  background: var(--accent-soft);
+.annotation-heading h1 {
+  font-size: clamp(26px, 2.6vw, 34px);
+}
+
+.annotation-heading h1 small {
+  color: var(--text-3);
+  font-size: 0.6em;
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .annotation-layout {
@@ -43,9 +44,7 @@
 .annotation-navigation {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 18px;
-  margin-bottom: 16px;
+  gap: 14px;
 }
 
 .annotation-navigation > span {
@@ -62,7 +61,11 @@
   gap: 22px;
 }
 
+/* a imagem acompanha a rolagem: dá para continuar vendo enquanto preenche
+   os campos mais embaixo */
 .annotation-preview-column {
+  position: sticky;
+  top: 84px;
   min-width: 0;
 }
 
@@ -74,8 +77,23 @@
   display: grid;
   min-height: 380px;
   place-items: center;
-  padding: 18px;
+  padding: 18px 18px 12px;
   background: var(--surface-2);
+}
+
+/* as caixas no cartão da direita, como mais uma seção do formulário */
+.annotation-form-card .box-attributes {
+  margin: 18px 0 4px;
+  padding: 18px 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+}
+
+.annotation-form-card .box-attributes h3 {
+  margin: 0 0 4px;
+  font-size: 15px;
 }
 
 .annotation-preview img {
@@ -103,7 +121,8 @@
 }
 
 .annotation-image-meta {
-  padding: 13px 18px;
+  padding: 12px 14px 12px 18px;
+  border-bottom: 1px solid var(--border);
   color: var(--text-3);
   font-size: 11px;
 }
@@ -234,17 +253,21 @@
   .annotation-workspace {
     grid-template-columns: 1fr;
   }
+
+  /* uma coluna só: a imagem não fica presa em cima do formulário */
+  .annotation-preview-column {
+    position: static;
+  }
+
+  .annotation-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 650px) {
   .annotation-page {
     width: min(100% - 28px, 1400px);
-  }
-
-  .annotation-header {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 10px;
   }
 
   .annotation-fields {

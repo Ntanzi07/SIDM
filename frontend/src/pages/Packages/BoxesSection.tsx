@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { BoxImportModal } from './BoxImportModal'
 import { cvatZipUrl, getPackageBoxes, type PackageBoxes } from '../../services/api'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
+const pct = (n: number, of: number) => (of > 0 ? `${Math.min(100, Math.round((n / of) * 100))}%` : '0%')
 
-// Caixas (bounding boxes) do CVAT neste pacote: em que tarefas ele tem
-// imagens anotadas, e o zip das imagens para criar a task no CVAT. O import
-// das caixas é feito na página da tarefa (procura as imagens em todos os
-// pacotes).
-export function BoxesSection({ packageName }: { packageName: string }) {
+// As caixas do pacote: em que tarefas ele tem imagens rotuladas e quanto do
+// pacote cada uma cobre. Daqui sai o zip das imagens para rotular, e o
+// import das caixas abre num pop-up (sem trocar de tela).
+export function BoxesSection({ packageName, total }: { packageName: string; total: number }) {
   const [summary, setSummary] = useState<PackageBoxes | null>(null)
+  const [importing, setImporting] = useState(false)
+  const [message, setMessage] = useState('')
+  const [reload, setReload] = useState(0) // muda depois de um import: o resumo é lido de novo
 
   useEffect(() => {
     let active = true
@@ -17,38 +21,47 @@ export function BoxesSection({ packageName }: { packageName: string }) {
       .then((result) => { if (active) setSummary(result) })
       .catch(() => { /* o resumo é só informativo */ })
     return () => { active = false }
-  }, [packageName])
+  }, [packageName, reload])
 
   const tasks = summary?.tasks ?? []
 
   return (
-    <div className="existing-import">
-      <div className="detail-images__heading">
-        <div>
-          <h2>Caixas (CVAT)</h2>
-          <p>
-            {tasks.length > 0
-              ? 'Imagens deste pacote anotadas em cada tarefa:'
-              : 'Nenhuma imagem deste pacote está numa tarefa ainda. Baixe as imagens, crie a task no CVAT e importe o export na página da tarefa.'}
-          </p>
-        </div>
-        <a className="button button--secondary" download href={cvatZipUrl(packageName)}>
-          Baixar imagens para o CVAT
-        </a>
+    <section className="side-section">
+      <div className="side-section__head">
+        <h2>Caixas</h2>
+        <span>{tasks.length} tarefa(s)</span>
       </div>
-      {tasks.length > 0 && (
-        <div className="import-report__stats">
-          {tasks.map((item) => (
-            <span key={item.task}>
-              <Link to={`/tarefas/${encodeURIComponent(item.task)}`}><strong>{item.task}</strong></Link>
-              {' '}{fmt(item.images)} imagem(ns) · {fmt(item.boxes)} caixa(s)
-            </span>
-          ))}
-        </div>
+      {summary && tasks.length === 0 && (
+        <p className="side-section__hint">Nenhuma imagem deste pacote tem caixas ainda. Baixe as imagens, rotule e importe as caixas.</p>
       )}
-      <p className="form-hint">
-        Para importar as caixas, abra a tarefa em <Link to="/tarefas">Tarefas</Link>.
-      </p>
-    </div>
+      {tasks.length > 0 && (
+        <ul className="task-list">
+          {tasks.map((item) => (
+            <li key={item.task}>
+              <Link className="task-row" title="Abrir a tarefa" to={`/tarefas/${encodeURIComponent(item.task)}`}>
+                <span className="task-row__top">
+                  <strong>{item.task}</strong>
+                  <small>{pct(item.images, total)}</small>
+                </span>
+                <span className="task-row__bar"><span style={{ width: pct(item.images, total) }} /></span>
+                <small>{fmt(item.images)} de {fmt(total)} imagens · {fmt(item.boxes)} caixas</small>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
+      {message && <p className="side-section__message">{message}</p>}
+      <div className="side-section__actions">
+        <button className="button button--secondary button--sm" onClick={() => { setMessage(''); setImporting(true) }} type="button">Importar caixas</button>
+        <a className="button button--secondary button--sm" download href={cvatZipUrl(packageName)}>Baixar imagens para rotular</a>
+      </div>
+      {importing && (
+        <BoxImportModal
+          defaultTask={tasks.length === 1 ? tasks[0].task : undefined}
+          onApplied={(text) => { setImporting(false); setMessage(text); setReload((n) => n + 1) }}
+          onClose={() => setImporting(false)}
+        />
+      )}
+    </section>
   )
 }

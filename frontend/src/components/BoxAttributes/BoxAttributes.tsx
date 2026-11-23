@@ -72,7 +72,7 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
       onSaved?.()
     } catch (error: unknown) {
       if (error instanceof RequestError && error.status === 409) {
-        setMessage({ task: set.task, text: 'As caixas mudaram (outra edição ou um novo import do CVAT): recarregadas, confira e edite de novo.', error: true })
+        setMessage({ task: set.task, text: 'As caixas mudaram (outra edição ou um novo import): recarregadas, confira e edite de novo.', error: true })
         onSaved?.()
       } else {
         setProblems((all) => ({ ...all, [set.task]: error instanceof RequestError ? error.problems : [] }))
@@ -85,7 +85,7 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
 
   return (
     <div className="box-attributes">
-      <h3>Caixas do CVAT</h3>
+      <h3>Caixas</h3>
       {!selected && <p className="box-attributes__hint">Clique numa caixa (na imagem ou aqui) para ver os atributos.</p>}
       {withBoxes.map((set) => {
         const dirty = Object.keys(draftOf(set)).length > 0
@@ -144,7 +144,7 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
             {box && !type && (
               <>
                 <p className="box-attributes__hint">
-                  A label "{box.label}" não é um tipo de objeto com caixa do perfil: os atributos ficam como vieram do CVAT.
+                  A label "{box.label}" não é um tipo de objeto com caixa do perfil: os atributos ficam como vieram no import.
                 </p>
                 <dl className="box-attributes__values">
                   {Object.entries(box.attributes ?? {}).map(([key, value]) => (

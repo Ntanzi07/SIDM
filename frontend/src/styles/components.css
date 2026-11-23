@@ -68,7 +68,9 @@ h2 {
 
 .package-page > .back-button:first-child,
 .export-page > .back-button:first-child,
-.versions-page > .back-button:first-child {
+.versions-page > .back-button:first-child,
+.viewer-page > .back-button:first-child,
+.annotation-page > .back-button:first-child {
   display: flex;
   width: fit-content;
   height: 20px;
@@ -106,6 +108,26 @@ h2 {
     opacity: 0;
     transform: translateY(10px);
   }
+}
+
+/* uma barra fina de progresso embaixo de um título (verificadas, anotação) */
+.progress-line {
+  display: block;
+  width: 220px;
+  height: 3px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  animation: rise 560ms var(--ease) 70ms both;
+}
+
+.progress-line span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 300ms var(--ease);
 }
 
 /* rótulo pequeno em maiúsculas (fonte de um número, nome de seção) */

@@ -97,6 +97,9 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   const [error, setError] = useState('')
   const [problems, setProblems] = useState<Problem[]>([]) // os erros de validação, campo a campo
   const [message, setMessage] = useState('')
+  // Aviso rápido (a notificação no canto): o que acabou de ser salvo ou
+  // excluído. O id muda a cada aviso, mesmo com o mesmo texto.
+  const [notice, setNotice] = useState<{ id: number; text: string; sha1: string } | null>(null)
 
   // A imagem aberta, para devolver à fila ao sair da página.
   const current = useRef<ImageDetail | null>(null)
@@ -259,7 +262,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       current.current = null
       setHistory((list) => list.filter((sha) => sha !== image.sha1))
       await pull(undefined, profile)
-      setMessage('Imagem excluída.')
+      setNotice({ id: Date.now(), text: `${image.original_name} excluída.`, sha1: '' })
       ok = true
     }, 'Não foi possível excluir a imagem.')
     return ok
@@ -289,7 +292,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     } else {
       await pull(undefined, profile)
     }
-    setMessage('Anotação salva.')
+    setNotice({ id: Date.now(), text: `Anotação de ${image.original_name} salva.`, sha1: image.sha1 })
   }, 'Não foi possível salvar a anotação.'), [form, history, image, position, profile, pull, refreshSummary, run, show])
 
   const progress = {
@@ -319,6 +322,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     error,
     problems,
     message,
+    notice,
     progress,
   }
 }
