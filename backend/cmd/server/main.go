@@ -19,6 +19,7 @@ import (
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
 	"SIDM/internal/platform"
+	"SIDM/internal/versions"
 )
 
 // Ponto de entrada do servidor SIDM.
@@ -110,8 +111,14 @@ func main() {
 	exp := exports.New(expRepo, img, bx, cat, fs, ann)
 	bx.Listen(exp) // os perfis de export guardam a tarefa
 
+	verRepo := versions.NewMongoRepo(db)
+	if err := verRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar as versões no Mongo: %v", err)
+	}
+	ver := versions.New(verRepo, img, bx, ann)
+
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
-	srv := api.New(ping, cat, img, bx, imp, exp, ann)
+	srv := api.New(ping, cat, img, bx, imp, exp, ann, ver)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, srv.Routes()))

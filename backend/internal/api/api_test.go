@@ -25,6 +25,7 @@ import (
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
 	"SIDM/internal/platform"
+	"SIDM/internal/versions"
 )
 
 type testEnv struct {
@@ -36,6 +37,7 @@ type testEnv struct {
 	imp     *imports.Memory    // perfis de import
 	exp     *exports.Memory    // perfis de export
 	ann     *annotation.Memory // perfis de anotação
+	ver     *versions.Memory   // datasets e versões
 	srv     *Server
 	files   *files.Storage
 	root    string
@@ -69,9 +71,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	exp := exports.NewMemory()
 	expSvc := exports.New(exp, imgSvc, bx, svc, fs, annSvc)
 	bx.Listen(expSvc)
-	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, files: fs, root: root}
+	ver := versions.NewMemory()
+	verSvc := versions.New(ver, imgSvc, bx, annSvc)
+	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, ver: ver, files: fs, root: root}
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
-		annSvc)
+		annSvc, verSvc)
 	env.handler = env.srv.Routes()
 	return env
 }

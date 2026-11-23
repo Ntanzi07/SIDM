@@ -50,3 +50,12 @@ db.export_profiles.createIndex({ name: 1 }, { unique: true });
 // Perfis de anotação salvos (o padrão "veiculos" fica no código).
 db.createCollection("annotation_profiles");
 db.annotation_profiles.createIndex({ name: 1 }, { unique: true });
+
+// Datasets (pesquisas salvas) e as versões deles (fotos congeladas das
+// verificadas). O backend também cria estes índices ao subir.
+db.createCollection("datasets");
+db.datasets.createIndex({ name: 1 }, { unique: true });
+db.createCollection("versions");
+db.versions.createIndex({ dataset: 1, number: -1 }, { unique: true });  // o número é único por dataset
+db.createCollection("version_items");
+db.version_items.createIndex({ version: 1, sha1: 1 }, { unique: true });

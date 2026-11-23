@@ -37,6 +37,33 @@ type LabelStats struct {
 	Tasks  []TaskStats `json:"tasks"`
 }
 
+// CountLabels faz a conta do LabelStats em Go, conjunto por conjunto (a
+// mesma do aggregate do MongoRepo.LabelStats): a memória usa, e o módulo
+// versions conta com ela as caixas congeladas de uma versão.
+func CountLabels(sets []*Set) map[string]*TaskStats {
+	res := map[string]*TaskStats{}
+	for _, set := range sets {
+		ts := res[set.Task]
+		if ts == nil {
+			ts = &TaskStats{Task: set.Task, Labels: map[string]LabelCount{}}
+			res[set.Task] = ts
+		}
+		ts.Images++
+		ts.Boxes += int64(len(set.Boxes))
+		seen := map[string]bool{}
+		for _, b := range set.Boxes {
+			c := ts.Labels[b.Label]
+			c.Boxes++
+			if !seen[b.Label] {
+				seen[b.Label] = true
+				c.Images++
+			}
+			ts.Labels[b.Label] = c
+		}
+	}
+	return res
+}
+
 // statsChunk: quantos sha1 por consulta (um $in muito grande pesa no banco).
 const statsChunk = 5000
 

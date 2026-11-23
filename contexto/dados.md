@@ -21,6 +21,9 @@ guardado no banco; o export escolhe o nome de saída.
 | `image_boxes` | único por (tarefa, imagem) | `boxes` |
 | `import_profiles` | `name` único | `imports` |
 | `export_profiles` | `name` único (os padrões ficam no código) | `exports` |
+| `datasets` | `name` único | `versions` |
+| `versions` | `_id` aleatório; único por (`dataset`, `number`) | `versions` |
+| `version_items` | único por (`version`, `sha1`): a anotação congelada de cada imagem | `versions` |
 
 Índices: `mongo/init/01-init.js` (banco novo) e os `EnsureIndexes` de cada módulo (toda subida).
 

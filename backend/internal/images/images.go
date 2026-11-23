@@ -103,6 +103,8 @@ var ErrConflict = errors.New("alterado por outra pessoa")
 
 // ImageFilter: campos vazios são ignorados.
 type ImageFilter struct {
+	// IDs: só estas imagens (sha1); vazio = sem filtro.
+	IDs     []string
 	Package string
 	// Packages: a imagem está em um destes pacotes (vazio = sem filtro). Junto
 	// com Package, valem os dois.

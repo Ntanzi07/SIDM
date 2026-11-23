@@ -118,6 +118,60 @@ func hasValue(v any) bool {
 	return true
 }
 
+// CountStats faz a conta do Stats em Go, imagem por imagem (a mesma do
+// aggregate do MongoRepo.Stats): a memória usa, e o módulo versions conta com
+// ela as imagens congeladas de uma versão.
+func CountStats(imgs []*Image, spec StatsSpec) *Stats {
+	st := emptyStats(spec)
+	// cada valor de uma lista conta; um valor solto conta uma vez ($unwind)
+	add := func(c Counts, v any) {
+		switch x := v.(type) {
+		case nil:
+		case []string:
+			for _, s := range x {
+				c[s]++
+			}
+		case []any:
+			for _, e := range x {
+				c[countKey(e)]++
+			}
+		default:
+			c[countKey(x)]++
+		}
+	}
+	for _, img := range imgs {
+		st.Total++
+		st.Packages[img.Package]++
+		st.Status[img.Status]++
+		for _, k := range spec.Fields {
+			add(st.Fields[k], img.Fields[k])
+			if !hasValue(img.Fields[k]) {
+				st.Missing[k]++
+			}
+		}
+		for t, keys := range spec.Objects {
+			o, n := st.Objects[t], int64(0)
+			for _, obj := range img.Objects {
+				if obj.Type != t {
+					continue
+				}
+				n++
+				for _, k := range keys {
+					add(o.Fields[k], obj.Fields[k])
+					if !hasValue(obj.Fields[k]) {
+						o.Missing[k]++
+					}
+				}
+			}
+			o.Count += n
+			if n > 0 {
+				o.Images++
+			}
+		}
+	}
+	return st
+}
+
 // countKey: o valor como chave do Counts.
 func countKey(v any) string {
 	switch x := v.(type) {

@@ -1,0 +1,197 @@
+package versions
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+
+	"SIDM/internal/platform"
+)
+
+// Routes são as rotas do módulo.
+//
+//	GET    /datasets                               os datasets, com a versão mais nova
+//	POST   /datasets                               cria (X-User)
+//	GET    /datasets/{name}                        um dataset
+//	PATCH  /datasets/{name}                        troca a descrição, o perfil e a query
+//	DELETE /datasets/{name}                        apaga (só sem versões)
+//	GET    /datasets/{name}/versions               as versões, da mais nova para a mais velha
+//	POST   /datasets/{name}/versions               congela uma versão nova (X-User, {"message"})
+//	GET    /datasets/{name}/versions/{number}      uma versão, com o resumo
+//	GET    /datasets/{name}/versions/{number}/items  as imagens congeladas, paginadas
+func (s *Service) Routes() []platform.Route {
+	return []platform.Route{
+		{Method: "GET", Path: "/datasets", Handler: s.handleListDatasets},
+		{Method: "POST", Path: "/datasets", Handler: s.handleCreateDataset},
+		{Method: "GET", Path: "/datasets/{name}", Handler: s.handleGetDataset},
+		{Method: "PATCH", Path: "/datasets/{name}", Handler: s.handleUpdateDataset},
+		{Method: "DELETE", Path: "/datasets/{name}", Handler: s.handleDeleteDataset},
+		{Method: "GET", Path: "/datasets/{name}/versions", Handler: s.handleListVersions},
+		{Method: "POST", Path: "/datasets/{name}/versions", Handler: s.handleCreateVersion},
+		{Method: "GET", Path: "/datasets/{name}/versions/{number}", Handler: s.handleGetVersion},
+		{Method: "GET", Path: "/datasets/{name}/versions/{number}/items", Handler: s.handleItems},
+	}
+}
+
+// writeErr: 400 para pedido inválido (deste módulo ou da pesquisa do
+// images), 404, 409; o resto é 500.
+func writeErr(w http.ResponseWriter, err error) {
+	var conflict *ConflictError
+	switch {
+	case errors.Is(err, platform.ErrInvalid):
+		platform.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, platform.ErrNotFound):
+		platform.WriteError(w, http.StatusNotFound, "não encontrado")
+	case errors.Is(err, platform.ErrDuplicate):
+		platform.WriteError(w, http.StatusConflict, "já existe um dataset com esse nome")
+	case errors.As(err, &conflict):
+		platform.WriteError(w, http.StatusConflict, conflict.Msg)
+	default:
+		platform.ServerError(w, err)
+	}
+}
+
+// user: quem está mexendo (X-User obrigatório para criar).
+func user(w http.ResponseWriter, r *http.Request) (string, bool) {
+	u := r.Header.Get("X-User")
+	if u == "" {
+		platform.WriteError(w, http.StatusBadRequest, "informe quem está criando no header X-User")
+		return "", false
+	}
+	return u, true
+}
+
+func decode(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(v); err != nil {
+		platform.WriteError(w, http.StatusBadRequest, "JSON inválido: "+err.Error())
+		return false
+	}
+	return true
+}
+
+func (s *Service) handleListDatasets(w http.ResponseWriter, r *http.Request) {
+	list, err := s.ListDatasets(r.Context())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, platform.Page[Dataset]{Total: int64(len(list)), Items: list})
+}
+
+func (s *Service) handleCreateDataset(w http.ResponseWriter, r *http.Request) {
+	u, ok := user(w, r)
+	if !ok {
+		return
+	}
+	var in DatasetInput
+	if !decode(w, r, &in) {
+		return
+	}
+	d, err := s.CreateDataset(r.Context(), in, u)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusCreated, d)
+}
+
+func (s *Service) handleGetDataset(w http.ResponseWriter, r *http.Request) {
+	d, err := s.FindDataset(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, d)
+}
+
+func (s *Service) handleUpdateDataset(w http.ResponseWriter, r *http.Request) {
+	var in DatasetInput
+	if !decode(w, r, &in) {
+		return
+	}
+	d, err := s.UpdateDataset(r.Context(), r.PathValue("name"), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, d)
+}
+
+func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
+	if err := s.DeleteDataset(r.Context(), r.PathValue("name")); err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) handleListVersions(w http.ResponseWriter, r *http.Request) {
+	list, err := s.ListVersions(r.Context(), r.PathValue("name"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, platform.Page[Version]{Total: int64(len(list)), Items: list})
+}
+
+func (s *Service) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
+	u, ok := user(w, r)
+	if !ok {
+		return
+	}
+	var in struct {
+		Message string `json:"message"`
+	}
+	if !decode(w, r, &in) {
+		return
+	}
+	v, err := s.CreateVersion(r.Context(), r.PathValue("name"), in.Message, u)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusCreated, v)
+}
+
+// number: o {number} da rota ("3" ou "v3").
+func number(w http.ResponseWriter, r *http.Request) (int, bool) {
+	raw := r.PathValue("number")
+	if len(raw) > 1 && (raw[0] == 'v' || raw[0] == 'V') {
+		raw = raw[1:]
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		platform.WriteError(w, http.StatusBadRequest, "número de versão inválido: "+r.PathValue("number"))
+		return 0, false
+	}
+	return n, true
+}
+
+func (s *Service) handleGetVersion(w http.ResponseWriter, r *http.Request) {
+	n, ok := number(w, r)
+	if !ok {
+		return
+	}
+	v, err := s.FindVersion(r.Context(), r.PathValue("name"), n)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, v)
+}
+
+func (s *Service) handleItems(w http.ResponseWriter, r *http.Request) {
+	n, ok := number(w, r)
+	if !ok {
+		return
+	}
+	q := r.URL.Query()
+	items, total, err := s.Items(r.Context(), r.PathValue("name"), n,
+		platform.IntParam(q, "limit", 50, 1, 500), platform.IntParam(q, "skip", 0, 0, 1<<31))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, platform.Page[Item]{Total: total, Items: items})
+}

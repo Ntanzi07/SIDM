@@ -37,6 +37,14 @@ tags:
       CVAT). O padrão `veiculos` reproduz os campos de sempre, com os códigos do
       nome v2. Cada pacote tem um perfil (`profile`), e as imagens guardam a
       anotação em `fields` e `objects`.
+  - name: versões
+    description: |
+      **Datasets** (uma pesquisa salva: perfil de anotação, pacotes, filtros e
+      tarefas) e as **versões** deles: fotos congeladas das imagens
+      **verificadas** que passavam, com a anotação de cada uma (campos, objetos
+      e caixas por tarefa), quem criou, quando e uma mensagem. As imagens não
+      são copiadas (no disco já são imutáveis); uma versão nunca muda: corrigir
+      gera a próxima.
   - name: caixas
     description: |
       Caixas (bounding boxes) anotadas no CVAT, por **tarefa** (ex.: `capacete`,
@@ -1110,6 +1118,159 @@ paths:
                   items: { type: array, items: { $ref: "#/components/schemas/Image" } }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /datasets:
+    get:
+      tags: [versões]
+      summary: Os datasets, com a versão mais nova de cada um
+      responses:
+        "200":
+          description: Lista.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Dataset" } }
+    post:
+      tags: [versões]
+      summary: Cria um dataset
+      description: |
+        Os filtros são os da Pesquisa (`fields.<campo>`, `objects.<tipo>.<campo>`)
+        e são conferidos rodando a pesquisa: um campo que o perfil não tem é 400.
+      parameters:
+        - $ref: "#/components/parameters/XUserRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DatasetInput" }
+      responses:
+        "201":
+          description: Criado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dataset" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /datasets/{name}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [versões]
+      summary: Um dataset
+      responses:
+        "200":
+          description: O dataset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dataset" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [versões]
+      summary: Troca a descrição, o perfil e a query
+      description: O nome não muda (as versões apontam para ele). As versões já criadas não mudam.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DatasetInput" }
+      responses:
+        "200":
+          description: O dataset.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Dataset" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [versões]
+      summary: Apaga um dataset sem versões
+      responses:
+        "204": { description: Apagado. }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+  /datasets/{name}/versions:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [versões]
+      summary: As versões do dataset, da mais nova para a mais velha
+      responses:
+        "200":
+          description: Lista.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/Version" } }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [versões]
+      summary: Congela uma versão nova
+      description: |
+        As imagens **verificadas** que passam na query agora, com a anotação e as
+        caixas das tarefas (as da query; nenhuma = todas). O número é o próximo
+        do dataset. Nenhuma imagem passando é 400.
+      parameters:
+        - $ref: "#/components/parameters/XUserRequired"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                message: { type: string, example: "corrigidas 40 placas da coleta de outubro" }
+      responses:
+        "201":
+          description: A versão.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /datasets/{name}/versions/{number}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+      - { name: number, in: path, required: true, description: "O número (3 ou v3).", schema: { type: string } }
+    get:
+      tags: [versões]
+      summary: Uma versão, com o resumo
+      responses:
+        "200":
+          description: A versão.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Version" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /datasets/{name}/versions/{number}/items:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+      - { name: number, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [versões]
+      summary: As imagens congeladas da versão (em ordem de sha1)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 50, minimum: 1, maximum: 500 }
+        - $ref: "#/components/parameters/Skip"
+      responses:
+        "200":
+          description: Página.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/VersionItem" } }
+        "404": { $ref: "#/components/responses/NotFound" }
   /boxes/packages:
     get:
       tags: [caixas]
@@ -1692,6 +1853,81 @@ components:
                     name: { type: string }
 
   schemas:
+    DatasetQuery:
+      type: object
+      properties:
+        packages: { type: array, items: { type: string }, description: "Vazio = todos os pacotes do perfil." }
+        filters:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string, example: fields.day_time }
+              value: { type: string, example: night }
+        tasks: { type: array, items: { type: string }, description: "As caixas destas tarefas. Vazio = todas." }
+    DatasetInput:
+      type: object
+      properties:
+        name: { type: string, example: motos-noite }
+        profile: { type: string, example: capacete-moto }
+        description: { type: string }
+        query: { $ref: "#/components/schemas/DatasetQuery" }
+    Dataset:
+      type: object
+      properties:
+        name: { type: string }
+        profile: { type: string }
+        description: { type: string }
+        query: { $ref: "#/components/schemas/DatasetQuery" }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        latest:
+          type: object
+          description: A versão mais nova (ausente se não há).
+          properties:
+            number: { type: integer }
+            message: { type: string }
+            created_by: { type: string }
+            created_at: { type: string, format: date-time }
+            images: { type: integer }
+    Version:
+      type: object
+      properties:
+        id: { type: string }
+        dataset: { type: string }
+        number: { type: integer }
+        message: { type: string }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        profile: { type: string }
+        query: { $ref: "#/components/schemas/DatasetQuery" }
+        tasks: { type: array, items: { type: string }, description: "As tarefas congeladas." }
+        summary:
+          type: object
+          description: O resumo para o dashboard, contado ao criar (as mesmas contas do /images/stats e do /boxes/stats).
+          properties:
+            images: { type: object, description: "Como a resposta do GET /images/stats." }
+            labels: { type: array, items: { type: object }, description: "Como os tasks do GET /boxes/stats." }
+    VersionItem:
+      type: object
+      properties:
+        sha1: { type: string }
+        package: { type: string }
+        file_name: { type: string }
+        ext: { type: string }
+        fields: { type: object, additionalProperties: true }
+        objects: { type: array, items: { type: object } }
+        boxes:
+          type: object
+          description: Tarefa → as caixas (com o tamanho da imagem no CVAT).
+          additionalProperties:
+            type: object
+            properties:
+              width: { type: integer }
+              height: { type: integer }
+              boxes: { type: array, items: { type: object } }
+        hash: { type: string, description: "O sha1 da anotação: mudou entre versões = a anotação mudou." }
     Counts:
       type: object
       description: Valor → quantidade.

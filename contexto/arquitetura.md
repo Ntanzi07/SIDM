@@ -14,6 +14,7 @@ mexem nelas pelo `Service` dele.
 | `boxes` | módulo | tarefas de anotação, caixas do CVAT (import COCO, `cvat.zip`) | `annotation_tasks`, `image_boxes` |
 | `imports` | módulo | perfis de import, raio-x de arquivo, import de CSV/INI nos rascunhos | `import_profiles` |
 | `exports` | módulo | perfis de export salvos, preview e download do zip | `export_profiles` |
+| `versions` | módulo | datasets (pesquisas salvas) e versões congeladas deles, com o resumo para o dashboard | `datasets`, `versions`, `version_items` |
 | `filename` | biblioteca pura | nome v2 (formatar e ler), tabelas de códigos, sanitização | — |
 | `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import para os campos de um perfil de anotação (`annotation.Values`) | — |
 | `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC | — |

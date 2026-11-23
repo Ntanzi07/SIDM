@@ -98,6 +98,9 @@ func (f ImageFilter) toBSON() bson.D {
 			filter = append(filter, bson.E{Key: field, Value: value})
 		}
 	}
+	if len(f.IDs) > 0 {
+		add("_id", bson.D{{Key: "$in", Value: f.IDs}})
+	}
 	switch {
 	case len(f.Packages) == 0:
 		add("package", f.Package)
