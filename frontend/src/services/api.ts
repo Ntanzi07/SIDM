@@ -739,7 +739,8 @@ export type FolderLevel = {
 export type ExportProfile = {
   name: string
   description?: string
-  format: 'coco' | 'yolo' | 'voc'
+  // images = só as imagens com o nome de saída e um anotacoes.csv (sem caixas, sem tarefa)
+  format: 'coco' | 'yolo' | 'voc' | 'images'
   layout?: 'split' | 'folders' // split = train/valid/test (padrão)
   folders?: FolderLevel[]
   file_name?: string // modelo do nome dos arquivos; vazio = o nome do SIDM (v2)

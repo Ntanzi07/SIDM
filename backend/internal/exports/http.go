@@ -314,7 +314,11 @@ func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(items) == 0 {
-		platform.WriteError(w, http.StatusBadRequest, fmt.Sprintf("nenhuma imagem verificada e anotada em %s passa nos filtros deste perfil", tasksText(p)))
+		msg := "nenhuma imagem verificada passa nos filtros deste perfil"
+		if p.NeedsTasks() {
+			msg = fmt.Sprintf("nenhuma imagem verificada e anotada em %s passa nos filtros deste perfil", tasksText(p))
+		}
+		platform.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 

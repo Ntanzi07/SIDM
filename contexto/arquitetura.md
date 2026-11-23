@@ -17,7 +17,7 @@ mexem nelas pelo `Service` dele.
 | `versions` | módulo | datasets (pesquisas salvas) e versões congeladas deles, com o resumo para o dashboard | `datasets`, `versions`, `version_items` |
 | `filename` | biblioteca pura | nome v2 (formatar e ler), tabelas de códigos, sanitização | — |
 | `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import para os campos de um perfil de anotação (`annotation.Values`) | — |
-| `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC | — |
+| `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC e só imagens (com `anotacoes.csv`) | — |
 | `files` | biblioteca | disco: receber com hash, guardar, mover, apagar | — |
 | `crypt` | biblioteca | abrir imagens criptografadas dos equipamentos | — |
 | `platform` | comum | erros (`ErrNotFound`, `ErrDuplicate`), `Route`, `Page[T]`, `WriteJSON`, `UserFrom`, conexão Mongo, `mongotest` | — |

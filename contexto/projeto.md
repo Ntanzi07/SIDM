@@ -22,7 +22,8 @@ criar pacote ─▶ upload ─▶ (import de CSV/INI) ─▶ fila de anotação 
   "placa", "capacete"). A mesma imagem pode ter caixas em várias tarefas. O COCO do CVAT
   é importado na página da tarefa e casa com as imagens do banco todo.
 - **Export:** escolhe uma tarefa e um perfil de export e gera o zip do dataset, só com as
-  imagens verificadas e anotadas naquela tarefa.
+  imagens verificadas e anotadas naquela tarefa. O formato **só imagens** (`images`) não
+  usa tarefa: leva as verificadas renomeadas e um `anotacoes.csv` com os dados anotados.
 
 ## Stack
 
