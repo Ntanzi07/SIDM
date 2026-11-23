@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listPackageTasks, listPackages, type PackageSummary } from '../../services/api'
 import type { Package } from '../../types/package'
+import { GridPicker, Menu, SearchField, SearchIcon } from '../../components/Toolbar/Toolbar'
+import { COLUMNS, savedColumns, saveColumns, type Columns, type MenuOption } from '../../components/Toolbar/columns'
 import './Packages.css'
 
 // "há 3 dias"; vazio quando a data falta (pacotes antigos vêm sem ela)
@@ -11,15 +13,6 @@ function formatUpdatedAt(date: string) {
   const days = Math.max(0, Math.floor((Date.now() - time) / 86400000))
   if (days === 0) return 'hoje'
   return `há ${days} ${days === 1 ? 'dia' : 'dias'}`
-}
-
-function SearchIcon() {
-  return (
-    <svg aria-hidden="true" fill="none" height="16" viewBox="0 0 24 24" width="16">
-      <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="1.8" />
-      <path d="m20 20-3.5-3.5" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
-    </svg>
-  )
 }
 
 // index: a posição na grade, para a entrada em cascata (cada cartão sobe um
@@ -74,86 +67,7 @@ function PackageCard({ packageItem, index, onClick }: { packageItem: Package; in
   )
 }
 
-type MenuOption = { value: string; label: string }
-
-// Um menu "rótulo: valor ⌄" com as opções embaixo; fecha ao escolher ou ao
-// clicar fora.
-// marked: o filtro está aplicado (o rótulo fica em destaque).
-function Menu({ label, value, options, onChange, marked = false }: { label: string; value: string; options: MenuOption[]; onChange: (value: string) => void; marked?: boolean }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const close = (event: MouseEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', close)
-    return () => document.removeEventListener('mousedown', close)
-  }, [open])
-  const current = options.find((option) => option.value === value) ?? options[0]
-  return (
-    <div className="filter-menu" ref={ref}>
-      <button aria-expanded={open} className={marked ? 'filter-button filter-button--set' : 'filter-button'} onClick={() => setOpen((isOpen) => !isOpen)} type="button">
-        {label} <strong>{current?.label}</strong> <span>⌄</span>
-      </button>
-      {open && (
-        <div className="filter-menu__options">
-          {options.map((option) => (
-            <button
-              className={option.value === value ? 'filter-menu__option filter-menu__option--active' : 'filter-menu__option'}
-              key={option.value}
-              onClick={() => {
-                onChange(option.value)
-                setOpen(false)
-              }}
-              type="button"
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Quantas colunas a grade tem (1 = lista: a capa à esquerda, o nome à
-// direita). Fica guardado no navegador de quem usa.
-const COLUMNS = [5, 4, 3, 2, 1] as const
-type Columns = (typeof COLUMNS)[number]
 const COLUMNS_KEY = 'sidm.packages.columns'
-
-function savedColumns(): Columns {
-  try {
-    const n = Number(localStorage.getItem(COLUMNS_KEY))
-    return (COLUMNS as readonly number[]).includes(n) ? (n as Columns) : 3
-  } catch {
-    return 3
-  }
-}
-
-function GridIcon({ columns }: { columns: Columns }) {
-  if (columns === 1) {
-    return (
-      <svg aria-hidden="true" height="14" viewBox="0 0 16 14" width="16">
-        <rect fill="currentColor" height="4" rx="1" width="5" x="0" y="0" />
-        <rect fill="currentColor" height="1.6" rx="0.8" width="9" x="7" y="1.2" />
-        <rect fill="currentColor" height="4" rx="1" width="5" x="0" y="5" />
-        <rect fill="currentColor" height="1.6" rx="0.8" width="9" x="7" y="6.2" />
-        <rect fill="currentColor" height="4" rx="1" width="5" x="0" y="10" />
-        <rect fill="currentColor" height="1.6" rx="0.8" width="9" x="7" y="11.2" />
-      </svg>
-    )
-  }
-  const w = (16 - (columns - 1) * 1.5) / columns
-  return (
-    <svg aria-hidden="true" height="14" viewBox="0 0 16 14" width="16">
-      {Array.from({ length: columns }, (_, i) => (
-        <rect fill="currentColor" height="14" key={i} rx="1" width={w} x={i * (w + 1.5)} y="0" />
-      ))}
-    </svg>
-  )
-}
 
 type SortBy = 'updated' | 'name' | 'creator' | 'profile' | 'task'
 
@@ -172,15 +86,11 @@ export function PackagesPage() {
   const [sortBy, setSortBy] = useState<SortBy>('updated')
   const [profileFilter, setProfileFilter] = useState('') // vazio = todos
   const [taskFilter, setTaskFilter] = useState('')
-  const [columns, setColumns] = useState<Columns>(savedColumns)
+  const [columns, setColumns] = useState<Columns>(() => savedColumns(COLUMNS_KEY, 3))
 
   function chooseColumns(value: Columns) {
     setColumns(value)
-    try {
-      localStorage.setItem(COLUMNS_KEY, String(value))
-    } catch {
-      // sem armazenamento (modo privado): vale só nesta visita
-    }
+    saveColumns(COLUMNS_KEY, value)
   }
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -264,16 +174,7 @@ export function PackagesPage() {
       </div>
 
       <div className="package-toolbar">
-        <label className="search-field" htmlFor="package-search">
-          <SearchIcon />
-          <input
-            id="package-search"
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Pesquisar pacote pelo nome"
-            type="search"
-            value={query}
-          />
-        </label>
+        <SearchField id="package-search" onChange={setQuery} placeholder="Pesquisar pacote pelo nome" value={query} />
         <div className="package-toolbar__actions">
           {!loading && !error && (
             <span className="package-toolbar__count">{filteredPackages.length} de {packages.length} pacote(s)</span>
@@ -281,20 +182,7 @@ export function PackagesPage() {
           <Menu label="Perfil" marked={Boolean(profileFilter)} onChange={setProfileFilter} options={profileOptions} value={profileFilter} />
           {taskOptions.length > 1 && <Menu label="Tarefa" marked={Boolean(taskFilter)} onChange={setTaskFilter} options={taskOptions} value={taskFilter} />}
           <Menu label="Ordenar por" onChange={(value) => setSortBy(value as SortBy)} options={SORTS} value={sortBy} />
-          <div aria-label="Colunas da grade" className="grid-picker" role="group">
-            {COLUMNS.map((value) => (
-              <button
-                aria-pressed={columns === value}
-                className={columns === value ? 'grid-picker__option grid-picker__option--active' : 'grid-picker__option'}
-                key={value}
-                onClick={() => chooseColumns(value)}
-                title={value === 1 ? 'Lista' : `${value} colunas`}
-                type="button"
-              >
-                <GridIcon columns={value} />
-              </button>
-            ))}
-          </div>
+          <GridPicker onChange={chooseColumns} options={COLUMNS} value={columns} />
           {filtering && (
             <button className="filter-clear" onClick={() => { setQuery(''); setProfileFilter(''); setTaskFilter('') }} type="button">
               Limpar

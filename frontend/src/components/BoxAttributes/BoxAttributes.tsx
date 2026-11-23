@@ -4,6 +4,7 @@ import { boxSetVersion, RequestError, updateBoxAttributes, type BoxSet, type Pro
 import type { AnnotationProfile, FormValues, ObjectType } from '../../types/annotation'
 import { displayValue, fieldLabel, fromFormValue, toFormValue } from '../../utils/annotationForm'
 import { boxPending, boxType, colorOf, type BoxRef } from '../../utils/boxes'
+import { useTaskColors } from '../../utils/taskColors'
 import './BoxAttributes.css'
 
 // O que foi digitado e ainda não salvo, por tarefa. Vale só para a versão
@@ -25,6 +26,7 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
   const [problems, setProblems] = useState<Record<string, Problem[]>>({})
   const [message, setMessage] = useState<{ task: string; text: string; error: boolean } | null>(null)
   const [saving, setSaving] = useState('')
+  useTaskColors()
   const pending = boxPending(profile, sets)
   const withBoxes = sets.filter((set) => set.boxes.length > 0)
   if (withBoxes.length === 0) return null
@@ -107,7 +109,7 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
                     className={index === pick ? 'box-attributes__chip box-attributes__chip--on' : 'box-attributes__chip'}
                     key={index}
                     onClick={() => onSelect(index === pick ? null : ref)}
-                    style={{ borderColor: colorOf(b.label) }}
+                    style={{ borderColor: colorOf(b.label, set.task) }}
                     title={pending(ref) ? 'atributo obrigatório faltando' : undefined}
                     type="button"
                   >

@@ -327,6 +327,60 @@ func TestZipParaOCVAT(t *testing.T) {
 	env.cat.Packages["vazio"] = catalog.Package{Name: "vazio"}
 	assertStatus(t, env.do("GET", "/packages/vazio/cvat.zip", nil, nil), http.StatusNotFound)
 	assertStatus(t, env.do("GET", "/packages/nao-existe/cvat.zip", nil, nil), http.StatusNotFound)
+
+	// vários pacotes num zip só: as do pacote de teste (o vazio não soma nada)
+	rec = env.do("GET", "/boxes/images.zip?package="+testPkg+"&package=vazio&package="+testPkg, nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, "2-pacotes-imagens.zip") {
+		t.Errorf("Content-Disposition = %q", cd)
+	}
+	zr, err = zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil || len(zr.File) != 2 {
+		t.Fatalf("zip de vários: %v, %d arquivos", err, len(zr.File))
+	}
+	assertStatus(t, env.do("GET", "/boxes/images.zip", nil, nil), http.StatusBadRequest)
+	assertStatus(t, env.do("GET", "/boxes/images.zip?package=vazio", nil, nil), http.StatusNotFound)
+	assertStatus(t, env.do("GET", "/boxes/images.zip?package=nao-existe", nil, nil), http.StatusNotFound)
+}
+
+// As cores das labels: guardadas por tarefa; só de labels da lista; editar
+// sem mandar cores mantém as de antes; {} tira.
+func TestCoresDasLabels(t *testing.T) {
+	env := newTestEnv(t)
+	type task struct {
+		Colors map[string]string `json:"colors"`
+	}
+	get := func() map[string]string {
+		var out task
+		rec := env.do("GET", "/tasks/capacete", nil, nil)
+		assertStatus(t, rec, http.StatusOK)
+		decode(t, rec, &out)
+		return out.Colors
+	}
+	assertStatus(t, env.doJSON("POST", "/tasks", `{"name":"capacete","labels":["helmet","no_helmet"],"colors":{"helmet":"#FF8A4C","outra":"#000000"}}`), http.StatusCreated)
+	if c := get(); len(c) != 1 || c["helmet"] != "#ff8a4c" {
+		t.Errorf("cores criadas = %v", c)
+	}
+	assertStatus(t, env.doJSON("POST", "/tasks", `{"name":"x","labels":["a"],"colors":{"a":"laranja"}}`), http.StatusBadRequest)
+
+	// editar sem cores: mantém; a label que saiu leva a cor junto
+	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"capacete","labels":["helmet","no_helmet"]}`), http.StatusOK)
+	if c := get(); c["helmet"] != "#ff8a4c" {
+		t.Errorf("sem cores no PUT, mudou: %v", c)
+	}
+	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"capacete","labels":["helmet","no_helmet"],"colors":{"no_helmet":"#6fd6a2"}}`), http.StatusOK)
+	if c := get(); len(c) != 1 || c["no_helmet"] != "#6fd6a2" {
+		t.Errorf("trocar as cores = %v", c)
+	}
+	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"capacete","labels":["helmet"]}`), http.StatusOK)
+	if c := get(); len(c) != 0 {
+		t.Errorf("a label saiu, a cor ficou: %v", c)
+	}
+	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"capacete","labels":["helmet"],"colors":{"helmet":"#123456"}}`), http.StatusOK)
+	assertStatus(t, env.doJSON("PUT", "/tasks/capacete", `{"name":"capacete","labels":["helmet"],"colors":{}}`), http.StatusOK)
+	if c := get(); len(c) != 0 {
+		t.Errorf("{} não tirou: %v", c)
+	}
 }
 
 // helmetCOCO: um COCO do CVAT com caixas "helmet" (tipo com caixa do

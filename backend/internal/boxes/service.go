@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -50,6 +51,32 @@ type TaskInput struct {
 	Name        string   `json:"name"`
 	Description string   `json:"description"`
 	Labels      []string `json:"labels"`
+	// Colors: label → #rrggbb. Ausente (nil) na edição = mantém as cores que
+	// a tarefa já tinha; {} = tira todas.
+	Colors map[string]string `json:"colors,omitempty"`
+}
+
+var colorRe = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+// cleanColors: só as cores de labels da lista, em minúsculas.
+func cleanColors(colors map[string]string, labels []string) (map[string]string, error) {
+	if len(colors) == 0 {
+		return nil, nil
+	}
+	out := map[string]string{}
+	for label, color := range colors {
+		if !slices.Contains(labels, label) {
+			continue
+		}
+		if !colorRe.MatchString(color) {
+			return nil, &InvalidError{fmt.Sprintf("cor da label %q: use #rrggbb (ex.: #ff8a4c)", label)}
+		}
+		out[label] = strings.ToLower(color)
+	}
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return out, nil
 }
 
 // InvalidError: o pedido não passa na validação (vira 400).
@@ -69,6 +96,16 @@ func (in *TaskInput) normalize() error {
 		return err
 	}
 	in.Labels = labels
+	if in.Colors != nil {
+		colors, err := cleanColors(in.Colors, labels)
+		if err != nil {
+			return err
+		}
+		if colors == nil {
+			colors = map[string]string{} // {} pedido: tira as cores
+		}
+		in.Colors = colors
+	}
 	return nil
 }
 
@@ -100,11 +137,18 @@ func (s *Service) CreateTask(ctx context.Context, in TaskInput, user string) (*T
 		return nil, err
 	}
 	now := s.now()
-	t := &Task{Name: in.Name, Description: in.Description, Labels: in.Labels, CreatedBy: user, CreatedAt: now, UpdatedAt: now}
+	t := &Task{Name: in.Name, Description: in.Description, Labels: in.Labels, Colors: nonEmpty(in.Colors), CreatedBy: user, CreatedAt: now, UpdatedAt: now}
 	if err := s.repo.CreateTask(ctx, t); err != nil {
 		return nil, err
 	}
 	return t, nil
+}
+
+func nonEmpty(m map[string]string) map[string]string {
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 // FindTask busca uma tarefa (platform.ErrNotFound se não existe).
@@ -130,7 +174,14 @@ func (s *Service) UpdateTask(ctx context.Context, oldName string, in TaskInput) 
 	if err := in.normalize(); err != nil {
 		return nil, err
 	}
-	t := &Task{Name: in.Name, Description: in.Description, Labels: in.Labels,
+	colors := in.Colors
+	if colors == nil {
+		// sem cores no pedido: as de antes, das labels que continuam
+		if colors, err = cleanColors(old.Colors, in.Labels); err != nil {
+			return nil, err
+		}
+	}
+	t := &Task{Name: in.Name, Description: in.Description, Labels: in.Labels, Colors: nonEmpty(colors),
 		CreatedBy: old.CreatedBy, CreatedAt: old.CreatedAt, UpdatedAt: s.now()}
 	if t.Name != oldName {
 		if _, err := s.repo.FindTask(ctx, t.Name); err == nil {

@@ -17,8 +17,9 @@ const FORMATS = [{ value: 'coco', label: 'COCO 1.0', accept: '.zip,.json,applica
 // Importar caixas sem sair do pacote: a tarefa, o formato, o arquivo e o
 // "sem objetos"; primeiro o ensaio, depois gravar. As imagens do arquivo são
 // procuradas em todos os pacotes (o ensaio mostra quantas por pacote).
-export function BoxImportModal({ defaultTask, onClose, onApplied }: {
+export function BoxImportModal({ defaultTask, fixedTask = false, onClose, onApplied }: {
   defaultTask?: string
+  fixedTask?: boolean // aberto de dentro de uma tarefa: não troca
   onClose: () => void
   onApplied: (message: string) => void
 }) {
@@ -97,7 +98,7 @@ export function BoxImportModal({ defaultTask, onClose, onApplied }: {
             <div className="import-modal__row">
               <label className="import-field">
                 <span>Tarefa</span>
-                <select disabled={busy !== '' || tasks === null} onChange={(event) => { setTask(event.target.value); reset() }} value={task}>
+                <select disabled={busy !== '' || tasks === null || fixedTask} onChange={(event) => { setTask(event.target.value); reset() }} value={task}>
                   <option value="">{tasks === null ? 'Carregando...' : 'Escolha a tarefa'}</option>
                   {tasks?.map((name) => <option key={name} value={name}>{name}</option>)}
                 </select>

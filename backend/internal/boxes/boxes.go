@@ -27,12 +27,15 @@ import (
 // Task é uma tarefa de anotação de caixas. Os pacotes de uma tarefa não são
 // guardados: saem das imagens que foram anotadas nela (Stats).
 type Task struct {
-	Name        string    `bson:"name" json:"name"`
-	Description string    `bson:"description" json:"description"`
-	Labels      []string  `bson:"labels" json:"labels"`
-	CreatedBy   string    `bson:"created_by" json:"created_by"`
-	CreatedAt   time.Time `bson:"created_at" json:"created_at"`
-	UpdatedAt   time.Time `bson:"updated_at" json:"updated_at"`
+	Name        string   `bson:"name" json:"name"`
+	Description string   `bson:"description" json:"description"`
+	Labels      []string `bson:"labels" json:"labels"`
+	// Colors: label → cor (#rrggbb) escolhida na tela. Label sem cor usa a
+	// cor automática (pelo nome).
+	Colors    map[string]string `bson:"colors,omitempty" json:"colors,omitempty"`
+	CreatedBy string            `bson:"created_by" json:"created_by"`
+	CreatedAt time.Time         `bson:"created_at" json:"created_at"`
+	UpdatedAt time.Time         `bson:"updated_at" json:"updated_at"`
 }
 
 // DefaultTask recebe as caixas importadas antes de existirem tarefas.

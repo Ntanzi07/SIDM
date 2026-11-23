@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -28,6 +29,7 @@ import (
 //	GET    /images/{sha1}/boxes       as caixas de uma imagem, em todas as tarefas
 //	GET    /packages/{name}/boxes     por tarefa: imagens do pacote anotadas nela
 //	GET    /packages/{name}/cvat.zip  as imagens do pacote, para criar a task no CVAT
+//	GET    /boxes/images.zip?package=a&package=b  as imagens de vários pacotes num zip só
 //	GET    /boxes/packages            em quais tarefas cada pacote tem imagens
 //	GET    /boxes/stats               labels das tarefas nas imagens de uma pesquisa (GET /images/stats)
 func (s *Service) Routes() []platform.Route {
@@ -44,6 +46,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "GET", Path: "/boxes/stats", Handler: s.handleLabelStats},
 		{Method: "GET", Path: "/boxes/packages", Handler: s.handlePackageTasks},
 		{Method: "GET", Path: "/packages/{name}/cvat.zip", Handler: s.handleCVATZip},
+		{Method: "GET", Path: "/boxes/images.zip", Handler: s.handleImagesZip},
 	}
 }
 
@@ -327,37 +330,80 @@ func (s *Service) handleCVATZip(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	s.writeZip(w, r, []string{pkg.Name}, pkg.Name+"-cvat.zip")
+}
+
+// GET /boxes/images.zip?package=a&package=b
+// O mesmo zip, com as imagens de vários pacotes (para rotular de uma vez).
+// Os nomes começam pelo sha1, então não se repetem entre pacotes.
+func (s *Service) handleImagesZip(w http.ResponseWriter, r *http.Request) {
+	var names []string
+	for _, name := range r.URL.Query()["package"] {
+		if name = strings.TrimSpace(name); name == "" || slices.Contains(names, name) {
+			continue
+		}
+		pkg, ok := s.packages.PackageByName(w, r, name)
+		if !ok {
+			return
+		}
+		names = append(names, pkg.Name)
+	}
+	if len(names) == 0 {
+		platform.WriteError(w, http.StatusBadRequest, "escolha pelo menos um pacote (?package=)")
+		return
+	}
+	file := names[0] + "-imagens.zip"
+	if len(names) > 1 {
+		file = fmt.Sprintf("%d-pacotes-imagens.zip", len(names))
+	}
+	s.writeZip(w, r, names, file)
+}
+
+// writeZip manda as imagens dos pacotes num zip, gerado enquanto é baixado.
+func (s *Service) writeZip(w http.ResponseWriter, r *http.Request, packages []string, file string) {
 	ctx := r.Context()
 	// Confere antes de começar a mandar: depois do primeiro byte, não dá
 	// mais para responder com erro.
-	if _, total, err := s.images.InPackage(ctx, pkg.Name, 1, 0); err != nil {
-		platform.ServerError(w, err)
-		return
-	} else if total == 0 {
-		platform.WriteError(w, http.StatusNotFound, "o pacote não tem imagens")
+	found := false
+	for _, name := range packages {
+		if _, total, err := s.images.InPackage(ctx, name, 1, 0); err != nil {
+			platform.ServerError(w, err)
+			return
+		} else if total > 0 {
+			found = true
+		}
+	}
+	if !found {
+		msg := "o pacote não tem imagens"
+		if len(packages) > 1 {
+			msg = "os pacotes não têm imagens"
+		}
+		platform.WriteError(w, http.StatusNotFound, msg)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-cvat.zip"`, pkg.Name))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, file))
 	zw := zip.NewWriter(w)
 	var missing []string
 	const page = 500
-	for skip := int64(0); ; skip += page {
-		imgs, _, err := s.images.InPackage(ctx, pkg.Name, page, skip)
-		if err != nil {
-			platform.LogError(fmt.Errorf("cvat.zip de %s: %w", pkg.Name, err))
-			missing = append(missing, "(erro listando imagens: o zip pode estar incompleto)")
-			break
-		}
-		for _, img := range imgs {
-			if err := s.addToZip(zw, img); err != nil {
-				platform.LogError(fmt.Errorf("cvat.zip de %s: %w", pkg.Name, err))
-				missing = append(missing, img.Path)
+	for _, name := range packages {
+		for skip := int64(0); ; skip += page {
+			imgs, _, err := s.images.InPackage(ctx, name, page, skip)
+			if err != nil {
+				platform.LogError(fmt.Errorf("zip de %s: %w", name, err))
+				missing = append(missing, "(erro listando as imagens de "+name+": o zip pode estar incompleto)")
+				break
 			}
-		}
-		if len(imgs) < page {
-			break
+			for _, img := range imgs {
+				if err := s.addToZip(zw, img); err != nil {
+					platform.LogError(fmt.Errorf("zip de %s: %w", name, err))
+					missing = append(missing, img.Path)
+				}
+			}
+			if len(imgs) < page {
+				break
+			}
 		}
 	}
 	if len(missing) > 0 {
@@ -367,7 +413,7 @@ func (s *Service) handleCVATZip(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err := zw.Close(); err != nil {
-		platform.LogError(fmt.Errorf("cvat.zip de %s: %w", pkg.Name, err))
+		platform.LogError(fmt.Errorf("zip de %s: %w", file, err))
 	}
 }
 

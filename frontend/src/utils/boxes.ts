@@ -1,12 +1,21 @@
 import type { BoxSet } from '../services/api'
 import type { AnnotationProfile, ObjectType } from '../types/annotation'
+import { taskColor } from './taskColors'
 
 // Uma caixa: a tarefa e a posição dela na lista da tarefa.
 export type BoxRef = { task: string; index: number }
 
-// Cor fixa por label (a mesma label tem sempre a mesma cor).
-const BOX_COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d']
-export function colorOf(label: string): string {
+// A cor de uma label: a escolhida na tarefa (Tarefas), ou uma fixa pelo nome
+// (a mesma label tem sempre a mesma cor). Quem desenha chama useTaskColors()
+// para redesenhar quando as cores escolhidas chegam.
+export const BOX_COLORS = ['#e11d48', '#2563eb', '#16a34a', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d']
+export function colorOf(label: string, task?: string): string {
+  const chosen = taskColor(task, label)
+  if (chosen) return chosen
+  return autoColor(label)
+}
+
+export function autoColor(label: string): string {
   let hash = 0
   for (const char of label) hash = (hash * 31 + char.charCodeAt(0)) | 0
   return BOX_COLORS[Math.abs(hash) % BOX_COLORS.length]

@@ -42,6 +42,16 @@ type Diff struct {
 	Removed   []ItemRef    `json:"removed"`
 	Changed   []ItemRef    `json:"changed"`
 	Unchanged int          `json:"unchanged"`
+	// Counts: os tamanhos das listas (vêm mesmo com ?summary=1, que manda
+	// as listas vazias: para a linha do tempo não baixar milhares de nomes).
+	Counts DiffCounts `json:"counts"`
+}
+
+type DiffCounts struct {
+	Added     int `json:"added"`
+	Removed   int `json:"removed"`
+	Changed   int `json:"changed"`
+	Unchanged int `json:"unchanged"`
 }
 
 // Os estados de uma imagem no diff.
@@ -97,9 +107,26 @@ func (s *Service) pair(ctx context.Context, name string, from, to int) (*Version
 	if _, err := s.repo.FindDataset(ctx, name); err != nil {
 		return nil, nil, err
 	}
+	if from == Now {
+		return nil, nil, &InvalidError{"o agora só pode ser o lado novo do diff (to=atual)"}
+	}
 	var vt *Version
 	var err error
-	if to == 0 {
+	if to == Now {
+		if vt, err = s.Current(ctx, name); err != nil {
+			return nil, nil, err
+		}
+		if from == 0 {
+			last, err := s.repo.LastVersion(ctx, name)
+			if err != nil {
+				return nil, nil, err
+			}
+			if last == nil {
+				return nil, vt, nil
+			}
+			return last, vt, nil
+		}
+	} else if to == 0 {
 		if vt, err = s.repo.LastVersion(ctx, name); err != nil {
 			return nil, nil, err
 		}
@@ -109,7 +136,7 @@ func (s *Service) pair(ctx context.Context, name string, from, to int) (*Version
 	} else if vt, err = s.repo.FindVersion(ctx, name, to); err != nil {
 		return nil, nil, err
 	}
-	if from == 0 {
+	if from == 0 && to != Now {
 		from = vt.Number - 1
 		if from == 0 {
 			return nil, vt, nil
@@ -135,11 +162,11 @@ func (s *Service) Diff(ctx context.Context, name string, from, to int) (*Diff, e
 	var old []ItemRef
 	if vf != nil {
 		d.From = vf.info()
-		if old, err = s.repo.ItemRefs(ctx, vf.ID); err != nil {
+		if old, err = s.refs(ctx, vf); err != nil {
 			return nil, err
 		}
 	}
-	cur, err := s.repo.ItemRefs(ctx, vt.ID)
+	cur, err := s.refs(ctx, vt)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +190,7 @@ func (s *Service) Diff(ctx context.Context, name string, from, to int) (*Diff, e
 			j++
 		}
 	}
+	d.Counts = DiffCounts{Added: len(d.Added), Removed: len(d.Removed), Changed: len(d.Changed), Unchanged: d.Unchanged}
 	return d, nil
 }
 
@@ -174,11 +202,11 @@ func (s *Service) DiffItem(ctx context.Context, name string, from, to int, sha1 
 	}
 	var a, b *Item
 	if vf != nil {
-		if a, err = s.findItem(ctx, vf.ID, sha1); err != nil {
+		if a, err = s.findItem(ctx, vf, sha1); err != nil {
 			return nil, err
 		}
 	}
-	if b, err = s.findItem(ctx, vt.ID, sha1); err != nil {
+	if b, err = s.findItem(ctx, vt, sha1); err != nil {
 		return nil, err
 	}
 	if a == nil && b == nil {
@@ -208,8 +236,28 @@ func (s *Service) DiffItem(ctx context.Context, name string, from, to int, sha1 
 	return d, nil
 }
 
-func (s *Service) findItem(ctx context.Context, version, sha1 string) (*Item, error) {
-	it, err := s.repo.FindItem(ctx, version, sha1)
+// refs: os itens (só sha1, nomes e hash) de uma versão gravada, ou do agora.
+func (s *Service) refs(ctx context.Context, v *Version) ([]ItemRef, error) {
+	if v.Number != 0 {
+		return s.repo.ItemRefs(ctx, v.ID)
+	}
+	out := make([]ItemRef, len(v.items))
+	for i, it := range v.items {
+		out[i] = ItemRef{SHA1: it.SHA1, Package: it.Package, FileName: it.FileName, OriginalName: it.OriginalName, Hash: it.Hash}
+	}
+	return out, nil // o snapshot já vem em ordem de sha1
+}
+
+func (s *Service) findItem(ctx context.Context, v *Version, sha1 string) (*Item, error) {
+	if v.Number == 0 {
+		for i := range v.items {
+			if v.items[i].SHA1 == sha1 {
+				return &v.items[i], nil
+			}
+		}
+		return nil, nil
+	}
+	it, err := s.repo.FindItem(ctx, v.ID, sha1)
 	if errors.Is(err, platform.ErrNotFound) {
 		return nil, nil
 	}
@@ -352,4 +400,20 @@ func same(a, b any) bool {
 	ja, _ := json.Marshal(a)
 	jb, _ := json.Marshal(b)
 	return string(ja) == string(jb)
+}
+
+// Current: o estado atual do dataset como uma versão (número 0, data de
+// agora), montado na hora e sem gravar. Sem nenhuma verificada, volta vazio
+// (total 0), sem erro.
+func (s *Service) Current(ctx context.Context, name string) (*Version, error) {
+	d, err := s.repo.FindDataset(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	snap, err := s.snapshot(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	return &Version{Dataset: d.Name, Number: 0, Message: "Agora (ainda não salvo como versão)", CreatedAt: s.now(),
+		Profile: d.Profile, Query: d.Query, Tasks: snap.tasks, Summary: snap.summary, items: snap.items}, nil
 }

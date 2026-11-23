@@ -1,5 +1,6 @@
 import { imageFileUrl, type BoxSet } from '../../services/api'
 import { colorOf, type BoxRef } from '../../utils/boxes'
+import { useTaskColors } from '../../utils/taskColors'
 import './ImageWithBoxes.css'
 
 // A imagem com as caixas do CVAT por cima, de todas as tarefas em que ela
@@ -16,6 +17,7 @@ export function ImageWithBoxes({ sha1, alt, sets, show, selected, onSelect, pend
   onSelect?: (box: BoxRef) => void
   pending?: (box: BoxRef) => boolean
 }) {
+  useTaskColors()
   const boxes = sets
     .filter((set) => set.width > 0 && set.height > 0)
     .flatMap((set) => set.boxes.map((box, index) => ({ box, set, index })))
@@ -40,13 +42,13 @@ export function ImageWithBoxes({ sha1, alt, sets, show, selected, onSelect, pend
               top: `${(box.y / set.height) * 100}%`,
               width: `${(box.w / set.width) * 100}%`,
               height: `${(box.h / set.height) * 100}%`,
-              borderColor: colorOf(box.label),
+              borderColor: colorOf(box.label, set.task),
               borderStyle: box.occluded ? 'dashed' : 'solid',
               transform: box.rotation ? `rotate(${box.rotation}deg)` : undefined,
             }}
             title={[sets.length > 1 ? `${set.task}: ${box.label}` : box.label, box.occluded ? 'oculta' : '', isPending ? 'atributo obrigatório faltando' : '', ...Object.entries(box.attributes ?? {}).map(([k, v]) => `${k}: ${String(v)}`)].filter(Boolean).join(' · ')}
           >
-            <span style={{ background: colorOf(box.label) }}>{box.label}{isPending ? ' !' : ''}</span>
+            <span style={{ background: colorOf(box.label, set.task) }}>{box.label}{isPending ? ' !' : ''}</span>
           </div>
         )
       })}

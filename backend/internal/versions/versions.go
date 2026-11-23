@@ -89,7 +89,16 @@ type Version struct {
 	Query   Query    `bson:"query" json:"query"`
 	Tasks   []string `bson:"tasks" json:"tasks"` // as tarefas congeladas (a lista real, mesmo quando a query diz "todas")
 	Summary Summary  `bson:"summary" json:"summary"`
+
+	// items: só no "agora" (Current), que não é gravado: os itens montados
+	// na hora, no lugar dos que uma versão guarda no banco.
+	items []Item
 }
+
+// Now: o "agora" nas rotas ({number} ou ?to= = "atual"): o estado atual do
+// dataset, montado na hora como uma versão, mas sem gravar. Volta com
+// number 0.
+const Now = -1
 
 func (v *Version) info() *VersionInfo {
 	return &VersionInfo{Number: v.Number, Message: v.Message, CreatedBy: v.CreatedBy, CreatedAt: v.CreatedAt, Images: v.Summary.Images.Total}

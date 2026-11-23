@@ -438,3 +438,13 @@ func queryValue(def *annotation.Field, s string) (any, error) {
 	}
 	return def.Typed(s)
 }
+
+// ParseFilter lê a pesquisa da query (?package=&status=&fields.x=&objects.t.k=)
+// do mesmo jeito que o /images/stats. O módulo versions filtra com ela os
+// itens congelados de uma versão.
+func ParseFilter(q map[string][]string, p *annotation.Profile) (ImageFilter, error) {
+	return statsFilter(q, p)
+}
+
+// Matches: a imagem passa no filtro (a mesma regra da memória).
+func (f ImageFilter) Matches(img *Image) bool { return f.match(img) }

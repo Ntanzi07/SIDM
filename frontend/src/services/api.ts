@@ -635,6 +635,13 @@ export type PackageBoxes = {
 
 // O zip com as imagens do pacote, para criar a task no CVAT (os nomes
 // começam pelo sha1, e é assim que o export volta casando).
+// As imagens de vários pacotes num zip só (para rotular de uma vez).
+export function imagesZipUrl(packages: string[]): string {
+  const query = new URLSearchParams()
+  for (const name of packages) query.append('package', name)
+  return `${API_BASE_URL}/boxes/images.zip?${query.toString()}`
+}
+
 export function cvatZipUrl(packageName: string): string {
   return `${API_BASE_URL}/packages/${encodeURIComponent(packageName)}/cvat.zip`
 }
@@ -676,13 +683,15 @@ export type AnnotationTask = {
   name: string
   description: string
   labels: string[]
+  colors?: Record<string, string> // label → #rrggbb escolhida (sem: a automática)
   created_by?: string
   created_at?: string
   updated_at?: string
   stats?: TaskStats
 }
 
-export type TaskBody = { name: string; description: string; labels: string[] }
+// colors ausente = mantém as de antes; {} = tira todas.
+export type TaskBody = { name: string; description: string; labels: string[]; colors?: Record<string, string> }
 
 export async function listTasks(): Promise<AnnotationTask[]> {
   const response = await request<PageResponse<AnnotationTask>>('/tasks')
@@ -877,6 +886,12 @@ export async function listPackageProfiles(): Promise<Record<string, string>> {
 }
 
 // Só os nomes dos pacotes (sem buscar capa).
+// Os pacotes com os números, sem a capa (um pedido só).
+export async function listPackageSummaries(): Promise<PackageSummary[]> {
+  const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
+  return response.items
+}
+
 export async function listPackageNames(): Promise<string[]> {
   const response = await request<PageResponse<PackageSummary>>('/packages?limit=100')
   return response.items.map((item) => item.name)

@@ -369,6 +369,31 @@ paths:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /boxes/images.zip:
+    get:
+      tags: [caixas]
+      summary: Imagens de vários pacotes, num zip só
+      description: |
+        O mesmo zip do `/packages/{name}/cvat.zip`, com as imagens de todos os
+        pacotes pedidos (para rotular de uma vez). Os nomes começam pelo sha1,
+        então não se repetem entre pacotes.
+      parameters:
+        - name: package
+          in: query
+          required: true
+          description: Um pacote; repita para vários.
+          schema: { type: array, items: { type: string } }
+          style: form
+          explode: true
+      responses:
+        "200":
+          description: O zip.
+          content:
+            application/zip:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /packages/{name}/boxes:
     get:
       tags: [caixas]
@@ -1238,7 +1263,7 @@ paths:
   /datasets/{name}/versions/{number}:
     parameters:
       - { name: name, in: path, required: true, schema: { type: string } }
-      - { name: number, in: path, required: true, description: "O número (3 ou v3).", schema: { type: string } }
+      - { name: number, in: path, required: true, description: "O número (3 ou v3), ou atual: o estado de agora, montado na hora e sem gravar (volta com number 0).", schema: { type: string } }
     get:
       tags: [versões]
       summary: Uma versão, com o resumo
@@ -1273,11 +1298,37 @@ paths:
                   total: { type: integer }
                   items: { type: array, items: { $ref: "#/components/schemas/VersionItem" } }
         "404": { $ref: "#/components/responses/NotFound" }
+  /datasets/{name}/versions/{number}/stats:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+      - { name: number, in: path, required: true, description: "3, v3 ou atual (o estado de agora)", schema: { type: string } }
+      - { name: package, in: query, description: Repita para vários., schema: { type: array, items: { type: string } }, style: form, explode: true }
+      - { name: task, in: query, description: "Tarefas das caixas (repita; sem: as da versão).", schema: { type: array, items: { type: string } }, style: form, explode: true }
+    get:
+      tags: [versões]
+      summary: A pesquisa dentro de uma versão
+      description: |
+        As mesmas contas do /images/stats e do /boxes/stats, sobre os itens
+        congelados da versão (o que a imagem tinha naquele momento). Os filtros
+        são os da Pesquisa: fields.<campo>=valor e objects.<tipo>.<campo>=valor.
+      responses:
+        "200":
+          description: As contas.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  images: { type: object, description: "O mesmo formato da resposta do GET /images/stats." }
+                  labels: { type: object, description: "O mesmo formato da resposta do GET /boxes/stats." }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
   /datasets/{name}/diff:
     parameters:
       - { name: name, in: path, required: true, schema: { type: string } }
       - { name: from, in: query, description: "A versão velha (3 ou v3). Sem: a anterior à `to` (nenhuma, se a `to` é a v1: tudo entra como adicionado).", schema: { type: string } }
-      - { name: to, in: query, description: "A versão nova. Sem: a mais nova.", schema: { type: string } }
+      - { name: to, in: query, description: "A versão nova. Sem: a mais nova. atual = o estado de agora, sem gravar (sem from: contra a mais nova).", schema: { type: string } }
+      - { name: summary, in: query, description: "1 = só as contas (counts); as listas vêm vazias.", schema: { type: string, enum: ["1"] } }
     get:
       tags: [versões]
       summary: O que mudou entre duas versões
@@ -1298,7 +1349,7 @@ paths:
       - { name: name, in: path, required: true, schema: { type: string } }
       - { name: sha1, in: path, required: true, schema: { type: string } }
       - { name: from, in: query, schema: { type: string } }
-      - { name: to, in: query, schema: { type: string } }
+      - { name: to, in: query, description: "Também aceita atual.", schema: { type: string } }
     get:
       tags: [versões]
       summary: O que mudou numa imagem entre duas versões
@@ -1986,6 +2037,14 @@ components:
         removed: { type: array, items: { $ref: "#/components/schemas/DiffRef" } }
         changed: { type: array, items: { $ref: "#/components/schemas/DiffRef" } }
         unchanged: { type: integer }
+        counts:
+          type: object
+          description: Os tamanhos das listas (vêm também com summary=1).
+          properties:
+            added: { type: integer }
+            removed: { type: integer }
+            changed: { type: integer }
+            unchanged: { type: integer }
     DiffChange:
       type: object
       properties:
@@ -2389,6 +2448,11 @@ components:
           type: array
           items: { type: string }
           example: [com_capacete, sem_capacete]
+        colors:
+          type: object
+          description: "Label → cor (#rrggbb). Na edição, ausente = mantém as cores de antes; {} = tira todas. Cores de labels fora da lista são ignoradas."
+          additionalProperties: { type: string, pattern: "^#[0-9a-fA-F]{6}$" }
+          example: { com_capacete: "#6fd6a2" }
 
     Task:
       type: object
@@ -2398,6 +2462,10 @@ components:
         labels:
           type: array
           items: { type: string }
+        colors:
+          type: object
+          description: Label → cor escolhida (#rrggbb). Label sem cor usa a automática.
+          additionalProperties: { type: string }
         created_by: { type: string }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }

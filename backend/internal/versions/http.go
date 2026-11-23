@@ -20,7 +20,8 @@ import (
 //	POST   /datasets/{name}/versions               congela uma versão nova (X-User, {"message"})
 //	GET    /datasets/{name}/versions/{number}      uma versão, com o resumo
 //	GET    /datasets/{name}/versions/{number}/items  as imagens congeladas, paginadas
-//	GET    /datasets/{name}/diff?from=&to=         o que mudou entre duas versões
+//	GET    /datasets/{name}/versions/{number}/stats  a pesquisa dentro da versão (?package=&fields.x=&task=)
+//	GET    /datasets/{name}/diff?from=&to=         o que mudou entre duas versões (&summary=1: só as contas)
 //	GET    /datasets/{name}/diff/{sha1}?from=&to=  o que mudou numa imagem
 func (s *Service) Routes() []platform.Route {
 	return []platform.Route{
@@ -33,6 +34,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "POST", Path: "/datasets/{name}/versions", Handler: s.handleCreateVersion},
 		{Method: "GET", Path: "/datasets/{name}/versions/{number}", Handler: s.handleGetVersion},
 		{Method: "GET", Path: "/datasets/{name}/versions/{number}/items", Handler: s.handleItems},
+		{Method: "GET", Path: "/datasets/{name}/versions/{number}/stats", Handler: s.handleVersionStats},
 		{Method: "GET", Path: "/datasets/{name}/diff", Handler: s.handleDiff},
 		{Method: "GET", Path: "/datasets/{name}/diff/{sha1}", Handler: s.handleDiffItem},
 	}
@@ -160,6 +162,9 @@ func (s *Service) handleCreateVersion(w http.ResponseWriter, r *http.Request) {
 
 // parseNumber: "3" ou "v3".
 func parseNumber(raw string) (int, bool) {
+	if raw == "atual" || raw == "agora" {
+		return Now, true
+	}
 	if len(raw) > 1 && (raw[0] == 'v' || raw[0] == 'V') {
 		raw = raw[1:]
 	}
@@ -203,7 +208,13 @@ func (s *Service) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	v, err := s.FindVersion(r.Context(), r.PathValue("name"), n)
+	var v *Version
+	var err error
+	if n == Now {
+		v, err = s.Current(r.Context(), r.PathValue("name"))
+	} else {
+		v, err = s.FindVersion(r.Context(), r.PathValue("name"), n)
+	}
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -214,6 +225,10 @@ func (s *Service) handleGetVersion(w http.ResponseWriter, r *http.Request) {
 func (s *Service) handleItems(w http.ResponseWriter, r *http.Request) {
 	n, ok := number(w, r)
 	if !ok {
+		return
+	}
+	if n == Now {
+		platform.WriteError(w, http.StatusBadRequest, "o agora não tem itens gravados: crie uma versão")
 		return
 	}
 	q := r.URL.Query()
@@ -236,6 +251,9 @@ func (s *Service) handleDiff(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	if r.URL.Query().Get("summary") == "1" {
+		d.Added, d.Removed, d.Changed = []ItemRef{}, []ItemRef{}, []ItemRef{}
+	}
 	platform.WriteJSON(w, http.StatusOK, d)
 }
 
@@ -250,4 +268,17 @@ func (s *Service) handleDiffItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, d)
+}
+
+func (s *Service) handleVersionStats(w http.ResponseWriter, r *http.Request) {
+	n, ok := number(w, r)
+	if !ok {
+		return
+	}
+	st, err := s.VersionStats(r.Context(), r.PathValue("name"), n, r.URL.Query())
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, st)
 }

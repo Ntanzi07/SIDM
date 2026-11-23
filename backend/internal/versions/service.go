@@ -213,6 +213,63 @@ func (s *Service) CreateVersion(ctx context.Context, name, message, user string)
 	if message == "" {
 		return nil, &InvalidError{"escreva uma mensagem para a versão (o que mudou)"}
 	}
+	snap, err := s.snapshot(ctx, d)
+	if err != nil {
+		return nil, err
+	}
+	if len(snap.items) == 0 {
+		return nil, &InvalidError{"nenhuma imagem verificada passa nos filtros do dataset"}
+	}
+	items, tasks, summary := snap.items, snap.tasks, snap.summary
+
+	// O número: o próximo. Se outra pessoa criar ao mesmo tempo, o índice
+	// único (dataset, número) recusa a segunda, que tenta o seguinte.
+	for range 5 {
+		last, err := s.repo.LastVersion(ctx, d.Name)
+		if err != nil {
+			return nil, err
+		}
+		v := &Version{ID: newID(), Dataset: d.Name, Number: 1, Message: message, CreatedBy: user, CreatedAt: s.now(),
+			Profile: d.Profile, Query: d.Query, Tasks: tasks, Summary: summary}
+		if last != nil {
+			v.Number = last.Number + 1
+		}
+		for i := range items {
+			items[i].Version = v.ID
+		}
+		// os itens antes da versão: quem lê só enxerga a versão pronta
+		for start := 0; start < len(items); start += 1000 {
+			if err := s.repo.InsertItems(ctx, items[start:min(start+1000, len(items))]); err != nil {
+				_ = s.repo.DeleteItems(ctx, v.ID)
+				return nil, err
+			}
+		}
+		err = s.repo.InsertVersion(ctx, v)
+		if errors.Is(err, platform.ErrDuplicate) {
+			if derr := s.repo.DeleteItems(ctx, v.ID); derr != nil {
+				return nil, derr
+			}
+			continue
+		}
+		if err != nil {
+			_ = s.repo.DeleteItems(ctx, v.ID)
+			return nil, err
+		}
+		return v, nil
+	}
+	return nil, &ConflictError{"muitas versões criadas ao mesmo tempo; tente de novo"}
+}
+
+// snapshot: as imagens verificadas que passam na pesquisa do dataset agora,
+// com a anotação e as caixas, o hash e o resumo. É o que uma versão grava; o
+// "Agora" do Dashboard usa sem gravar.
+type snapshot struct {
+	items   []Item
+	tasks   []string
+	summary Summary
+}
+
+func (s *Service) snapshot(ctx context.Context, d *Dataset) (*snapshot, error) {
 	p, err := s.annotation.FindProfile(ctx, d.Profile)
 	if err != nil {
 		return nil, fmt.Errorf("perfil de anotação %q: %w", d.Profile, err)
@@ -220,9 +277,6 @@ func (s *Service) CreateVersion(ctx context.Context, name, message, user string)
 	ids, err := s.images.SearchIDs(ctx, d.Query.values(d.Profile))
 	if err != nil {
 		return nil, err
-	}
-	if len(ids) == 0 {
-		return nil, &InvalidError{"nenhuma imagem verificada passa nos filtros do dataset"}
 	}
 
 	// as tarefas: as da query, ou todas
@@ -275,50 +329,11 @@ func (s *Service) CreateVersion(ctx context.Context, name, message, user string)
 			imgs = append(imgs, img)
 		}
 	}
-	if len(items) == 0 {
-		return nil, &InvalidError{"nenhuma imagem verificada passa nos filtros do dataset"}
-	}
 	slices.SortFunc(items, func(a, b Item) int { return strings.Compare(a.SHA1, b.SHA1) })
 
 	summary := Summary{Images: *images.CountStats(imgs, images.SpecOf(p)), Labels: labelsOf(tasks, all, sets)}
 	summary.Images.Profile = p.Name
-
-	// O número: o próximo. Se outra pessoa criar ao mesmo tempo, o índice
-	// único (dataset, número) recusa a segunda, que tenta o seguinte.
-	for range 5 {
-		last, err := s.repo.LastVersion(ctx, d.Name)
-		if err != nil {
-			return nil, err
-		}
-		v := &Version{ID: newID(), Dataset: d.Name, Number: 1, Message: message, CreatedBy: user, CreatedAt: s.now(),
-			Profile: d.Profile, Query: d.Query, Tasks: tasks, Summary: summary}
-		if last != nil {
-			v.Number = last.Number + 1
-		}
-		for i := range items {
-			items[i].Version = v.ID
-		}
-		// os itens antes da versão: quem lê só enxerga a versão pronta
-		for start := 0; start < len(items); start += 1000 {
-			if err := s.repo.InsertItems(ctx, items[start:min(start+1000, len(items))]); err != nil {
-				_ = s.repo.DeleteItems(ctx, v.ID)
-				return nil, err
-			}
-		}
-		err = s.repo.InsertVersion(ctx, v)
-		if errors.Is(err, platform.ErrDuplicate) {
-			if derr := s.repo.DeleteItems(ctx, v.ID); derr != nil {
-				return nil, derr
-			}
-			continue
-		}
-		if err != nil {
-			_ = s.repo.DeleteItems(ctx, v.ID)
-			return nil, err
-		}
-		return v, nil
-	}
-	return nil, &ConflictError{"muitas versões criadas ao mesmo tempo; tente de novo"}
+	return &snapshot{items: items, tasks: tasks, summary: summary}, nil
 }
 
 // labelsOf: as caixas por tarefa, na ordem das tarefas, com as labels da

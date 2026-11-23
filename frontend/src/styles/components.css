@@ -41,7 +41,8 @@ h2 {
 .package-page,
 .export-page,
 .search-page,
-.versions-page {
+.versions-page,
+.tasks-page {
   width: min(1180px, calc(100% - 48px));
   max-width: none;
   margin: 0 auto;
@@ -70,7 +71,8 @@ h2 {
 .export-page > .back-button:first-child,
 .versions-page > .back-button:first-child,
 .viewer-page > .back-button:first-child,
-.annotation-page > .back-button:first-child {
+.annotation-page > .back-button:first-child,
+.tasks-page > .back-button:first-child {
   display: flex;
   width: fit-content;
   height: 20px;

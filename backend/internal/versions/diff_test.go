@@ -70,6 +70,9 @@ func TestDiffEntreVersoes(t *testing.T) {
 		!reflect.DeepEqual(refs(d.Changed), []string{"a"}) || d.Unchanged != 1 {
 		t.Errorf("diff: +%v -%v ~%v =%d", refs(d.Added), refs(d.Removed), refs(d.Changed), d.Unchanged)
 	}
+	if d.Counts != (DiffCounts{Added: 1, Removed: 1, Changed: 1, Unchanged: 1}) {
+		t.Errorf("counts = %+v", d.Counts)
+	}
 	if d.Removed[0].FileName != "b.jpg" || d.Removed[0].OriginalName != "b.jpg" {
 		t.Errorf("removida com o nome da versão velha: %+v", d.Removed[0])
 	}
@@ -149,5 +152,115 @@ func TestPlain(t *testing.T) {
 	}
 	if !same(bson.A{"x", "y"}, []any{"x", "y"}) || same([]any{"x", "y"}, []any{"y", "x"}) || !same(int32(3), 3.0) {
 		t.Error("same")
+	}
+}
+
+// A pesquisa dentro de uma versão: filtra os itens congelados (a imagem
+// mudou depois, a versão não) e conta as caixas só das que passam.
+func TestPesquisaNaVersao(t *testing.T) {
+	ctx := context.Background()
+	s, _, img, _ := newTestService()
+	if _, err := s.CreateDataset(ctx, DatasetInput{Name: "tudo", Profile: "veiculos"}, "n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateVersion(ctx, "tudo", "v1", "n"); err != nil {
+		t.Fatal(err)
+	}
+	// depois da v1: a "b" vira chuva; na v1 ela continua "clear"
+	b := img.imgs["b"]
+	b.Fields = map[string]any{"weather": "rain"}
+	img.imgs["b"] = b
+
+	all, err := s.VersionStats(ctx, "tudo", 1, map[string][]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if all.Images.Total != 3 || all.Labels.Images != 3 {
+		t.Errorf("sem filtro: %+v / %+v", all.Images, all.Labels)
+	}
+
+	rain, err := s.VersionStats(ctx, "tudo", 1, map[string][]string{"fields.weather": {"rain"}, "status": {"all"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rain.Images.Total != 1 || rain.Images.Packages["p1"] != 1 {
+		t.Errorf("chuva na v1 (só a a): %+v", rain.Images)
+	}
+	// só a tarefa pedida, com as labels zeradas que não aparecem
+	if len(rain.Labels.Tasks) != 2 {
+		t.Fatalf("tarefas: %+v", rain.Labels.Tasks)
+	}
+	only, err := s.VersionStats(ctx, "tudo", 1, map[string][]string{"task": {"capacete"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(only.Labels.Tasks) != 1 || only.Labels.Tasks[0].Boxes != 2 || only.Labels.Tasks[0].Labels["no_helmet"].Boxes != 0 {
+		t.Errorf("capacete: %+v", only.Labels.Tasks)
+	}
+	if _, ok := only.Labels.Tasks[0].Labels["no_helmet"]; !ok {
+		t.Error("a label sem caixa tem que aparecer (zero)")
+	}
+
+	p2, _ := s.VersionStats(ctx, "tudo", 1, map[string][]string{"package": {"p2"}})
+	if p2.Images.Total != 1 {
+		t.Errorf("pacote p2: %d", p2.Images.Total)
+	}
+	if _, err := s.VersionStats(ctx, "tudo", 1, map[string][]string{"fields.nao": {"x"}}); !errors.Is(err, platform.ErrInvalid) {
+		t.Errorf("campo que não existe: %v", err)
+	}
+	if _, err := s.VersionStats(ctx, "tudo", 9, nil); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("versão que não existe: %v", err)
+	}
+}
+
+// O "agora": o estado atual montado na hora, sem gravar; o diff e a pesquisa
+// funcionam com ele como se fosse uma versão.
+func TestAgora(t *testing.T) {
+	ctx := context.Background()
+	s, mem, img, _ := newTestService()
+	if _, err := s.CreateDataset(ctx, DatasetInput{Name: "tudo", Profile: "veiculos"}, "n"); err != nil {
+		t.Fatal(err)
+	}
+	// sem versão: o agora vem com as 3 verificadas e o diff é tudo novo
+	now, err := s.Current(ctx, "tudo")
+	if err != nil || now.Number != 0 || now.Summary.Images.Total != 3 {
+		t.Fatalf("agora sem versão: %+v %v", now, err)
+	}
+	if d, err := s.Diff(ctx, "tudo", 0, Now); err != nil || d.From != nil || len(d.Added) != 3 {
+		t.Errorf("diff do agora sem versão: %+v %v", d, err)
+	}
+	if _, err := s.CreateVersion(ctx, "tudo", "v1", "n"); err != nil {
+		t.Fatal(err)
+	}
+	versions, items := len(mem.Versions), len(mem.Items)
+
+	// muda a "a" e verifica a "d": o agora mostra, nada é gravado
+	a := img.imgs["a"]
+	a.Fields = map[string]any{"weather": "clear"}
+	img.imgs["a"] = a
+	dd := img.imgs["d"]
+	dd.Status = images.StatusVerified
+	img.imgs["d"] = dd
+
+	d, err := s.Diff(ctx, "tudo", 0, Now) // sem from: contra a mais nova
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.From.Number != 1 || d.To.Number != 0 || d.Counts != (DiffCounts{Added: 1, Changed: 1, Unchanged: 2}) {
+		t.Errorf("diff v1 → agora: from %+v to %+v %+v", d.From, d.To, d.Counts)
+	}
+	it, err := s.DiffItem(ctx, "tudo", 1, Now, "a")
+	if err != nil || it.Status != StatusChanged || len(it.Fields) != 1 {
+		t.Errorf("detalhe da a no agora: %+v %v", it, err)
+	}
+	st, err := s.VersionStats(ctx, "tudo", Now, map[string][]string{"fields.weather": {"clear"}})
+	if err != nil || st.Images.Total != 2 {
+		t.Errorf("pesquisa no agora (a e b claras): %+v %v", st, err)
+	}
+	if len(mem.Versions) != versions || len(mem.Items) != items {
+		t.Error("o agora gravou alguma coisa")
+	}
+	if _, err := s.Diff(ctx, "tudo", Now, 1); !errors.Is(err, platform.ErrInvalid) {
+		t.Errorf("agora como lado velho: %v", err)
 	}
 }

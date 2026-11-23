@@ -102,6 +102,14 @@ func TestMongoVersoes(t *testing.T) {
 	if ia.Status != StatusChanged || !reflect.DeepEqual(ia.Fields, []Change{{Key: "fields.tags", From: []any{"x", "y"}, To: []any{"x"}}}) {
 		t.Errorf("tags: %+v", ia)
 	}
+	// a pesquisa na versão lendo do banco: a lista volta como bson.A e conta igual
+	st, err := s.VersionStats(ctx, "motos", 4, map[string][]string{"fields.weather": {"rain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Images.Total == 0 {
+		t.Errorf("pesquisa na versão pelo banco: %+v", st.Images)
+	}
 	if d, _ := s.Diff(ctx, "motos", 3, 4); len(d.Changed) != 1 || d.Changed[0].SHA1 != "a" || d.Changed[0].FileName != "a_v2.jpg" {
 		t.Errorf("diff tags: %+v", d)
 	}

@@ -91,6 +91,25 @@ func TestVersoesDeDataset(t *testing.T) {
 	if item.Status != versions.StatusAdded || len(item.Fields) == 0 {
 		t.Errorf("detalhe: %+v", item)
 	}
+	rec = env.do("GET", "/datasets/motos-noite/diff?summary=1", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var short versions.Diff
+	decode(t, rec, &short)
+	if len(short.Added) != 0 || short.Counts.Added != 1 || short.Counts.Unchanged != 1 {
+		t.Errorf("summary=1: %+v", short)
+	}
+	// o agora: GET .../versions/atual, diff até ele e a pesquisa nele
+	rec = env.do("GET", "/datasets/motos-noite/versions/atual", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var now versions.Version
+	decode(t, rec, &now)
+	if now.Number != 0 || now.Summary.Images.Total != 2 {
+		t.Errorf("agora: %+v", now)
+	}
+	rec = env.do("GET", "/datasets/motos-noite/diff?to=atual&summary=1", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	assertStatus(t, env.do("GET", "/datasets/motos-noite/versions/atual/stats", nil, nil), http.StatusOK)
+	assertStatus(t, env.do("GET", "/datasets/motos-noite/versions/atual/items", nil, nil), http.StatusBadRequest)
 	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff?from=2&to=2", nil, nil), http.StatusBadRequest)
 	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff?from=x", nil, nil), http.StatusBadRequest)
 	assertStatus(t, env.do("GET", "/datasets/motos-noite/diff?to=9", nil, nil), http.StatusNotFound)

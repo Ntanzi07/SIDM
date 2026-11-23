@@ -715,3 +715,8 @@ func (m *MongoRepo) MatchingIDs(ctx context.Context, f ImageFilter) ([]string, e
 	}
 	return ids, nil
 }
+
+// NormalizeValue: um valor lido do Mongo no tipo que o resto usa (lista de
+// texto = []string, número = float64, data = time.Time). O módulo versions
+// usa para os itens congelados.
+func NormalizeValue(v any) any { return bsonValue(v) }
