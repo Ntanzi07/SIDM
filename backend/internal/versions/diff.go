@@ -25,10 +25,11 @@ import (
 
 // ItemRef: o mínimo de um item para a lista do diff.
 type ItemRef struct {
-	SHA1     string `bson:"sha1" json:"sha1"`
-	Package  string `bson:"package" json:"package"`
-	FileName string `bson:"file_name" json:"file_name"`
-	Hash     string `bson:"hash" json:"-"`
+	SHA1         string `bson:"sha1" json:"sha1"`
+	Package      string `bson:"package" json:"package"`
+	FileName     string `bson:"file_name" json:"file_name"`
+	OriginalName string `bson:"original_name" json:"original_name"`
+	Hash         string `bson:"hash" json:"-"`
 }
 
 // Diff: o que mudou da versão From para a To. From é nil quando a To é a
@@ -53,10 +54,11 @@ const (
 
 // ItemDiff: o detalhe de uma imagem entre as duas versões. Só o que mudou.
 type ItemDiff struct {
-	SHA1     string `json:"sha1"`
-	Package  string `json:"package"`
-	FileName string `json:"file_name"`
-	Status   string `json:"status"`
+	SHA1         string `json:"sha1"`
+	Package      string `json:"package"`
+	FileName     string `json:"file_name"`
+	OriginalName string `json:"original_name"`
+	Status       string `json:"status"`
 	// Fields e Objects: a chave no formato dos filtros da Pesquisa
 	// ("fields.cor", "objects.veiculo.cor"; com mais de um objeto do mesmo
 	// tipo, "objects.veiculo[2].cor"). nil = não informado.
@@ -197,7 +199,7 @@ func (s *Service) DiffItem(ctx context.Context, name string, from, to int, sha1 
 	}
 	for _, it := range []*Item{a, b} {
 		if it.SHA1 != "" {
-			d.Package, d.FileName = it.Package, it.FileName
+			d.Package, d.FileName, d.OriginalName = it.Package, it.FileName, it.OriginalName
 		}
 	}
 	d.Fields = diffFields("fields.", a.Fields, b.Fields)

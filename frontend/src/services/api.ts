@@ -952,3 +952,122 @@ export async function searchImages(search: StatsQuery, limit = 50, skip = 0): Pr
   query.set('skip', String(skip))
   return request<PageResponse<SearchImage>>(`/images/search?${query.toString()}`)
 }
+
+// ---------- versões ----------
+
+// Um dataset é uma pesquisa salva (sempre das VERIFICADAS); uma versão é uma
+// foto congelada dele, que nunca muda.
+export type DatasetQuery = {
+  packages: string[] // vazio = todos os pacotes do perfil
+  filters: Array<{ key: string; value: string }>
+  tasks: string[] // vazio = todas as tarefas
+}
+
+export type VersionInfo = {
+  number: number
+  message: string
+  created_by: string
+  created_at: string
+  images: number
+}
+
+export type Dataset = {
+  name: string
+  profile: string
+  description: string
+  query: DatasetQuery
+  created_by: string
+  created_at: string
+  updated_at: string
+  latest?: VersionInfo
+}
+
+export type Version = {
+  id: string
+  dataset: string
+  number: number
+  message: string
+  created_by: string
+  created_at: string
+  profile: string
+  query: DatasetQuery
+  tasks: string[]
+  summary: {
+    images: ImageStats
+    labels: LabelStats['tasks'] // como os tasks do /boxes/stats
+  }
+}
+
+export type DiffRef = { sha1: string; package: string; file_name: string; original_name?: string } // original_name: vazio em versões antigas
+
+export type VersionDiff = {
+  dataset: string
+  from: VersionInfo | null // null: a "to" é a primeira (tudo entrou)
+  to: VersionInfo
+  added: DiffRef[]
+  removed: DiffRef[]
+  changed: DiffRef[]
+  unchanged: number
+}
+
+// Uma mudança: null = não informado.
+export type DiffChange = { key: string; from: unknown; to: unknown }
+
+export type ItemDiff = {
+  sha1: string
+  package: string
+  file_name: string
+  original_name?: string
+  status: 'added' | 'removed' | 'changed' | 'unchanged'
+  fields: DiffChange[]
+  objects: DiffChange[]
+  tasks: Array<{
+    task: string
+    from: number
+    to: number
+    labels: Array<{ label: string; from: number; to: number }>
+    edited: boolean // as mesmas quantidades, mas as caixas mudaram
+  }>
+}
+
+export async function listDatasets(): Promise<Dataset[]> {
+  const response = await request<PageResponse<Dataset>>('/datasets')
+  return response.items
+}
+
+export async function getDataset(name: string): Promise<Dataset> {
+  return request<Dataset>(`/datasets/${encodeURIComponent(name)}`)
+}
+
+export async function createDataset(input: { name: string; profile: string; description: string; query: DatasetQuery }): Promise<Dataset> {
+  return request<Dataset>('/datasets', { method: 'POST', body: JSON.stringify(input) })
+}
+
+// Só sem versões (o backend recusa com 409).
+export async function deleteDataset(name: string): Promise<void> {
+  return request<void>(`/datasets/${encodeURIComponent(name)}`, { method: 'DELETE' })
+}
+
+export async function listVersions(dataset: string): Promise<Version[]> {
+  const response = await request<PageResponse<Version>>(`/datasets/${encodeURIComponent(dataset)}/versions`)
+  return response.items
+}
+
+export async function createVersion(dataset: string, message: string): Promise<Version> {
+  return request<Version>(`/datasets/${encodeURIComponent(dataset)}/versions`, { method: 'POST', body: JSON.stringify({ message }) })
+}
+
+// from = 0: contra nada (a "to" é a primeira versão: tudo entrou).
+function diffParams(from: number, to: number): string {
+  const query = new URLSearchParams({ to: String(to) })
+  if (from > 0) query.set('from', String(from))
+  return query.toString()
+}
+
+export async function getVersionDiff(dataset: string, from: number, to: number): Promise<VersionDiff> {
+  return request<VersionDiff>(`/datasets/${encodeURIComponent(dataset)}/diff?${diffParams(from, to)}`)
+}
+
+export async function getItemDiff(dataset: string, from: number, to: number, sha1: string): Promise<ItemDiff> {
+  return request<ItemDiff>(`/datasets/${encodeURIComponent(dataset)}/diff/${sha1}?${diffParams(from, to)}`)
+}

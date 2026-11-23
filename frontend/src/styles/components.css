@@ -40,7 +40,8 @@ h2 {
    sempre no mesmo lugar (mesma largura, mesmo topo). */
 .package-page,
 .export-page,
-.search-page {
+.search-page,
+.versions-page {
   width: min(1180px, calc(100% - 48px));
   max-width: none;
   margin: 0 auto;
@@ -66,7 +67,8 @@ h2 {
 }
 
 .package-page > .back-button:first-child,
-.export-page > .back-button:first-child {
+.export-page > .back-button:first-child,
+.versions-page > .back-button:first-child {
   display: flex;
   width: fit-content;
   height: 20px;

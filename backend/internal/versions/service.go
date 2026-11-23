@@ -256,7 +256,7 @@ func (s *Service) CreateVersion(ctx context.Context, name, message, user string)
 		}
 		for i := range list {
 			img := &list[i]
-			it := Item{SHA1: img.SHA1, Package: img.Package, FileName: img.FileName, Ext: img.Ext,
+			it := Item{SHA1: img.SHA1, Package: img.Package, FileName: img.FileName, OriginalName: img.OriginalName, Ext: img.Ext,
 				Fields: img.Fields, Objects: img.Objects, Boxes: map[string]TaskSet{}}
 			if it.FileName == "" {
 				it.FileName = img.OriginalName

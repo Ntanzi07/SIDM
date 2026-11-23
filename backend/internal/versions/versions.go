@@ -106,14 +106,16 @@ type Summary struct {
 // Item é um documento da coleção version_items: uma imagem da versão, com
 // a anotação congelada.
 type Item struct {
-	Version  string              `bson:"version" json:"-"`
-	SHA1     string              `bson:"sha1" json:"sha1"`
-	Package  string              `bson:"package" json:"package"`
-	FileName string              `bson:"file_name" json:"file_name"` // o nome que o export usa
-	Ext      string              `bson:"ext" json:"ext"`
-	Fields   map[string]any      `bson:"fields" json:"fields"`
-	Objects  []annotation.Object `bson:"objects" json:"objects"`
-	Boxes    map[string]TaskSet  `bson:"boxes" json:"boxes"` // tarefa → as caixas
+	Version  string `bson:"version" json:"-"`
+	SHA1     string `bson:"sha1" json:"sha1"`
+	Package  string `bson:"package" json:"package"`
+	FileName string `bson:"file_name" json:"file_name"` // o nome que o export usa
+	// OriginalName: o nome com que a imagem subiu (o que a pessoa reconhece).
+	OriginalName string              `bson:"original_name" json:"original_name"`
+	Ext          string              `bson:"ext" json:"ext"`
+	Fields       map[string]any      `bson:"fields" json:"fields"`
+	Objects      []annotation.Object `bson:"objects" json:"objects"`
+	Boxes        map[string]TaskSet  `bson:"boxes" json:"boxes"` // tarefa → as caixas
 	// Hash: o sha1 da anotação (campos, objetos e caixas). Duas versões com a
 	// mesma imagem e hashes diferentes = a anotação mudou (o diff usa).
 	Hash string `bson:"hash" json:"hash"`

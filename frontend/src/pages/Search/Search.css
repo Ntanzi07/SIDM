@@ -306,3 +306,22 @@
     transform: scaleX(0);
   }
 }
+
+/* "Salvar como dataset" */
+.save-dataset {
+  margin-bottom: 20px;
+  animation: rise 360ms var(--ease) both;
+}
+
+.save-dataset h2 {
+  margin: 0 0 6px;
+}
+
+.save-dataset > .profile-name-hint {
+  margin: 0 0 20px;
+}
+
+.save-dataset__actions {
+  display: flex;
+  gap: 10px;
+}

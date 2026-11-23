@@ -191,7 +191,7 @@ func (m *MongoRepo) ListItems(ctx context.Context, version string, limit, skip i
 func (m *MongoRepo) ItemRefs(ctx context.Context, version string) ([]ItemRef, error) {
 	cur, err := m.items().Find(ctx, bson.D{{Key: "version", Value: version}}, options.Find().
 		SetSort(bson.D{{Key: "sha1", Value: 1}}).
-		SetProjection(bson.D{{Key: "_id", Value: 0}, {Key: "sha1", Value: 1}, {Key: "package", Value: 1}, {Key: "file_name", Value: 1}, {Key: "hash", Value: 1}}))
+		SetProjection(bson.D{{Key: "_id", Value: 0}, {Key: "sha1", Value: 1}, {Key: "package", Value: 1}, {Key: "file_name", Value: 1}, {Key: "original_name", Value: 1}, {Key: "hash", Value: 1}}))
 	if err != nil {
 		return nil, fmt.Errorf("listar as imagens da versão: %w", err)
 	}

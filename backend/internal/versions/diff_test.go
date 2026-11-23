@@ -70,7 +70,7 @@ func TestDiffEntreVersoes(t *testing.T) {
 		!reflect.DeepEqual(refs(d.Changed), []string{"a"}) || d.Unchanged != 1 {
 		t.Errorf("diff: +%v -%v ~%v =%d", refs(d.Added), refs(d.Removed), refs(d.Changed), d.Unchanged)
 	}
-	if d.Removed[0].FileName != "b.jpg" {
+	if d.Removed[0].FileName != "b.jpg" || d.Removed[0].OriginalName != "b.jpg" {
 		t.Errorf("removida com o nome da versão velha: %+v", d.Removed[0])
 	}
 	// ao contrário: o que entrou vira o que saiu

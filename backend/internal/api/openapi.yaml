@@ -1953,6 +1953,7 @@ components:
         sha1: { type: string }
         package: { type: string }
         file_name: { type: string }
+        original_name: { type: string }
         ext: { type: string }
         fields: { type: object, additionalProperties: true }
         objects: { type: array, items: { type: object } }
@@ -1972,6 +1973,7 @@ components:
         sha1: { type: string }
         package: { type: string }
         file_name: { type: string }
+        original_name: { type: string, description: "O nome com que a imagem subiu (vazio em versões antigas)." }
     VersionDiff:
       type: object
       properties:
@@ -1994,6 +1996,7 @@ components:
         sha1: { type: string }
         package: { type: string }
         file_name: { type: string }
+        original_name: { type: string }
         status: { type: string, enum: [added, removed, changed, unchanged] }
         fields: { type: array, items: { $ref: "#/components/schemas/DiffChange" } }
         objects:

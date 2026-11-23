@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  createDataset,
   getImageStats,
   getLabelStats,
   listAnnotationProfiles,
@@ -8,50 +10,19 @@ import {
   listTasks,
   searchImages,
   type Counts,
+  type DatasetQuery,
   type SearchImage,
   type StatsQuery,
   type ImageStats,
   type LabelStats,
   type StatsStatus,
 } from '../../services/api'
-import type { AnnotationProfile, ProfileField } from '../../types/annotation'
-import { fieldLabel, optionLabel } from '../../utils/annotationForm'
+import type { AnnotationProfile } from '../../types/annotation'
+import { fieldLabel } from '../../utils/annotationForm'
+import { facetsOf, fmt, toggle, valuesOf } from '../../utils/stats'
+import { Chips, CountCard, LabelCard } from '../../components/Stats/StatsCards'
 import '../Packages/Packages.css'
 import './Search.css'
-
-const fmt = (n: number) => n.toLocaleString('pt-BR')
-const pct = (n: number, of: number) => (of > 0 ? `${Math.round((n / of) * 100)}%` : '0%')
-
-// A pesquisa conta por valor só os campos de lista e sim/não (como o backend).
-const countable = (field: ProfileField) => field.type === 'choice' || field.type === 'multi' || field.type === 'bool'
-
-// Um campo que a tela mostra: da imagem ("fields.<campo>") ou de um tipo de
-// objeto sem caixa ("objects.<tipo>.<campo>").
-type Facet = {
-  key: string // a chave do filtro na query
-  title: string
-  field: ProfileField
-  objectType?: string
-}
-
-function facetsOf(profile: AnnotationProfile): Facet[] {
-  const out: Facet[] = []
-  for (const field of profile.fields.filter(countable)) {
-    out.push({ key: `fields.${field.key}`, title: fieldLabel(field), field })
-  }
-  for (const type of profile.objects.filter((item) => !item.box)) {
-    for (const field of type.fields.filter(countable)) {
-      out.push({ key: `objects.${type.key}.${field.key}`, title: `${fieldLabel(type)}: ${fieldLabel(field)}`, field, objectType: type.key })
-    }
-  }
-  return out
-}
-
-// Os valores possíveis, na ordem do perfil (os que não aparecem contam zero).
-function valuesOf(field: ProfileField): Array<{ value: string; label: string }> {
-  if (field.type === 'bool') return [{ value: 'true', label: 'Sim' }, { value: 'false', label: 'Não' }]
-  return (field.options ?? []).map((option) => ({ value: option.value, label: optionLabel(field, option.value) }))
-}
 
 // Pesquisa/dashboard: quantas imagens de UM perfil de anotação têm cada valor
 // de cada campo. Clicar num valor filtra por ele.
@@ -69,6 +40,7 @@ export function SearchPage() {
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [stats, setStats] = useState<ImageStats | null>(null)
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false) // o formulário de "Salvar como dataset" aberto
   // a pesquisa da tela (perfil + filtros) e a da última resposta: diferentes = carregando
   const requestKey = JSON.stringify([profileName, status, chosenPackages, filters])
   const [resultKey, setResultKey] = useState('')
@@ -151,8 +123,25 @@ export function SearchPage() {
           <h1>Pesquisa</h1>
           <p>Quantas imagens de um perfil de anotação têm cada valor, por pacote. Clique num valor para filtrar por ele.</p>
         </div>
+        {profile && !saving && (
+          <button className="button button--secondary" onClick={() => setSaving(true)} type="button">
+            Salvar como dataset
+          </button>
+        )}
       </div>
       {error && <p className="form-error">{error}</p>}
+      {profile && saving && (
+        <SaveDataset
+          onCancel={() => setSaving(false)}
+          profile={profileName}
+          query={{
+            packages: chosenPackages,
+            filters: Object.entries(filters).map(([key, value]) => ({ key, value })),
+            tasks: allTasks ? [] : chosenTasks,
+          }}
+          status={status}
+        />
+      )}
 
       <div className="create-card search-controls">
         <div className="search-controls__row">
@@ -403,123 +392,55 @@ function ImageList({ search, total, open, onOpen }: { search: StatsQuery; total:
   )
 }
 
-// Uma tarefa do CVAT: para cada label, em quantas imagens ela aparece e qual
-// parte de todas as caixas da tarefa é dela.
-function LabelCard({ task, searchImages }: { task: LabelStats['tasks'][number]; searchImages: number }) {
-  const names = Object.keys(task.labels).sort()
+// Salva a pesquisa da tela (perfil, pacotes, filtros, tarefas) como um
+// dataset, para congelar versões dele na tela de Versões.
+function SaveDataset({ profile, query, status, onCancel }: {
+  profile: string
+  query: DatasetQuery
+  status: StatsStatus
+  onCancel: () => void
+}) {
+  const navigate = useNavigate()
+  const [name, setName] = useState('')
+  const [description, setDescription] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event: FormEvent) {
+    event.preventDefault()
+    setBusy(true)
+    setError('')
+    try {
+      const dataset = await createDataset({ name: name.trim(), profile, description, query })
+      navigate(`/versoes/${encodeURIComponent(dataset.name)}`)
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o dataset.')
+      setBusy(false)
+    }
+  }
+
   return (
-    <div className="search-card">
-      <h2>Tarefa {task.task}</h2>
+    <form className="create-card save-dataset" onSubmit={(event) => void submit(event)}>
+      <h2>Salvar como dataset</h2>
       <p className="profile-name-hint">
-        {fmt(task.images)} de {fmt(searchImages)} imagens da pesquisa foram anotadas nesta tarefa ({fmt(task.boxes)} caixas). Por label: em quantas dessas imagens ela aparece, e quanto das caixas é dela.
+        Guarda o perfil {profile}, os pacotes, os filtros e as tarefas escolhidos. Cada versão do dataset congela as imagens que passam nesta pesquisa naquele momento.
+        {status !== 'verified' && ' Só as verificadas entram numa versão (o filtro de status não é guardado).'}
       </p>
-      <ul className="search-labels">
-        {names.map((name) => {
-          const item = task.labels[name]
-          return (
-            <li key={name}>
-              <strong>{name}</strong>
-              <div className="search-labels__line">
-                <span>Em {fmt(item.images)} de {fmt(task.images)} imagens</span>
-                <span className="search-bar__track"><span className="search-bar__fill" style={{ width: pct(item.images, task.images) }} /></span>
-                <small>{pct(item.images, task.images)}</small>
-              </div>
-              <div className="search-labels__line">
-                <span>{fmt(item.boxes)} de {fmt(task.boxes)} caixas da tarefa</span>
-                <span className="search-bar__track"><span className="search-bar__fill search-bar__fill--boxes" style={{ width: pct(item.boxes, task.boxes) }} /></span>
-                <small>{pct(item.boxes, task.boxes)}</small>
-              </div>
-            </li>
-          )
-        })}
-      </ul>
-    </div>
-  )
-}
-
-const toggle = (list: string[], item: string) => (list.includes(item) ? list.filter((x) => x !== item) : [...list, item])
-
-// Uma escolha de vários: "Todos" ou os itens marcados.
-function Chips({ title, items, chosen, all, allLabel, empty, onAll, onToggle }: {
-  title: string
-  items: string[]
-  chosen: string[]
-  all: boolean
-  allLabel: string
-  empty: string
-  onAll: () => void
-  onToggle: (item: string) => void
-}) {
-  return (
-    <div className="search-chips">
-      <span>{title}</span>
-      {items.length === 0 ? (
-        <p className="profile-name-hint">{empty}</p>
-      ) : (
-        <div className="search-chips__list">
-          <button className={all ? 'search-chip search-chip--on' : 'search-chip'} onClick={onAll} type="button">{allLabel}</button>
-          {items.map((item) => (
-            <button
-              className={!all && chosen.includes(item) ? 'search-chip search-chip--on' : 'search-chip'}
-              key={item}
-              onClick={() => onToggle(item)}
-              type="button"
-            >
-              {item}
-            </button>
-          ))}
+      {error && <p className="form-error">{error}</p>}
+      <div className="form-row">
+        <div className="form-field">
+          <label htmlFor="dataset-name">Nome</label>
+          <input autoFocus id="dataset-name" onChange={(event) => setName(event.target.value)} placeholder="ex.: motos-noite" value={name} />
         </div>
-      )}
-    </div>
-  )
-}
-
-// Um cartão de contagens: uma barra por valor (a % é do total do cartão) e o
-// "Não informado" no fim.
-function CountCard({ title, rows, of, missing, note, active, onPick }: {
-  title: string
-  rows: Array<{ value: string; label: string; count: number }>
-  of: number
-  missing?: number
-  note?: string
-  active?: string
-  onPick?: (value: string) => void
-}) {
-  const all = missing !== undefined ? [...rows, { value: '', label: 'Não informado', count: missing }] : rows
-  return (
-    <div className="search-card">
-      <h2>{title}</h2>
-      {note && <p className="profile-name-hint">{note}</p>}
-      {rows.length === 0 && missing === undefined && <p className="profile-name-hint">Nenhuma imagem.</p>}
-      <ul className="search-bars">
-        {all.map((row) => {
-          const clickable = Boolean(onPick && row.value)
-          const className = [
-            'search-bar',
-            clickable ? 'search-bar--clickable' : '',
-            active && row.value === active ? 'search-bar--active' : '',
-            row.value === '' ? 'search-bar--missing' : '',
-          ].filter(Boolean).join(' ')
-          const content = (
-            <>
-              <span className="search-bar__label">{row.label}</span>
-              <span className="search-bar__track"><span className="search-bar__fill" style={{ width: pct(row.count, of) }} /></span>
-              <span className="search-bar__count">{fmt(row.count)} <small>{pct(row.count, of)}</small></span>
-            </>
-          )
-          return (
-            <li key={row.value || '__missing'}>
-              {clickable ? (
-                <button className={className} onClick={() => onPick?.(row.value)} title={active === row.value ? 'Tirar o filtro' : 'Filtrar por este valor'} type="button">
-                  {content}
-                </button>
-              ) : (
-                <div className={className}>{content}</div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    </div>
+        <div className="form-field">
+          <label htmlFor="dataset-description">Descrição (opcional)</label>
+          <input id="dataset-description" onChange={(event) => setDescription(event.target.value)} placeholder="Para que serve" value={description} />
+        </div>
+      </div>
+      <div className="save-dataset__actions">
+        <button className="button button--primary" disabled={busy || !name.trim()} type="submit">{busy ? 'Salvando...' : 'Salvar'}</button>
+        <button className="button button--secondary" disabled={busy} onClick={onCancel} type="button">Cancelar</button>
+      </div>
+    </form>
   )
 }

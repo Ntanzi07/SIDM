@@ -159,7 +159,7 @@ func (m *Memory) ItemRefs(ctx context.Context, version string) ([]ItemRef, error
 	list := []ItemRef{}
 	for _, it := range m.Items {
 		if it.Version == version {
-			list = append(list, ItemRef{SHA1: it.SHA1, Package: it.Package, FileName: it.FileName, Hash: it.Hash})
+			list = append(list, ItemRef{SHA1: it.SHA1, Package: it.Package, FileName: it.FileName, OriginalName: it.OriginalName, Hash: it.Hash})
 		}
 	}
 	slices.SortFunc(list, func(a, b ItemRef) int { return strings.Compare(a.SHA1, b.SHA1) })

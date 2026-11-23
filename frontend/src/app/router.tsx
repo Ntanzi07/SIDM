@@ -9,6 +9,8 @@ import { SettingsPage } from '../pages/Settings/SettingsPage'
 import { ImageViewerPage } from '../pages/Viewer/ImageViewerPage'
 import { TasksPage } from '../pages/Tasks/TasksPage'
 import { SearchPage } from '../pages/Search/SearchPage'
+import { DatasetsPage } from '../pages/Versions/DatasetsPage'
+import { DatasetPage } from '../pages/Versions/DatasetPage'
 
 export function Router() {
   return (
@@ -26,6 +28,8 @@ export function Router() {
           <Route path="/tarefas/:name" element={<TasksPage />} />
           <Route path="/exportar" element={<ExportPage />} />
           <Route path="/pesquisa" element={<SearchPage />} />
+          <Route path="/versoes" element={<DatasetsPage />} />
+          <Route path="/versoes/:name" element={<DatasetPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>
