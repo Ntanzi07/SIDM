@@ -8,7 +8,7 @@ import { UploadStatus } from './UploadStatus'
 import { BoxesSection } from './BoxesSection'
 import { ImportModal, type ImportSource } from './ImportModal'
 import { PackageImages } from './PackageImages'
-import { forPackage, optionLabel } from '../../utils/importProfiles'
+import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import './Packages.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -51,7 +51,10 @@ export function PackageDetailPage() {
 
   useEffect(() => {
     listAnnotationProfiles().then(setAnnotationProfiles).catch(() => { /* sem a lista: só mostra o nome */ })
-    listIniProfiles().then(setIniProfiles).catch(() => { /* sem perfis de INI: a opção some */ })
+    listIniProfiles().then((list) => {
+      setIniProfiles(list)
+      setUploadIniProfile((current) => current || defaultIniProfile(list))
+    }).catch(() => { /* sem perfis de INI: a opção some */ })
     listImportProfiles().then(setCsvProfiles).catch(() => { /* sem perfis CSV: o pop-up avisa */ })
   }, [])
 

@@ -1,6 +1,6 @@
 # Estado atual
 
-Atualizado em 2026-11-23. Branch de trabalho: `feature/exportar-sem-label`.
+Atualizado em 2026-11-23. Branch de trabalho: `fix/config-ini`.
 
 ## Pronto
 
@@ -24,6 +24,19 @@ Atualizado em 2026-11-23. Branch de trabalho: `feature/exportar-sem-label`.
   e `all_tasks` (só as imagens anotadas em todas); as caixas das tarefas são juntadas
   na mesma imagem (`exports.mergeSets`, que também ajusta a escala se o tamanho no CVAT
   diferir).
+- INI de arquivo com duas imagens (MFR1): lido depois de cada fim de JPEG, então o
+  `[Metrologico]` e o `[NMetrologico]` aparecem juntos.
+- Data e hora do import sem formato fixo (`importer.ParseDateTime`): data, hora e ms em
+  partes (`column`/`time_column`/`ms_column`); o editor de perfil de import grava assim,
+  com o formato "Automático" por padrão.
+- Perfil de import padrão `splice-ini` (no código, como os de export): já escolhido no
+  upload; em Configurar, Ver e Duplicar.
+- Equipamento/câmera desativado (apagado em uso) pode ser reativado em Configurar
+  (`?inactive=true` na lista); o upload avisa quando o INI cita um desativado.
+- `repeat` no campo do perfil de anotação: equipamento, câmera, direção, ângulo e clima
+  do `veiculos` repetem a última imagem salva do pacote, sem nada na tela.
+- Configurar: perfis de anotação com lista (quantidade no menu) e "Criar novo perfil"
+  numa tela própria, como os de import; seletor de chave do INI com busca (`ColumnPicker`).
 - Export sem caixas: formato `images` ("Só imagens", perfil padrão `imagens`), sem tarefa
   nem labels; entram as verificadas que passam nos filtros, com o nome de saída (v2 ou
   modelo), por divisão (um grupo só = na raiz) ou por pastas, e um `anotacoes.csv` com os
@@ -49,6 +62,10 @@ Atualizado em 2026-11-23. Branch de trabalho: `feature/exportar-sem-label`.
 - Mover os testes de cada módulo de `internal/api/` para o próprio módulo.
 - Login próprio no lugar do `X-User`; Swagger UI embutido (hoje vem de CDN); graceful shutdown.
 - O serviço `backend` do `docker-compose.yml` precisa ser reconstruído para ter o código novo.
+- Data do import: falta a prévia (endpoint que lê a data em imagens de exemplo, ✔/✘ no
+  editor) e um aviso na anotação quando a data não deu para ler.
+- O editor de perfil de anotação ainda não tem onde marcar `repeat` (só pelo JSON).
+- Um `splice-ini` salvo no banco antes de virar padrão fica escondido; pode ser apagado.
 
 ## Documentos desatualizados (não siga)
 

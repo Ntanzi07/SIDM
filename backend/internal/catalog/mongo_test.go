@@ -121,12 +121,15 @@ func TestMongoCadastro(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	names, total, err := r.Search(ctx, Equipments, "", 10, 0)
+	names, total, err := r.Search(ctx, Equipments, "", true, 10, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if fmt.Sprint(names) != "[1000-AAA 8003-MF4739]" || total != 2 {
 		t.Errorf("Search = %v (total %d); esperava só ativos, em ordem alfabética", names, total)
+	}
+	if off, total, _ := r.Search(ctx, Equipments, "", false, 10, 0); fmt.Sprint(off) != "[9999-OLD]" || total != 1 {
+		t.Errorf("Search(desativados) = %v (total %d)", off, total)
 	}
 	if ok, _ := r.ActiveExists(ctx, Equipments, "8003-MF4739"); !ok {
 		t.Error("ActiveExists(ativo) = false")
@@ -139,14 +142,14 @@ func TestMongoCadastro(t *testing.T) {
 	if err := r.Create(ctx, Cameras, "hikvision-233"); err != nil {
 		t.Fatal(err)
 	}
-	if cams, _, _ := r.Search(ctx, Cameras, "", 10, 0); fmt.Sprint(cams) != "[hikvision-233]" {
+	if cams, _, _ := r.Search(ctx, Cameras, "", true, 10, 0); fmt.Sprint(cams) != "[hikvision-233]" {
 		t.Errorf("Search(câmeras) = %v", cams)
 	}
 	if ok, _ := r.ActiveExists(ctx, Cameras, "8003-MF4739"); ok {
 		t.Error("equipamento não pode ser encontrado como câmera")
 	}
 	// lista vazia é [] e não nil (senão o JSON sai null)
-	if names, _, _ := r.Search(ctx, Cameras, "nada", 10, 0); names == nil {
+	if names, _, _ := r.Search(ctx, Cameras, "nada", true, 10, 0); names == nil {
 		t.Error("lista vazia deve ser []string{}, não nil")
 	}
 }
@@ -214,7 +217,7 @@ func TestMongoSearch(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(fmt.Sprintf("q=%q limit=%d skip=%d", tc.q, tc.limit, tc.skip), func(t *testing.T) {
-			names, total, err := r.Search(ctx, Equipments, tc.q, tc.limit, tc.skip)
+			names, total, err := r.Search(ctx, Equipments, tc.q, true, tc.limit, tc.skip)
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -75,6 +75,7 @@ func TestPerfilInvalido(t *testing.T) {
 		{"objeto min > max", func(p *Profile) { p.Objects[1].Min = 3 }, "objects[1]"},
 		{"valor inicial fora das opções", func(p *Profile) { p.Fields[0].Default = "tarde" }, "fields[0].default"},
 		{"valor inicial em ref", func(p *Profile) { p.Fields[6].Default = "8003" }, "fields[6].default"},
+		{"repeat em campo de objeto", func(p *Profile) { p.Objects[1].Fields[0].Repeat = true }, "objects[1].fields[0].repeat"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -50,13 +50,36 @@ func (s *Service) Validate(ctx context.Context, p *importer.Profile) error {
 // ---------- perfis ----------
 
 // FindProfile busca um perfil pelo nome (platform.ErrNotFound se não existe).
+// Os perfis padrão (importer.Builtins) vêm do código.
 func (s *Service) FindProfile(ctx context.Context, name string) (*importer.Profile, error) {
-	return s.repo.FindProfile(ctx, name)
+	return Profiles{s.repo}.FindProfile(ctx, name)
+}
+
+// Profiles busca perfis (padrão primeiro, depois o banco) para quem não tem
+// o Service: o upload de imagens é montado antes dele.
+type Profiles struct{ Repo Repo }
+
+func (ps Profiles) FindProfile(ctx context.Context, name string) (*importer.Profile, error) {
+	if p, ok := importer.Builtin(name); ok {
+		return &p, nil
+	}
+	return ps.Repo.FindProfile(ctx, name)
+}
+
+// builtinError: perfil padrão não se edita, renomeia nem apaga.
+func builtinError(name string) error {
+	if _, ok := importer.Builtin(name); ok {
+		return &InvalidError{fmt.Sprintf("%q é um perfil padrão do sistema e não pode ser alterado; copie com outro nome", name)}
+	}
+	return nil
 }
 
 // CreateProfile cadastra um perfil já validado (platform.ErrDuplicate se o
 // nome já existe).
 func (s *Service) CreateProfile(ctx context.Context, p *importer.Profile, user string) error {
+	if err := builtinError(p.Name); err != nil {
+		return err
+	}
 	p.CreatedBy = user
 	p.UpdatedAt = s.now()
 	return s.repo.CreateProfile(ctx, p)
@@ -64,6 +87,9 @@ func (s *Service) CreateProfile(ctx context.Context, p *importer.Profile, user s
 
 // ReplaceProfile grava a nova versão de um perfil existente.
 func (s *Service) ReplaceProfile(ctx context.Context, p *importer.Profile) error {
+	if err := builtinError(p.Name); err != nil {
+		return err
+	}
 	p.UpdatedAt = s.now()
 	return s.repo.ReplaceProfile(ctx, p)
 }
@@ -78,6 +104,11 @@ func (s *Service) RenameProfile(ctx context.Context, oldName, newName string) (*
 	if newName == oldName {
 		return nil, &InvalidError{"o nome novo é igual ao atual"}
 	}
+	for _, name := range []string{oldName, newName} {
+		if err := builtinError(name); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.repo.RenameProfile(ctx, oldName, newName, s.now()); err != nil {
 		return nil, err
 	}
@@ -86,12 +117,42 @@ func (s *Service) RenameProfile(ctx context.Context, oldName, newName string) (*
 
 // DeleteProfile apaga um perfil. Os rascunhos que ele já preencheu ficam.
 func (s *Service) DeleteProfile(ctx context.Context, name string) error {
+	if err := builtinError(name); err != nil {
+		return err
+	}
 	return s.repo.DeleteProfile(ctx, name)
 }
 
-// ListProfiles lista em ordem alfabética, com busca por nome.
+// ListProfiles lista os perfis padrão primeiro e depois os do banco, em ordem
+// alfabética, com busca por nome. Um perfil salvo com o nome de um padrão
+// (de antes de ele virar padrão) fica escondido: vale o do código.
 func (s *Service) ListProfiles(ctx context.Context, q string, limit, skip int64) ([]importer.Profile, int64, error) {
-	return s.repo.ListProfiles(ctx, q, limit, skip)
+	builtins := []importer.Profile{}
+	for _, p := range importer.Builtins() {
+		if strings.Contains(strings.ToLower(p.Name), strings.ToLower(q)) {
+			builtins = append(builtins, p)
+		}
+	}
+	nb := int64(len(builtins))
+	out := []importer.Profile{}
+	if skip < nb {
+		out = append(out, builtins[skip:min(nb, skip+limit)]...)
+	}
+	savedSkip := max(0, skip-nb)
+	saved, total, err := s.repo.ListProfiles(ctx, q, limit+nb, savedSkip) // +nb: os escondidos
+	if err != nil {
+		return nil, 0, err
+	}
+	for _, p := range saved {
+		if _, shadowed := importer.Builtin(p.Name); shadowed {
+			total--
+			continue
+		}
+		if int64(len(out)) < limit {
+			out = append(out, p)
+		}
+	}
+	return out, total + nb, nil
 }
 
 // ---------- import ----------

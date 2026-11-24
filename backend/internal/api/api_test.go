@@ -59,7 +59,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	imp := imports.NewMemory()
 	ann := annotation.NewMemory()
 	annSvc := annotation.New(ann)
-	imgSvc := images.New(img, fs, nil, imp, annSvc)
+	imgSvc := images.New(img, fs, nil, imports.Profiles{Repo: imp}, annSvc)
 	svc := catalog.New(cat, fs, imgSvc, annSvc)
 	imgSvc.SetCatalog(svc)
 	annSvc.SetPackages(svc)

@@ -19,7 +19,7 @@ guardado no banco; o export escolhe o nome de saída.
 | `annotation_profiles` | `name` único (o padrão `veiculos` fica no código) | `annotation` |
 | `annotation_tasks` | `name` único (a `padrao` existe sempre) | `boxes` |
 | `image_boxes` | único por (tarefa, imagem) | `boxes` |
-| `import_profiles` | `name` único | `imports` |
+| `import_profiles` | `name` único (o padrão `splice-ini` fica no código) | `imports` |
 | `export_profiles` | `name` único (os padrões ficam no código) | `exports` |
 | `datasets` | `name` único | `versions` |
 | `versions` | `_id` aleatório; único por (`dataset`, `number`) | `versions` |
@@ -61,7 +61,8 @@ guardado no banco; o export escolhe o nome de saída.
 
 Campos: `choice`, `multi`, `text` (`pattern` do valor inteiro, `max_len`, `upper`),
 `number` (`min`, `max`, `integer`), `bool`, `datetime`, `ref` (`equipment`/`camera`).
-Cada campo pode ter `required`, `default`, `help`; opções podem ter `code` (forma curta no
+Cada campo pode ter `required`, `default`, `help` e (só campo da imagem) `repeat` (a próxima
+pendente do pacote vem com o valor da última salva); opções podem ter `code` (forma curta no
 nome de arquivo; se uma tem, todas têm). Tipos de objeto: `key`, `label`, `box`, `min`, `max`,
 `fields`. O padrão `veiculos` é montado das tabelas do `filename` (mesmos códigos do v2).
 

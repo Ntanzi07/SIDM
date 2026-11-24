@@ -82,8 +82,9 @@ type Repo interface {
 	// PackagesWithProfile: os nomes dos pacotes que usam o perfil.
 	PackagesWithProfile(ctx context.Context, profile string) ([]string, error)
 
-	// Search: os ATIVOS cujo nome contém q, em ordem alfabética.
-	Search(ctx context.Context, reg Registry, q string, limit, skip int64) ([]string, int64, error)
+	// Search: os ativos (active=true) ou os desativados (false) cujo nome
+	// contém q, em ordem alfabética.
+	Search(ctx context.Context, reg Registry, q string, active bool, limit, skip int64) ([]string, int64, error)
 	Create(ctx context.Context, reg Registry, name string) error
 	Find(ctx context.Context, reg Registry, name string) (*RegistryEntry, error)
 	ActiveExists(ctx context.Context, reg Registry, name string) (bool, error)

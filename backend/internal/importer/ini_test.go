@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"SIDM/internal/annotation"
 )
 
 // fakeJPEG monta um "JPEG" mínimo com um INI grudado depois do fim,
@@ -49,6 +51,30 @@ func TestExtractJPEGTrailer(t *testing.T) {
 				t.Errorf("esperava nil, veio %.30q", got)
 			}
 		})
+	}
+}
+
+// Equipamento que grava duas imagens no arquivo, cada uma com o seu INI:
+// JPEG 1, [Metrologico], [Imagem2], JPEG 2 (com uma miniatura EXIF dentro,
+// que também termina em FF D9), [NMetrologico]. Antes só o último bloco era
+// lido e o Metrologico sumia.
+func TestExtractJPEGTrailerDuasImagens(t *testing.T) {
+	var data []byte
+	data = append(data, fakeJPEG("\r\n[Metrologico]\r\nData=18/09/2026\r\nAssinatura=abc\r\n[Imagem2]")...)
+	// JPEG 2: APP1 com uma miniatura (FF D8 ... FF D9) seguida de binário, e o fim.
+	data = append(data, 0xFF, 0xD8, 0xFF, 0xE1, 0x00, 0x10, 0xFF, 0xD8, 0x01, 0xFF, 0xD9, 0x00, 0x3D, 0x5B, 0x01, 0xFF, 0xC0, 0x00, 0x05, 0xFF, 0xD9)
+	data = append(data, []byte("\n[NMetrologico]\nPlaca = ABC1D23\n")...)
+
+	entries := ParseINI(ExtractJPEGTrailer(data))
+	got := INIValues(entries)
+	want := map[string]string{"Metrologico.Data": "18/09/2026", "NMetrologico.Placa": "ABC1D23"}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, esperava %q (tudo: %v)", k, got[k], v, got)
+		}
+	}
+	if len(got) != len(want) { // a Assinatura fica de fora; o binário da miniatura também
+		t.Errorf("chaves a mais: %v", got)
 	}
 }
 
@@ -176,5 +202,24 @@ func TestValidateINI(t *testing.T) {
 				t.Errorf("err = %v, want algo com %q", err, tc.want)
 			}
 		})
+	}
+}
+
+// Os perfis padrão têm que passar na validação contra o perfil de anotação
+// deles (um erro aqui quebraria o upload de todo mundo).
+func TestBuiltinsValidos(t *testing.T) {
+	for _, p := range Builtins() {
+		ap, ok := annotation.Builtin(p.AnnotationProfile)
+		if !ok {
+			t.Fatalf("%s: perfil de anotação %q não é padrão", p.Name, p.AnnotationProfile)
+		}
+		if err := p.Validate(&ap); err != nil {
+			t.Errorf("%s: %v", p.Name, err)
+		}
+	}
+	p := SpliceINI()
+	p.Builtin = false // alguém tentando salvar com o nome do padrão
+	if err := p.Validate(nil); err == nil || !strings.Contains(err.Error(), "perfil padrão") {
+		t.Errorf("err = %v", err)
 	}
 }

@@ -80,6 +80,11 @@ func (p *Profile) Validate() error {
 			ps.add(path, "min e max: números ≥ 0, com min ≤ max (max 0 = sem limite)")
 		}
 		validFields(&ps, path+".fields", o.Fields)
+		for j, f := range o.Fields {
+			if f.Repeat {
+				ps.add(fmt.Sprintf("%s.fields[%d].repeat", path, j), "repeat só vale nos campos da imagem")
+			}
+		}
 	}
 	if len(ps) > 0 {
 		return &InvalidError{Msg: summary(ps), Problems: ps}
