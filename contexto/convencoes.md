@@ -38,7 +38,9 @@
   converta com `utils/datetime.ts`.
 - A anotação usa a **fila** (`POST /packages/{nome}/next`), nunca a lista por índice.
 
-- **Visual:** tema escuro único, em `src/styles/theme.css` (tokens: `--bg`, `--surface*`,
+- **Visual:** tema escuro (padrão) e claro, com os mesmos tokens, em `src/styles/theme.css`
+  (o claro vale com `data-theme="light"` no `<html>`; `services/theme.ts` guarda a escolha
+  no navegador, sem escolha segue o sistema; botão claro/escuro no header) (tokens: `--bg`, `--surface*`,
   `--border*`, `--text*`, `--accent*`, `--success/warning/danger*`, fontes `--font` e
   `--font-display`). CSS de tela **não escreve cor fixa (hex)**: usa os tokens. Botões,
   títulos e rótulos comuns ficam em `src/styles/components.css` (`.button`,

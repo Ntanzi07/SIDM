@@ -1,7 +1,9 @@
 /*
  * Tema do SIDM: escuro e quente (preto de papel, não azulado), tipografia
  * Figtree (interface e números grandes, leve) e Inter Tight (marca e títulos
- * fortes). TODA cor de tela sai destes tokens: uma tela nova não escreve hex.
+ * fortes). Há também o tema claro, com os mesmos tokens: vale com
+ * data-theme="light" no <html> (services/theme.ts, botão no header).
+ * TODA cor de tela sai destes tokens: uma tela nova não escreve hex.
  * As cores das caixas (utils/boxes.ts) ficam fora: elas ficam em cima da foto.
  */
 :root {
@@ -39,6 +41,12 @@
   --danger-soft: rgba(255, 128, 128, 0.12);
   --danger-border: rgba(255, 128, 128, 0.4);
 
+  /* interação: fundo de hover, borda no hover, o hover do botão principal */
+  --hover: rgba(255, 255, 255, 0.04);
+  --border-hover: rgba(255, 255, 255, 0.3);
+  --primary-hover: #ffffff;
+  --hatch: rgba(255, 255, 255, 0.025);
+
   /* sombras (no escuro, sombra é só profundidade) */
   --shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
   --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -55,8 +63,57 @@
   --font-mono: ui-monospace, 'Cascadia Mono', 'Consolas', monospace;
 }
 
+/* Tema claro: os mesmos tokens, quentes como o escuro. Os tons de destaque
+   e de estado são mais escuros para manter o contraste no fundo claro. */
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg: #f7f6f3;
+  --surface: #ffffff;
+  --surface-2: #f1efeb;
+  --surface-3: #e6e3dd;
+  --surface-glass: rgba(247, 246, 243, 0.78);
+
+  --border: rgba(28, 26, 23, 0.1);
+  --border-strong: rgba(28, 26, 23, 0.18);
+
+  --text: #1c1a17;
+  --text-2: #57524b;
+  --text-3: #7a746b;
+  --on-accent: #ffffff;
+
+  --accent: #c2510f;
+  --accent-strong: #a8440a;
+  --accent-soft: rgba(194, 81, 15, 0.09);
+  --accent-border: rgba(194, 81, 15, 0.4);
+  --success: #1d7f53;
+  --success-soft: rgba(29, 127, 83, 0.09);
+  --success-border: rgba(29, 127, 83, 0.35);
+  --warning: #8a6700;
+  --warning-soft: rgba(176, 132, 0, 0.1);
+  --warning-border: rgba(176, 132, 0, 0.4);
+  --danger: #c23434;
+  --danger-soft: rgba(194, 52, 52, 0.08);
+  --danger-border: rgba(194, 52, 52, 0.35);
+
+  --hover: rgba(28, 26, 23, 0.05);
+  --border-hover: rgba(28, 26, 23, 0.32);
+  --primary-hover: #000000;
+  --hatch: rgba(28, 26, 23, 0.04);
+
+  --shadow: 0 18px 40px rgba(28, 26, 23, 0.14);
+  --shadow-sm: 0 4px 14px rgba(28, 26, 23, 0.1);
+}
+
 * {
   box-sizing: border-box;
+}
+
+/* durante a troca de tema (services/theme.ts), nada anima */
+.theme-switching *,
+.theme-switching *::before,
+.theme-switching *::after {
+  transition: none !important;
 }
 
 html,
@@ -129,7 +186,7 @@ textarea {
 input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']):hover,
 select:hover,
 textarea:hover {
-  border-color: rgba(255, 255, 255, 0.24);
+  border-color: var(--border-hover);
 }
 
 input:not([type='checkbox'], [type='radio'], [type='file'], [type='range']):focus,
