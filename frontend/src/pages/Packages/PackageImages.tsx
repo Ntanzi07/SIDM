@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteImage, imageFileUrl, listPackageImages, type ImageSummary } from '../../services/api'
+import { useToastState } from '../../hooks/useToast'
+import { confirmDialog } from '../../services/confirm'
 
 const PAGE = 25
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -44,7 +46,7 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
   const navigate = useNavigate()
   const [items, setItems] = useState<ImageSummary[]>([])
   const [total, setTotal] = useState(-1) // -1 = ainda não chegou a primeira página
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [removing, setRemoving] = useState('')
   const loading = useRef(false)
   const sentinel = useRef<HTMLDivElement | null>(null)
@@ -62,7 +64,7 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
     } finally {
       loading.current = false
     }
-  }, [packageName, status])
+  }, [packageName, status, setError])
 
   // a primeira página
   useEffect(() => {
@@ -79,7 +81,7 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
       })
       .finally(() => { loading.current = false })
     return () => { active = false }
-  }, [packageName, status])
+  }, [packageName, status, setError])
 
   // o sentinela no fim da lista: apareceu (com 400px de folga) = busca mais
   const hasMore = total < 0 || items.length < total
@@ -99,7 +101,12 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
   }
 
   async function remove(image: ImageSummary) {
-    if (!window.confirm(`Remover permanentemente a imagem "${image.original_name}"?`)) return
+    if (!(await confirmDialog({
+      title: 'Remover imagem?',
+      message: `"${image.original_name}" e a anotação dela serão removidas permanentemente.`,
+      confirmLabel: 'Remover',
+      tone: 'danger',
+    }))) return
     setRemoving(image.sha1)
     try {
       await deleteImage(image.sha1)
@@ -142,7 +149,6 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
           ))}
         </ul>
       )}
-      {error && <p className="form-error">{error}</p>}
       <div className="image-feed__sentinel" ref={sentinel}>
         {total < 0 && 'Carregando...'}
         {total > 0 && hasMore && 'Carregando mais...'}

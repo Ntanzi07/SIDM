@@ -8,6 +8,8 @@ import {
   type Problem,
 } from '../../services/api'
 import type { AnnotationProfile, FieldType, ObjectType, ProfileField, ProfileOption } from '../../types/annotation'
+import { useToast, useToastState } from '../../hooks/useToast'
+import { confirmDialog } from '../../services/confirm'
 
 // Editor dos PERFIS DE ANOTAÇÃO: o que se anota em cada imagem de um pacote.
 // Quem confere tudo é o backend (POST/PUT /annotation-profiles): os erros
@@ -292,7 +294,8 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
   const [isNew, setIsNew] = useState(false)
   const [problems, setProblems] = useState<Problem[]>([])
   const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  useToast(error && !problems.length ? error : '', 'error')
+  const [, setMessage] = useToastState('success')
   const [saving, setSaving] = useState(false)
 
   const load = () => listAnnotationProfiles().then(setProfiles).catch((e: unknown) => setError(e instanceof Error ? e.message : 'Não foi possível carregar os perfis.'))
@@ -353,7 +356,12 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
 
   async function remove(name: string) {
     // Em uso por algum pacote, o backend recusa e diz quais.
-    if (!window.confirm(`Apagar o perfil "${name}"?`)) return
+    if (!(await confirmDialog({
+      title: 'Apagar perfil de anotação?',
+      message: `O perfil "${name}" será apagado. Se algum pacote usar este perfil, ele não é apagado.`,
+      confirmLabel: 'Apagar perfil',
+      tone: 'danger',
+    }))) return
     try {
       await deleteAnnotationProfile(name)
       setDraft(null)
@@ -371,8 +379,6 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
 
   const notices = (
     <>
-      {error && !problems.length && <p className="form-error">{error}</p>}
-      {message && <p className="settings-message">{message}</p>}
     </>
   )
 

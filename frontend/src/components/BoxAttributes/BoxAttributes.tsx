@@ -5,6 +5,7 @@ import type { AnnotationProfile, FormValues, ObjectType } from '../../types/anno
 import { displayValue, fieldLabel, fromFormValue, toFormValue } from '../../utils/annotationForm'
 import { boxPending, boxType, colorOf, type BoxRef } from '../../utils/boxes'
 import { useTaskColors } from '../../utils/taskColors'
+import { notify } from '../../services/toast'
 import './BoxAttributes.css'
 
 // O que foi digitado e ainda não salvo, por tarefa. Vale só para a versão
@@ -24,7 +25,6 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
 }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [problems, setProblems] = useState<Record<string, Problem[]>>({})
-  const [message, setMessage] = useState<{ task: string; text: string; error: boolean } | null>(null)
   const [saving, setSaving] = useState('')
   useTaskColors()
   const pending = boxPending(profile, sets)
@@ -50,7 +50,6 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
       ...all,
       [set.task]: { version: boxSetVersion(set), values: { ...draftOf(set), [index]: { ...current, [key]: value } } },
     }))
-    setMessage(null)
   }
 
   async function save(set: BoxSet) {
@@ -66,19 +65,18 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
       return out
     })
     setSaving(set.task)
-    setMessage(null)
     try {
       await updateBoxAttributes(set, attributes)
       setProblems((all) => ({ ...all, [set.task]: [] }))
-      setMessage({ task: set.task, text: 'Atributos salvos.', error: false })
+      notify('Atributos salvos.')
       onSaved?.()
     } catch (error: unknown) {
       if (error instanceof RequestError && error.status === 409) {
-        setMessage({ task: set.task, text: 'As caixas mudaram (outra edição ou um novo import): recarregadas, confira e edite de novo.', error: true })
+        notify('As caixas mudaram (outra edição ou um novo import): recarregadas, confira e edite de novo.', 'error')
         onSaved?.()
       } else {
         setProblems((all) => ({ ...all, [set.task]: error instanceof RequestError ? error.problems : [] }))
-        setMessage({ task: set.task, text: error instanceof Error ? error.message : 'Não foi possível salvar os atributos.', error: true })
+        notify(error instanceof Error ? error.message : 'Não foi possível salvar os atributos.', 'error')
       }
     } finally {
       setSaving('')
@@ -157,11 +155,8 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
               </>
             )}
 
-            {!readOnly && (dirty || message?.task === set.task) && (
+            {!readOnly && dirty && (
               <div className="box-attributes__actions">
-                {message?.task === set.task && (
-                  <span className={message.error ? 'form-error' : 'settings-message'}>{message.text}</span>
-                )}
                 {dirty && (
                   <button className="button button--primary button--sm" disabled={saving !== ''} onClick={() => void save(set)} type="button">
                     {saving === set.task ? 'Salvando...' : 'Salvar atributos'}

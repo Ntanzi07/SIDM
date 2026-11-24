@@ -4,6 +4,7 @@ import { listDatasets, listVersions, type Dataset } from '../../services/api'
 import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
 import { formatWhen } from './format'
+import { useToastState } from '../../hooks/useToast'
 import './Versions.css'
 
 // Os datasets (pesquisas salvas) de um perfil e a versão mais nova de cada
@@ -11,7 +12,7 @@ import './Versions.css'
 // como dataset").
 export function DatasetList({ profile }: { profile: string }) {
   const [datasets, setDatasets] = useState<Dataset[] | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [history, setHistory] = useState<Record<string, number[]>>({})
 
   useEffect(() => {
@@ -37,11 +38,10 @@ export function DatasetList({ profile }: { profile: string }) {
         setDatasets([])
       })
     return () => { active = false }
-  }, [profile])
+  }, [profile, setError])
 
   return (
     <div className="versions-list">
-      {error && <p className="form-error">{error}</p>}
 
       {datasets === null && <p className="versions-hint">Carregando...</p>}
       {datasets?.length === 0 && !error && (

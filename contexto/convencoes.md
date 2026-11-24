@@ -36,6 +36,15 @@
 - Telas montadas a partir do perfil de anotação (nada de lista fixa de campos na anotação).
 - Datas: a API usa UTC (ISO 8601); o `<input type="datetime-local">` usa hora local;
   converta com `utils/datetime.ts`.
+- **Alertas são balões** (canto inferior direito, somem em 3 s; `services/toast.ts` +
+  `<Toaster />` no layout): o erro/mensagem de uma tela é `const [error, setError] =
+  useToastState('error')` (`hooks/useToast.ts`), e cada `setError(msg)` mostra o balão;
+  fora de estado, `notify(texto, tipo)`. Fica fixo na tela só o que é estado permanente:
+  validação de campo, aviso de confirmação no modal, "não existe mais", lista de problemas,
+  erro no lugar do conteúdo que não carregou.
+- **Confirmação é modal**, nunca `window.confirm`/`alert`: `if (!(await confirmDialog({
+  title, message, confirmLabel, tone: 'danger' })))` (`services/confirm.ts`; o
+  `<ConfirmDialog />` fica no layout). `tone: 'danger'` para o que apaga ou não se desfaz.
 - A anotação usa a **fila** (`POST /packages/{nome}/next`), nunca a lista por índice.
 
 - **Visual:** tema escuro (padrão) e claro, com os mesmos tokens, em `src/styles/theme.css`

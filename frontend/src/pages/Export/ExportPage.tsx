@@ -20,6 +20,8 @@ import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { FileNameTemplate } from './FileNameTemplate'
 import { FolderLevels } from './FolderLevels'
 import { Link } from 'react-router-dom'
+import { useToastState } from '../../hooks/useToast'
+import { confirmDialog } from '../../services/confirm'
 import './Export.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -158,8 +160,8 @@ export function ExportPage() {
   const [rows, setRows] = useState<LabelRow[]>([])
   const [preview, setPreview] = useState<ExportPreview | null>(null)
   const [busy, setBusy] = useState<'' | 'preview' | 'save' | 'delete'>('')
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const [, setError] = useToastState('error')
+  const [, setMessage] = useToastState('success')
 
   useEffect(() => {
     let active = true
@@ -180,7 +182,7 @@ export function ExportPage() {
       })
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o export.') })
     return () => { active = false }
-  }, [])
+  }, [setError])
 
   // Os campos de pasta e de nome do perfil de anotação escolhido.
   const annotationName = draft.annotation_profile || DEFAULT_ANNOTATION_PROFILE
@@ -190,7 +192,7 @@ export function ExportPage() {
       .then((fields) => { if (active) setFolderFields(fields) })
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os campos do perfil de anotação.') })
     return () => { active = false }
-  }, [annotationName])
+  }, [annotationName, setError])
   const annotationProfile = annotationProfiles.find((profile) => profile.name === annotationName)
   const packages = Object.keys(packageProfiles).sort((a, b) => a.localeCompare(b))
 
@@ -324,7 +326,13 @@ export function ExportPage() {
   }
 
   async function remove() {
-    if (!selected || isBuiltin || !window.confirm(`Apagar o perfil "${selected}"?`)) return
+    if (!selected || isBuiltin) return
+    if (!(await confirmDialog({
+      title: 'Apagar perfil de export?',
+      message: `O perfil "${selected}" será apagado.`,
+      confirmLabel: 'Apagar perfil',
+      tone: 'danger',
+    }))) return
     setBusy('delete')
     try {
       await deleteExportProfile(selected)
@@ -354,8 +362,6 @@ export function ExportPage() {
           <p>Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa, ou só as imagens com o nome e os dados anotados.</p>
         </div>
       </div>
-      {error && <p className="form-error">{error}</p>}
-      {message && <p className="settings-message">{message}</p>}
 
       <div className="export-layout">
         <aside className="export-profiles">

@@ -15,6 +15,7 @@ import { fmt } from '../../utils/stats'
 import { formatWhen, keyInfo, valueText } from './format'
 import { spanText } from '../../components/Charts/palette'
 import { DatasetTimeline, VersionPanel, type PanelTab } from './VersionParts'
+import { useToastState } from '../../hooks/useToast'
 import './Versions.css'
 
 // Um dataset: a pesquisa salva, as versões (da mais nova para a mais velha),
@@ -27,7 +28,7 @@ export function DatasetPage() {
   const [profile, setProfile] = useState<AnnotationProfile | undefined>()
   const [chosen, setChosen] = useState(0) // 0 = a mais nova
   const [tab, setTab] = useState<PanelTab>('summary')
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
 
   useEffect(() => {
     let active = true
@@ -44,7 +45,7 @@ export function DatasetPage() {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o dataset.')
       })
     return () => { active = false }
-  }, [name])
+  }, [name, setError])
 
   const version = versions?.find((item) => item.number === chosen) ?? versions?.[0]
 
@@ -57,7 +58,6 @@ export function DatasetPage() {
   return (
     <section className="versions-page">
       <button className="back-button" onClick={() => navigate(dataset ? `/dashboard/${encodeURIComponent(dataset.profile)}?dataset=${encodeURIComponent(dataset.name)}` : '/dashboard')} type="button">← Dashboard</button>
-      {error && <p className="form-error">{error}</p>}
       {dataset && versions && (
         <>
           <div className="page-heading">
@@ -145,7 +145,7 @@ function QuerySummary({ dataset, profile }: { dataset: Dataset; profile?: Annota
 function NewVersion({ dataset, onCreated }: { dataset: string; onCreated: (version: Version) => void }) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -171,7 +171,6 @@ function NewVersion({ dataset, onCreated }: { dataset: string; onCreated: (versi
         rows={2}
         value={message}
       />
-      {error && <p className="form-error">{error}</p>}
       <button className="button button--primary" disabled={busy || !message.trim()} type="submit">
         {busy ? 'Congelando as imagens...' : 'Criar versão'}
       </button>
@@ -182,7 +181,7 @@ function NewVersion({ dataset, onCreated }: { dataset: string; onCreated: (versi
 function DeleteDataset({ name }: { name: string }) {
   const navigate = useNavigate()
   const [confirming, setConfirming] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
 
   async function remove() {
     try {
@@ -195,7 +194,6 @@ function DeleteDataset({ name }: { name: string }) {
 
   return (
     <div className="delete-dataset">
-      {error && <p className="form-error">{error}</p>}
       {confirming ? (
         <>
           <button className="button button--danger button--sm" onClick={() => void remove()} type="button">Apagar de vez</button>

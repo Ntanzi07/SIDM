@@ -3,7 +3,6 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
 import { ZoomView } from '../../components/ZoomView/ZoomView'
-import { Toast } from '../../components/Toast/Toast'
 import { boxPending, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
@@ -168,8 +167,6 @@ export function AnnotationPage() {
                   {image.status === 'verified' && <span className="annotation-status annotation-status--done">Concluída</span>}
                 </div>
 
-                {annotator.error && <p className="annotation-feedback annotation-feedback--error">{annotator.error}</p>}
-                {annotator.message && <p className="annotation-feedback">{annotator.message}</p>}
 
                 <div className="annotation-fields">
                   {profile.fields.map((field) => (
@@ -277,12 +274,10 @@ export function AnnotationPage() {
                   ? 'Este pacote ainda não tem imagens.'
                   : 'Todas as imagens livres já foram anotadas. Se alguém está com uma reservada, ela volta para a fila em até 15 minutos.'}
               </p>
-              {annotator.message && <p className="annotation-feedback">{annotator.message}</p>}
             </div>
           )}
         </main>
       </div>
-      <Toast notice={annotator.notice} />
     </section>
   )
 }

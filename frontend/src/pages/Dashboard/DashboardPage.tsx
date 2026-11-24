@@ -8,6 +8,7 @@ import { DatasetTimeline, NewVersionModal, VersionPanel, type PanelTab } from '.
 import { formatWhen } from '../Versions/format'
 import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
+import { useToastState } from '../../hooks/useToast'
 import './Dashboard.css'
 
 // Dashboard: primeiro escolhe o perfil de anotação; depois, à esquerda, de
@@ -24,7 +25,7 @@ export function DashboardPage() {
 function ProfilePicker() {
   const [profiles, setProfiles] = useState<AnnotationProfile[] | null>(null)
   const [packages, setPackages] = useState<Record<string, number>>({})
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
 
   useEffect(() => {
     let active = true
@@ -43,7 +44,7 @@ function ProfilePicker() {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis.')
       })
     return () => { active = false }
-  }, [])
+  }, [setError])
 
   return (
     <section className="dashboard-page">
@@ -53,7 +54,6 @@ function ProfilePicker() {
           <p>Escolha um perfil de anotação para ver os números das imagens e as versões dos datasets dele.</p>
         </div>
       </div>
-      {error && <p className="form-error">{error}</p>}
       {profiles === null && !error && <p className="dashboard-hint">Carregando...</p>}
       {profiles && (
         <div className="profile-grid">
@@ -86,7 +86,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
   // ?v=3: uma versão; sem v: o agora (o estado atual, não salvo)
   const versionNumber = Number(params.get('v')) || 0
   const [datasets, setDatasets] = useState<Array<{ dataset: Dataset; versions: Version[] }> | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [reload, setReload] = useState(0) // muda depois de criar uma versão
   const [creating, setCreating] = useState('') // o dataset do pop-up "Nova versão"
   const [deleting, setDeleting] = useState('') // o dataset do pop-up "Apagar"
@@ -108,7 +108,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
         setDatasets([])
       })
     return () => { active = false }
-  }, [profile, reload])
+  }, [profile, reload, setError])
 
   const pick = (dataset = '', v = 0) => {
     const next: Record<string, string> = {}
@@ -151,7 +151,6 @@ function ProfileDashboard({ profile }: { profile: string }) {
           {chosen && <small className="dashboard-side__note">o estado atual de <strong>{chosen.dataset.name}</strong> vira a v{(chosen.versions[0]?.number ?? 0) + 1}</small>}
 
           <span className="eyebrow dashboard-side__group">Versões</span>
-          {error && <p className="form-error">{error}</p>}
           {datasets === null && <p className="dashboard-hint">Carregando...</p>}
           {datasets?.length === 0 && !error && (
             <p className="dashboard-hint">Nenhum dataset ainda. Monte a pesquisa à direita e use “Salvar como dataset”.</p>
@@ -239,7 +238,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
 function VersionSource({ dataset, versions, number, onPick }: { dataset: Dataset; versions: Version[]; number: number; onPick: (n: number) => void }) {
   const [profile, setProfile] = useState<AnnotationProfile | undefined>()
   const [current, setCurrent] = useState<Version | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [tab, setTab] = useState<PanelTab>('summary')
   useEffect(() => {
     let active = true
@@ -253,7 +252,7 @@ function VersionSource({ dataset, versions, number, onPick }: { dataset: Dataset
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível montar o estado atual.')
       })
     return () => { active = false }
-  }, [dataset.profile, dataset.name])
+  }, [dataset.profile, dataset.name, setError])
 
   // 0 = o agora
   const version = number === 0 ? current : versions.find((item) => item.number === number) ?? current
@@ -269,7 +268,6 @@ function VersionSource({ dataset, versions, number, onPick }: { dataset: Dataset
         selected={version?.number}
         versions={versions}
       />
-      {error && <p className="form-error">{error}</p>}
       {!version && !error && <p className="dashboard-hint">Montando o estado atual...</p>}
       {version && (
         <VersionPanel
@@ -290,7 +288,7 @@ function VersionSource({ dataset, versions, number, onPick }: { dataset: Dataset
 // digitado); as imagens e a anotação delas não mudam.
 function DeleteDatasetModal({ name, versions, onClose, onDeleted }: { name: string; versions: number; onClose: () => void; onDeleted: () => void }) {
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const [typed, setTyped] = useState('')
   const needsName = versions > 0
 
@@ -332,7 +330,6 @@ function DeleteDatasetModal({ name, versions, onClose, onDeleted }: { name: stri
           ) : (
             <p className="dashboard-hint">Ele ainda não tem versões: some só a pesquisa salva (o perfil, os pacotes e os filtros). Nenhuma imagem é apagada.</p>
           )}
-          {error && <p className="form-error">{error}</p>}
         </div>
         <div className="modal-actions">
           <button className="button button--secondary" disabled={busy} onClick={onClose} type="button">Cancelar</button>

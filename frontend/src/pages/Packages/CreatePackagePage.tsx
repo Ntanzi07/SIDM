@@ -7,6 +7,7 @@ import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
 import { UploadStatus } from './UploadStatus'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
+import { useToastState } from '../../hooks/useToast'
 import './Packages.css'
 
 export function CreatePackagePage() {
@@ -21,7 +22,7 @@ export function CreatePackagePage() {
   const [profileName, setProfileName] = useState('')
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [overwrite, setOverwrite] = useState(true)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const [profileError, setProfileError] = useState('')
   const [saving, setSaving] = useState<'creating' | 'uploading' | 'testing' | 'applying' | ''>('')
   const [upload, setUpload] = useState<UploadProgress | null>(null)
@@ -242,7 +243,6 @@ export function CreatePackagePage() {
           </>
         )}
         {upload && <UploadStatus progress={upload} />}
-        {error && <p className="form-error">{error}</p>}
         {importReport && (
           <div className="import-report">
             <h2>Ensaio da importação</h2>

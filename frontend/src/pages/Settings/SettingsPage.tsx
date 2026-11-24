@@ -30,6 +30,8 @@ import {
 import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { AnnotationProfilesSection } from './AnnotationProfilesSection'
 import { ColumnPicker } from './ColumnPicker'
+import { useToastState } from '../../hooks/useToast'
+import { confirmDialog } from '../../services/confirm'
 import './Settings.css'
 
 const DEFAULT_ANNOTATION_PROFILE = 'veiculos'
@@ -198,8 +200,8 @@ export function SettingsPage() {
   // tipo de objeto -> campo -> coluna
   const [objectColumns, setObjectColumns] = useState<Record<string, Record<string, string>>>({})
   const [objectSettings, setObjectSettings] = useState<Record<string, ObjectSetting>>({})
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
+  const [, setError] = useToastState('error')
+  const [, setMessage] = useToastState('success')
   const [saving, setSaving] = useState<'equipment' | 'camera' | 'inspect' | 'profile' | 'registry' | ''>('')
   const [activeTab, setActiveTab] = useState<'equipments' | 'cameras' | 'annotation_profiles' | 'annotation_editor' | 'profiles_list' | 'profile_editor'>('equipments')
   // Quantidade e nome do editor dos perfis de anotação, para o menu.
@@ -231,6 +233,8 @@ export function SettingsPage() {
     listAnnotationProfiles()
       .then(setAnnotationProfiles)
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis de anotação.'))
+    // só ao abrir a tela: loadCodes/loadProfiles usam setters estáveis
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const annotationProfile = annotationProfiles.find((p) => p.name === annotationProfileName)
@@ -325,7 +329,12 @@ export function SettingsPage() {
 
   async function handleDeleteRegistry(type: 'equipment' | 'camera', name: string) {
     const label = type === 'equipment' ? 'equipamento' : 'câmera'
-    if (!window.confirm(`Tem certeza que deseja apagar o ${label} "${name}"? Se estiver em uso por imagens, será desativado.`)) return
+    if (!(await confirmDialog({
+      title: `Apagar ${label}?`,
+      message: `"${name}" sai da lista. Se estiver em uso por imagens, fica desativado (dá para reativar depois).`,
+      confirmLabel: 'Apagar',
+      tone: 'danger',
+    }))) return
     setSaving('registry')
     setError('')
     setMessage('')
@@ -465,7 +474,12 @@ export function SettingsPage() {
   }
 
   async function handleDeleteProfile(name: string) {
-    if (!window.confirm(`Tem certeza que deseja apagar o perfil "${name}"? Esta ação não pode ser desfeita.`)) {
+    if (!(await confirmDialog({
+      title: 'Apagar perfil de import?',
+      message: `O perfil "${name}" será apagado. Esta ação não pode ser desfeita.`,
+      confirmLabel: 'Apagar perfil',
+      tone: 'danger',
+    }))) {
       return
     }
     setSaving('profile')
@@ -731,8 +745,6 @@ export function SettingsPage() {
           <p>Cadastre os equipamentos, câmeras, perfis de anotação e perfis de importação.</p>
         </div>
       </div>
-      {error && <p className="form-error">{error}</p>}
-      {message && <p className="settings-message">{message}</p>}
 
       <div className="settings-layout">
         <aside className="settings-sidebar">

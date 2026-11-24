@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { applyIniProfile, importPackageCsv, type ImportProfile, type ImportReport } from '../../services/api'
 import { ImportWarnings } from './ImportWarnings'
 import { forPackage, optionLabel } from '../../utils/importProfiles'
+import { useToastState } from '../../hooks/useToast'
 
 export type ImportSource = 'csv' | 'ini'
 
@@ -24,7 +25,7 @@ export function ImportModal({ packageName, packageProfile, source: initialSource
   const [file, setFile] = useState<File | null>(null)
   const [overwrite, setOverwrite] = useState(true)
   const [report, setReport] = useState<ImportReport | null>(null)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const [busy, setBusy] = useState<'testing' | 'applying' | ''>('')
 
   const options = forPackage(source === 'csv' ? csvProfiles : iniProfiles, packageProfile)
@@ -124,7 +125,6 @@ export function ImportModal({ packageName, packageProfile, source: initialSource
               <span>Sobrescrever os rascunhos que já têm valor</span>
             </label>
 
-            {error && <p className="form-error">{error}</p>}
 
             {report && (
               <div className="import-report">

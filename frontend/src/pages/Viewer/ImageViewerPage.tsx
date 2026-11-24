@@ -8,6 +8,7 @@ import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { getAnnotationProfile, getImage, getPackage, listPackageImages, reopenImage } from '../../services/api'
 import type { AnnotationProfile, ImageDetail } from '../../types/annotation'
 import { displayValue, fieldLabel } from '../../utils/annotationForm'
+import { useToastState } from '../../hooks/useToast'
 import './Viewer.css'
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -35,7 +36,7 @@ export function ImageViewerPage() {
   const [profile, setProfile] = useState<AnnotationProfile | null>(null)
   const [total, setTotal] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [confirmEdit, setConfirmEdit] = useState(false)
   const [reopening, setReopening] = useState(false)
   const { sets: boxSets } = useImageBoxes(image?.sha1)
@@ -73,7 +74,7 @@ export function ImageViewerPage() {
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível abrir a imagem.') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [index, packageName, shaParam])
+  }, [index, packageName, shaParam, setError])
 
   function go(nextIndex: number) {
     setLoading(true)
@@ -121,7 +122,6 @@ export function ImageViewerPage() {
         )}
       </div>
 
-      {error && <p className="form-error">{error}</p>}
       {loading && !image && <p className="viewer-empty">Carregando...</p>}
       {!loading && !image && !error && <p className="viewer-empty">Nenhuma imagem verificada neste pacote ainda.</p>}
 

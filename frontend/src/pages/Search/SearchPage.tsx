@@ -21,6 +21,7 @@ import { fieldLabel } from '../../utils/annotationForm'
 import { facetsOf, fmt, valuesOf } from '../../utils/stats'
 import { CountCard, LabelCard } from '../../components/Stats/StatsCards'
 import '../Packages/Packages.css'
+import { useToastState } from '../../hooks/useToast'
 import './Search.css'
 
 // Pesquisa/dashboard: quantas imagens de UM perfil de anotação têm cada valor
@@ -38,7 +39,7 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
   const [showImages, setShowImages] = useState(false) // a lista de imagens fica aberta entre as pesquisas
   const [filters, setFilters] = useState<Record<string, string>>({})
   const [stats, setStats] = useState<ImageStats | null>(null)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const [saving, setSaving] = useState(false) // o formulário de "Salvar como dataset" aberto
   // a pesquisa da tela (perfil + filtros) e a da última resposta: diferentes = carregando
   const requestKey = JSON.stringify([profileName, status, chosenPackages, filters])
@@ -56,7 +57,7 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis.')
       })
     return () => { active = false }
-  }, [])
+  }, [setError])
 
   // numa versão: tudo numa chamada só (contas e caixas dos itens congelados)
   const versionKey = version ? `${version.dataset}#${version.number}` : ''
@@ -94,7 +95,7 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
       })
       .finally(() => { if (active) setResultKey(key) })
     return () => { active = false }
-  }, [profileName, chosenPackages, filters, version])
+  }, [profileName, chosenPackages, filters, version, setError])
 
   // As labels: as mesmas imagens da pesquisa, nas tarefas escolhidas.
   useEffect(() => {
@@ -106,7 +107,7 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível contar as labels.')
       })
     return () => { active = false }
-  }, [profileName, chosenPackages, filters, version])
+  }, [profileName, chosenPackages, filters, version, setError])
 
   function setFilter(key: string, value: string) {
     setFilters((current) => {
@@ -121,7 +122,6 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
 
   return (
     <div className="search-body">
-      {error && <p className="form-error">{error}</p>}
       {profile && saving && (
         <SaveDataset
           onCancel={() => setSaving(false)}
@@ -251,7 +251,7 @@ function ImageList({ search, total, open, onOpen }: { search: StatsQuery; total:
   const [count, setCount] = useState(0)
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const searchKey = JSON.stringify(search)
 
   // a primeira página, quando a lista está aberta
@@ -270,7 +270,7 @@ function ImageList({ search, total, open, onOpen }: { search: StatsQuery; total:
       })
       .finally(() => { if (active) setLoaded(true) })
     return () => { active = false }
-  }, [open, searchKey])
+  }, [open, searchKey, setError])
 
   async function loadMore() {
     setBusy(true)
@@ -299,7 +299,6 @@ function ImageList({ search, total, open, onOpen }: { search: StatsQuery; total:
         </button>
       ) : (
         <div className="create-card search-images__card">
-          {error && <p className="form-error">{error}</p>}
           {!loaded && <p className="profile-name-hint">Carregando...</p>}
           {loaded && items.length === 0 && !error && <p className="profile-name-hint">Nenhuma imagem nesta pesquisa.</p>}
           {items.length > 0 && (
@@ -348,7 +347,7 @@ function SaveDataset({ profile, query, status, onCancel }: {
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
 
   async function submit(event: FormEvent) {
     event.preventDefault()
@@ -370,7 +369,6 @@ function SaveDataset({ profile, query, status, onCancel }: {
         Guarda o perfil {profile}, os pacotes, os filtros e as tarefas escolhidos. Cada versão do dataset congela as imagens que passam nesta pesquisa naquele momento.
         {status !== 'verified' && ' Só as verificadas entram numa versão (o filtro de status não é guardado).'}
       </p>
-      {error && <p className="form-error">{error}</p>}
       <div className="form-row">
         <div className="form-field">
           <label htmlFor="dataset-name">Nome</label>

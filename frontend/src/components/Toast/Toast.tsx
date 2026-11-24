@@ -1,39 +1,56 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { imageFileUrl } from '../../services/api'
+import { dismiss, subscribeToasts, type ToastItem, type ToastKind } from '../../services/toast'
 import './Toast.css'
 
-export type ToastNotice = { id: number; text: string; sha1?: string }
+const DURATION = 3000
+const LEAVE = 220
 
-const DURATION = 3500
-
-// Uma notificação rápida no canto inferior esquerdo, que some sozinha. Para
-// mostrar de novo (mesmo texto), troque o id; a key recomeça o tempo.
-export function Toast({ notice }: { notice: ToastNotice | null }) {
-  if (!notice) return null
-  return createPortal(<ToastItem key={notice.id} notice={notice} />, document.body)
+// A pilha de balões, no canto inferior direito. Fica no layout, uma vez só.
+export function Toaster() {
+  const [items, setItems] = useState<ToastItem[]>([])
+  useEffect(() => subscribeToasts(setItems), [])
+  return createPortal(
+    <div aria-live="polite" className="toaster">
+      {items.map((item) => <Toast item={item} key={item.id} />)}
+    </div>,
+    document.body,
+  )
 }
 
-function ToastItem({ notice }: { notice: ToastNotice }) {
+const ICONS: Record<ToastKind, string> = { success: '✓', error: '!', info: 'i' }
+
+function Toast({ item }: { item: ToastItem }) {
   const [leaving, setLeaving] = useState(false)
-  const [gone, setGone] = useState(false)
+  // o tempo para enquanto o mouse está em cima (dá para ler um erro longo)
+  const [paused, setPaused] = useState(false)
 
   useEffect(() => {
+    if (paused) return
     const leave = window.setTimeout(() => setLeaving(true), DURATION)
-    const hide = window.setTimeout(() => setGone(true), DURATION + 260)
-    return () => {
-      window.clearTimeout(leave)
-      window.clearTimeout(hide)
-    }
-  }, [])
+    return () => window.clearTimeout(leave)
+  }, [paused])
 
-  if (gone) return null
+  useEffect(() => {
+    if (!leaving) return
+    const hide = window.setTimeout(() => dismiss(item.id), LEAVE)
+    return () => window.clearTimeout(hide)
+  }, [leaving, item.id])
+
   return (
-    <div aria-live="polite" className={leaving ? 'toast toast--leaving' : 'toast'} role="status">
-      {notice.sha1 ? <img alt="" className="toast__thumb" src={imageFileUrl(notice.sha1)} /> : <span className="toast__icon">✓</span>}
-      <span className="toast__text">{notice.text}</span>
-      <button aria-label="Fechar" className="toast__close" onClick={() => setGone(true)} type="button">✕</button>
-      <span className="toast__timer" style={{ animationDuration: `${DURATION}ms` }} />
+    <div
+      className={`toast toast--${item.kind}${leaving ? ' toast--leaving' : ''}${paused ? ' toast--paused' : ''}`}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      role={item.kind === 'error' ? 'alert' : 'status'}
+    >
+      {item.sha1
+        ? <img alt="" className="toast__thumb" src={imageFileUrl(item.sha1)} />
+        : <span aria-hidden="true" className="toast__icon">{ICONS[item.kind]}</span>}
+      <span className="toast__text">{item.text}</span>
+      <button aria-label="Fechar" className="toast__close" onClick={() => setLeaving(true)} type="button">✕</button>
+      <span className="toast__timer" key={String(paused)} style={{ animationDuration: `${DURATION}ms` }} />
     </div>
   )
 }

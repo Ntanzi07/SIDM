@@ -24,6 +24,7 @@ import { SearchPage } from '../Search/SearchPage'
 import { Timeline, type TimelinePoint } from '../../components/Charts/Timeline'
 import { spanText } from '../../components/Charts/palette'
 import { formatWhen, keyInfo, valueText } from './format'
+import { useToast, useToastState } from '../../hooks/useToast'
 import './Versions.css'
 
 // As partes de uma versão usadas na tela do dataset e no Dashboard: a linha
@@ -201,6 +202,7 @@ function DownloadVersionModal({ dataset, version, onClose }: { dataset: string; 
 
   const noTasks = withBoxes && tasks.length === 0
   const current = result?.key === key ? result : null
+  useToast(current?.error, 'error')
   const loading = !!body && !noTasks && !current
   const preview = current?.preview
 
@@ -260,7 +262,6 @@ function DownloadVersionModal({ dataset, version, onClose }: { dataset: string; 
               <div className="download-version__preview">
                 {noTasks && <p className="versions-hint">Escolha ao menos uma tarefa.</p>}
                 {loading && <p className="versions-hint">Montando a prévia...</p>}
-                {current?.error && <p className="form-error">{current.error}</p>}
                 {preview && <PreviewSummary preview={preview} />}
               </div>
             </>
@@ -505,7 +506,7 @@ function Value({ text }: { text: string | null }) {
 export function NewVersionModal({ dataset, onClose, onCreated }: { dataset: string; onClose: () => void; onCreated: (version: Version) => void }) {
   const [message, setMessage] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
@@ -537,7 +538,6 @@ export function NewVersionModal({ dataset, onClose, onCreated }: { dataset: stri
             <p className="versions-hint">Congela agora as imagens verificadas que passam na pesquisa do dataset, com a anotação delas. A versão nunca muda depois.</p>
             <label htmlFor="new-version-message">O que mudou desde a última?</label>
             <textarea autoFocus id="new-version-message" onChange={(event) => setMessage(event.target.value)} placeholder="Ex.: corrigi a cor de 30 motos" rows={3} value={message} />
-            {error && <p className="form-error">{error}</p>}
           </div>
           <div className="modal-actions">
             <button className="button button--secondary" disabled={busy} onClick={onClose} type="button">Cancelar</button>

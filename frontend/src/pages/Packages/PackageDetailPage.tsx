@@ -9,6 +9,7 @@ import { BoxesSection } from './BoxesSection'
 import { ImportModal, type ImportSource } from './ImportModal'
 import { PackageImages } from './PackageImages'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
+import { useToastState } from '../../hooks/useToast'
 import './Packages.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -21,12 +22,12 @@ export function PackageDetailPage() {
   const [selectedPackage, setSelectedPackage] = useState<PackageSummary | undefined>()
   const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [saving, setSaving] = useState(false)
   const [csvProfiles, setCsvProfiles] = useState<ImportProfile[]>([])
   const [iniProfiles, setIniProfiles] = useState<ImportProfile[]>([])
   const [annotationProfiles, setAnnotationProfiles] = useState<AnnotationProfile[]>([])
-  const [profileError, setProfileError] = useState('')
+  const [, setProfileError] = useToastState('error')
   const [uploadIniProfile, setUploadIniProfile] = useState('')
   const [importing, setImporting] = useState<ImportSource | null>(null) // o pop-up aberto
   const [imagesKey, setImagesKey] = useState(0) // muda = a lista de imagens recomeça
@@ -47,7 +48,7 @@ export function PackageDetailPage() {
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o pacote.') })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [packageName])
+  }, [packageName, setError])
 
   useEffect(() => {
     listAnnotationProfiles().then(setAnnotationProfiles).catch(() => { /* sem a lista: só mostra o nome */ })
@@ -172,7 +173,6 @@ export function PackageDetailPage() {
               </strong>
             )}
           </p>
-          {profileError && <p className="form-error">{profileError}</p>}
         </div>
         <div className="detail-heading__actions">
           <button className="button button--danger" disabled={saving} onClick={handleOpenDeleteModal} type="button">Excluir pacote</button>
@@ -247,7 +247,6 @@ export function PackageDetailPage() {
             </div>
           </div>
           {upload && <UploadStatus progress={upload} />}
-          {error && <p className="form-error">{error}</p>}
           <PackageImages key={imagesKey} onRemoved={() => void refreshSummary()} packageName={selectedPackage.name} />
         </div>
       </div>
@@ -295,7 +294,6 @@ export function PackageDetailPage() {
                     disabled={saving}
                   />
                 </label>
-                {error && <p className="form-error">{error}</p>}
               </div>
               <div className="modal-actions">
                 <button

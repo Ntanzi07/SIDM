@@ -19,6 +19,7 @@ import { BoxImportModal } from '../Packages/BoxImportModal'
 import { GridPicker, Menu, SearchField, SearchIcon } from '../../components/Toolbar/Toolbar'
 import { savedColumns, saveColumns, type Columns, type MenuOption } from '../../components/Toolbar/columns'
 import '../Packages/Packages.css'
+import { useToastState } from '../../hooks/useToast'
 import './Tasks.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -61,7 +62,7 @@ const time = (iso?: string) => (iso ? new Date(iso).getTime() || 0 : 0)
 
 function TaskGrid() {
   const [tasks, setTasks] = useState<AnnotationTask[] | null>(null)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const [creating, setCreating] = useState(false)
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState<SortBy>('updated')
@@ -99,7 +100,7 @@ function TaskGrid() {
         setTasks([])
       })
     return () => { active = false }
-  }, [])
+  }, [setError])
 
   return (
     <section className="tasks-page">
@@ -110,7 +111,6 @@ function TaskGrid() {
         </div>
         <button className="button button--primary" onClick={() => setCreating(true)} type="button">+ Nova tarefa</button>
       </div>
-      {error && <p className="form-error">{error}</p>}
       {tasks === null && <p className="tasks-hint">Carregando...</p>}
       {tasks?.length === 0 && !error && (
         <div className="tasks-empty">
@@ -257,7 +257,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
   const [description, setDescription] = useState('')
   const [labels, setLabels] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const nameOk = NAME_RE.test(name.trim())
 
   async function submit(event: FormEvent) {
@@ -291,7 +291,6 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
             <LabelInput labels={labels} onChange={setLabels} />
             <small>Enter ou vírgula separa. Labels novas que vierem no import entram sozinhas.</small>
           </div>
-          {error && <p className="form-error">{error}</p>}
         </div>
         <div className="modal-actions">
           <button className="button button--secondary" disabled={busy} onClick={onClose} type="button">Cancelar</button>
@@ -306,7 +305,7 @@ function NewTaskModal({ onClose }: { onClose: () => void }) {
 function DownloadModal({ task, onClose }: { task: AnnotationTask; onClose: () => void }) {
   const [packages, setPackages] = useState<PackageSummary[] | null>(null)
   const [chosen, setChosen] = useState<string[]>([])
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error')
   const inTask = useMemo(() => new Map((task.stats?.packages ?? []).map((item) => [item.name, item.images])), [task])
 
   useEffect(() => {
@@ -317,7 +316,7 @@ function DownloadModal({ task, onClose }: { task: AnnotationTask; onClose: () =>
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os pacotes.')
       })
     return () => { active = false }
-  }, [])
+  }, [setError])
 
   const toggle = (name: string) => setChosen((list) => (list.includes(name) ? list.filter((item) => item !== name) : [...list, name]))
   const all = packages !== null && packages.length > 0 && chosen.length === packages.length
@@ -329,7 +328,6 @@ function DownloadModal({ task, onClose }: { task: AnnotationTask; onClose: () =>
         <p className="import-modal__intro">
           Um zip com as imagens dos pacotes escolhidos. Os nomes dos arquivos começam pelo sha1: é assim que o import das caixas encontra cada imagem depois.
         </p>
-        {error && <p className="form-error">{error}</p>}
         {packages === null && !error && <p className="tasks-hint">Carregando...</p>}
         {packages && packages.length === 0 && <p className="tasks-hint">Nenhum pacote com imagens.</p>}
         {packages && packages.length > 0 && (
@@ -372,7 +370,7 @@ function DeleteModal({ task, onClose }: { task: AnnotationTask; onClose: () => v
   const navigate = useNavigate()
   const [typed, setTyped] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
 
   async function remove(event: FormEvent) {
     event.preventDefault()
@@ -397,7 +395,6 @@ function DeleteModal({ task, onClose }: { task: AnnotationTask; onClose: () => v
             <span>Digite <code>{task.name}</code> para confirmar</span>
             <input autoFocus onChange={(event) => setTyped(event.target.value)} placeholder={task.name} value={typed} />
           </label>
-          {error && <p className="form-error">{error}</p>}
         </div>
         <div className="modal-actions">
           <button className="button button--secondary" disabled={busy} onClick={onClose} type="button">Cancelar</button>
@@ -530,7 +527,7 @@ function TaskTitle({ task, onSave }: { task: AnnotationTask; onSave: (changes: {
   const [name, setName] = useState(task.name)
   const [description, setDescription] = useState(task.description)
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const nameOk = NAME_RE.test(name.trim())
 
   function start() {
@@ -576,7 +573,6 @@ function TaskTitle({ task, onSave }: { task: AnnotationTask; onSave: (changes: {
       {name.trim() !== '' && !nameOk && <small className="tasks-field__bad">{NAME_HINT}</small>}
       {nameOk && name.trim() !== task.name && <small className="tasks-hint">Renomear leva junto as caixas e os perfis de export que usam esta tarefa.</small>}
       <textarea aria-label="Descrição" onChange={(event) => setDescription(event.target.value)} placeholder="Descrição (opcional)" rows={2} value={description} />
-      {error && <p className="form-error">{error}</p>}
       <div className="task-title__actions">
         <button className="button button--primary button--sm" disabled={busy || !nameOk} type="submit">{busy ? 'Salvando...' : 'Salvar'}</button>
         <button className="button button--secondary button--sm" disabled={busy} onClick={() => setEditing(false)} type="button">Cancelar</button>
@@ -592,7 +588,7 @@ function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: 
   const [colors, setColors] = useState<Record<string, string>>(task.colors ?? {})
   const [adding, setAdding] = useState('')
   const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const counts = task.stats?.labels ?? {}
   const totalBoxes = task.stats?.boxes ?? 0
   const dirty = labels.join('\n') !== task.labels.join('\n') || JSON.stringify(sorted(colors)) !== JSON.stringify(sorted(task.colors ?? {}))
@@ -676,7 +672,6 @@ function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: 
         <input onChange={(event) => setAdding(event.target.value)} placeholder="Nova label (ou várias, separadas por vírgula)" value={adding} />
         <button className="button button--secondary button--sm" disabled={!adding.trim()} type="submit">Acrescentar</button>
       </form>
-      {error && <p className="form-error">{error}</p>}
       {dirty && (
         <div className="label-save">
           <span>Alterações não salvas</span>

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import { importTaskBoxes, listTasks, type BoxImportReport } from '../../services/api'
 import { BoxImportSummary } from '../Tasks/BoxImportReport'
+import { useToastState } from '../../hooks/useToast'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
 const sizeText = (bytes: number) => (bytes < 1024 * 1024
@@ -29,7 +30,7 @@ export function BoxImportModal({ defaultTask, fixedTask = false, onClose, onAppl
   const [file, setFile] = useState<File | null>(null)
   const [negatives, setNegatives] = useState(false)
   const [report, setReport] = useState<BoxImportReport | null>(null)
-  const [error, setError] = useState('')
+  const [, setError] = useToastState('error')
   const [busy, setBusy] = useState<'testing' | 'applying' | ''>('')
 
   useEffect(() => {
@@ -46,7 +47,7 @@ export function BoxImportModal({ defaultTask, fixedTask = false, onClose, onAppl
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar as tarefas.')
       })
     return () => { active = false }
-  }, [])
+  }, [setError])
 
   const close = () => { if (!busy) onClose() }
 
@@ -131,7 +132,6 @@ export function BoxImportModal({ defaultTask, fixedTask = false, onClose, onAppl
               </span>
             </label>
 
-            {error && <p className="form-error">{error}</p>}
 
             {report && (
               <div className="import-report">

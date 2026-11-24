@@ -1,25 +1,55 @@
-.toast {
+/* Balões temporários: empilhados no canto inferior direito, por cima de tudo
+   (inclusive dos modais). A cor da borda, do ícone e da barra diz o tipo. */
+.toaster {
   position: fixed;
+  right: 24px;
   bottom: 24px;
-  left: 24px;
   z-index: 1100;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.toast {
+  --toast-color: var(--success);
+  --toast-soft: var(--success-soft);
+  --toast-border: var(--success-border);
+
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
+  width: max-content;
   max-width: min(420px, calc(100vw - 48px));
-  padding: 10px 12px 10px 10px;
+  padding: 10px 10px 12px;
   overflow: hidden;
-  border: 1px solid var(--success-border);
-  border-radius: var(--radius);
+  border: 1px solid var(--toast-border);
+  border-radius: var(--radius-sm);
   background: var(--surface-2);
   box-shadow: var(--shadow);
   color: var(--text);
   font-size: 13px;
-  animation: toast-in 260ms var(--ease) both;
+  line-height: 1.4;
+  pointer-events: auto;
+  animation: toast-in 220ms var(--ease) both;
+}
+
+.toast--error {
+  --toast-color: var(--danger);
+  --toast-soft: var(--danger-soft);
+  --toast-border: var(--danger-border);
+}
+
+.toast--info {
+  --toast-color: var(--accent);
+  --toast-soft: var(--accent-soft);
+  --toast-border: var(--accent-border);
 }
 
 .toast--leaving {
-  animation: toast-out 260ms var(--ease) both;
+  animation: toast-out 220ms var(--ease) both;
 }
 
 .toast__thumb {
@@ -32,26 +62,26 @@
 
 .toast__icon {
   display: grid;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   flex-shrink: 0;
   place-items: center;
   border-radius: 50%;
-  background: var(--success-soft);
-  color: var(--success);
+  background: var(--toast-soft);
+  color: var(--toast-color);
+  font-size: 12px;
   font-weight: 700;
 }
 
 .toast__text {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .toast__close {
   flex-shrink: 0;
+  align-self: flex-start;
   padding: 4px 6px;
   border: 0;
   border-radius: 5px;
@@ -66,16 +96,21 @@
   color: var(--text);
 }
 
-/* a barrinha embaixo: o tempo até sumir */
+/* a barrinha embaixo: o tempo até sumir (para com o mouse em cima) */
 .toast__timer {
   position: absolute;
   bottom: 0;
   left: 0;
-  height: 2px;
   width: 100%;
-  background: var(--success);
+  height: 2px;
+  background: var(--toast-color);
   transform-origin: left;
   animation: toast-timer linear both;
+}
+
+.toast--paused .toast__timer {
+  animation: none;
+  opacity: 0.4;
 }
 
 @keyframes toast-in {
@@ -88,12 +123,26 @@
 @keyframes toast-out {
   to {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateX(16px);
   }
 }
 
 @keyframes toast-timer {
   to {
     transform: scaleX(0);
+  }
+}
+
+@media (max-width: 600px) {
+  .toaster {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    align-items: stretch;
+  }
+
+  .toast {
+    width: auto;
+    max-width: none;
   }
 }

@@ -25,6 +25,9 @@ import { getUser } from '../services/user'
 import type { AnnotationForm, AnnotationProfile, FormValue, ImageDetail } from '../types/annotation'
 import { formFromImage, formToAPI, listObjectTypes, newObject } from '../utils/annotationForm'
 import { isEmptyValue, loadLast, saveLast } from '../utils/repeatFields'
+import { notify } from '../services/toast'
+import { useToastState } from './useToast'
+import { confirmDialog } from '../services/confirm'
 
 // A anotação segue a FILA do backend (POST /packages/{nome}/next): cada
 // imagem fica reservada para quem pegou por 15 minutos, então duas pessoas
@@ -72,14 +75,24 @@ async function ensureRegistered(kind: keyof typeof registries, typed: string): P
 
   const inactive = (await registry.inactive()).find((name) => normalizeName(name) === normalizeName(typed))
   if (inactive) {
-    if (!window.confirm(`O ${registry.label} "${inactive}" está desativado. Reativar agora?`)) {
+    const reactivate = await confirmDialog({
+      title: `Reativar ${registry.label}?`,
+      message: `O ${registry.label} "${inactive}" está desativado (foi apagado em Configurar). Reative para usar nesta imagem.`,
+      confirmLabel: 'Reativar',
+    })
+    if (!reactivate) {
       throw new Error(`O ${registry.label} "${inactive}" está desativado. Reative para verificar, ou escolha outro.`)
     }
     await registry.reactivate(inactive)
     return inactive
   }
 
-  if (!window.confirm(`"${typed}" não está cadastrado como ${registry.label}. Cadastrar agora?`)) {
+  const register = await confirmDialog({
+    title: `Cadastrar ${registry.label}?`,
+    message: `"${typed}" não está cadastrado como ${registry.label}. Confira se o nome está certo: depois de cadastrado, ele aparece na lista para todos.`,
+    confirmLabel: `Cadastrar ${registry.label}`,
+  })
+  if (!register) {
     throw new Error(`Escolha um ${registry.label} da lista ou confirme o cadastro de "${typed}".`)
   }
   try {
@@ -110,12 +123,9 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   const [finished, setFinished] = useState(false) // a fila acabou
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
+  const [error, setError] = useToastState('error') // também vira balão
   const [problems, setProblems] = useState<Problem[]>([]) // os erros de validação, campo a campo
-  const [message, setMessage] = useState('')
-  // Aviso rápido (a notificação no canto): o que acabou de ser salvo ou
-  // excluído. O id muda a cada aviso, mesmo com o mesmo texto.
-  const [notice, setNotice] = useState<{ id: number; text: string; sha1: string } | null>(null)
+  const [message, setMessage] = useToastState('info')
 
   // A imagem aberta, para devolver à fila ao sair da página.
   const current = useRef<ImageDetail | null>(null)
@@ -203,7 +213,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       window.removeEventListener('pagehide', release)
       release()
     }
-  }, [initialSha1, packageName, pull, show])
+  }, [initialSha1, packageName, pull, show, setError])
 
   const run = useCallback(async (action: () => Promise<void>, fallback: string) => {
     setSaving(true)
@@ -224,7 +234,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [setError, setMessage])
 
   // Próxima: pula a atual (ela volta no fim da fila).
   const skip = useCallback(() => run(
@@ -244,7 +254,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     setFinished(false)
     await show(detail, profile)
     setPosition(position - 1)
-  }, 'Não foi possível abrir a imagem anterior.'), [history, image, position, profile, run, show])
+  }, 'Não foi possível abrir a imagem anterior.'), [history, image, position, profile, run, show, setMessage])
 
   // Volta para a imagem mais recente do histórico (depois de usar "Anterior").
   const forward = useCallback(() => run(async () => {
@@ -289,7 +299,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       current.current = null
       setHistory((list) => list.filter((sha) => sha !== image.sha1))
       await pull(undefined, profile)
-      setNotice({ id: Date.now(), text: `${image.original_name} excluída.`, sha1: '' })
+      notify(`${image.original_name} excluída.`)
       ok = true
     }, 'Não foi possível excluir a imagem.')
     return ok
@@ -321,7 +331,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     } else {
       await pull(undefined, profile)
     }
-    setNotice({ id: Date.now(), text: `Anotação de ${image.original_name} salva.`, sha1: image.sha1 })
+    notify(`Anotação de ${image.original_name} salva.`, 'success', { sha1: image.sha1 })
   }, 'Não foi possível salvar a anotação.'), [form, history, image, packageName, position, profile, pull, refreshSummary, run, show])
 
   const progress = {
@@ -351,7 +361,6 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     error,
     problems,
     message,
-    notice,
     progress,
   }
 }
