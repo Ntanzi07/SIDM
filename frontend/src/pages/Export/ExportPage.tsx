@@ -21,6 +21,7 @@ import { FileNameTemplate } from './FileNameTemplate'
 import { FolderLevels } from './FolderLevels'
 import { Link } from 'react-router-dom'
 import { useIsAdmin } from '../../services/user'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Export.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -162,6 +163,7 @@ export function ExportPage() {
   const [busy, setBusy] = useState<'' | 'preview' | 'save' | 'delete'>('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [loaded, setLoaded] = useState(false) // a primeira carga (perfis, pacotes, tarefas)
 
   useEffect(() => {
     let active = true
@@ -181,6 +183,7 @@ export function ExportPage() {
         }
       })
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o export.') })
+      .finally(() => { if (active) setLoaded(true) })
     return () => { active = false }
   }, [])
 
@@ -347,6 +350,8 @@ export function ExportPage() {
   // Pacotes de outro perfil de anotação entram, mas sem os campos (não
   // passam nos filtros; vão para "Desconhecido").
   const otherProfile = (name: string) => Boolean(packageProfiles[name]) && packageProfiles[name] !== annotationName
+
+  if (!loaded) return <section className="export-page"><PageLoader label="Carregando o export" /></section>
 
   return (
     <section className="export-page">

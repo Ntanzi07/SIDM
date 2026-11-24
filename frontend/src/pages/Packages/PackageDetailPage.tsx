@@ -9,6 +9,7 @@ import { BoxesSection } from './BoxesSection'
 import { ImportModal, type ImportSource } from './ImportModal'
 import { PackageImages } from './PackageImages'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Packages.css'
 import { useIsAdmin } from '../../services/user'
 
@@ -131,7 +132,7 @@ export function PackageDetailPage() {
   }
 
   if (loading) {
-    return <section className="package-page empty-package"><p>Carregando pacote...</p></section>
+    return <section className="package-page"><PageLoader label="Carregando o pacote" /></section>
   }
 
   if (!selectedPackage) {

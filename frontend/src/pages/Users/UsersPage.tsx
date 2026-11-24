@@ -5,6 +5,7 @@ import { listAccounts, resetAccountPassword, updateAccount } from '../../service
 import { Toast, type ToastNotice } from '../../components/Toast/Toast'
 import { setPendingCount, useAccount, type Account } from '../../services/user'
 import { formatWhen } from '../Versions/format'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Users.css'
 
 // As contas (só admin): aprovar quem pediu, trocar o papel, desativar e
@@ -60,7 +61,7 @@ export function UsersPage() {
         </div>
       </div>
       {error && <p className="form-error" role="alert">{error}</p>}
-      {accounts === null && !error && <p className="versions-hint">Carregando...</p>}
+      {accounts === null && !error && <PageLoader label="Carregando as contas" />}
       {accounts && groups.map((group) => {
         const list = accounts.filter((item) => item.status === group.status)
         if (list.length === 0 && group.status !== 'pending') return null

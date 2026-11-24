@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { getMe } from '../../services/api'
 import { setAccount, useAccount } from '../../services/user'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 
 // Toda tela, menos o login, pede uma sessão. Ao abrir o app, pergunta ao
 // servidor quem está logado (o cookie é HttpOnly: só ele sabe).
@@ -25,7 +26,7 @@ export function RequireLogin() {
       </div>
     )
   }
-  if (account === undefined) return <div className="auth-wait" aria-busy="true" />
+  if (account === undefined) return <PageLoader label="Entrando" />
   if (account === null) return <Navigate replace state={{ from: location.pathname + location.search }} to="/login" />
   return <Outlet />
 }

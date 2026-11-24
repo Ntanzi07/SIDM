@@ -9,6 +9,7 @@ import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import { fieldLabel, listObjectTypes } from '../../utils/annotationForm'
 import { FieldInput } from './AnnotationFields'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Annotation.css'
 
 function formatSize(bytes: number) {
@@ -48,7 +49,7 @@ export function AnnotationPage() {
     if (ok) setShowDeleteModal(false)
   }
 
-  if (annotator.loading) return <section className="annotation-page annotation-empty">Carregando a fila...</section>
+  if (annotator.loading) return <section className="annotation-page"><PageLoader label="Carregando a fila" /></section>
   if (annotator.error && !image && !annotator.finished) {
     return (
       <section className="annotation-page annotation-empty">

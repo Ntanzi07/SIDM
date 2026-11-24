@@ -20,6 +20,7 @@ import { GridPicker, Menu, SearchField, SearchIcon } from '../../components/Tool
 import { savedColumns, saveColumns, type Columns, type MenuOption } from '../../components/Toolbar/columns'
 import { useIsAdmin } from '../../services/user'
 import '../Packages/Packages.css'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Tasks.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -113,7 +114,7 @@ function TaskGrid() {
         {admin && <button className="button button--primary" onClick={() => setCreating(true)} type="button">+ Nova tarefa</button>}
       </div>
       {error && <p className="form-error">{error}</p>}
-      {tasks === null && <p className="tasks-hint">Carregando...</p>}
+      {tasks === null && <PageLoader label="Carregando as tarefas" />}
       {tasks?.length === 0 && !error && (
         <div className="tasks-empty">
           <p>Nenhuma tarefa ainda.</p>
@@ -332,7 +333,7 @@ function DownloadModal({ task, onClose }: { task: AnnotationTask; onClose: () =>
           Um zip com as imagens dos pacotes escolhidos. Os nomes dos arquivos começam pelo sha1: é assim que o import das caixas encontra cada imagem depois.
         </p>
         {error && <p className="form-error">{error}</p>}
-        {packages === null && !error && <p className="tasks-hint">Carregando...</p>}
+        {packages === null && !error && <PageLoader inline label="Carregando os pacotes" />}
         {packages && packages.length === 0 && <p className="tasks-hint">Nenhum pacote com imagens.</p>}
         {packages && packages.length > 0 && (
           <>
@@ -463,7 +464,7 @@ function TaskDetail({ name }: { name: string }) {
       </section>
     )
   }
-  if (!task) return <section className="tasks-page"><p className="tasks-hint">Carregando...</p></section>
+  if (!task) return <section className="tasks-page"><PageLoader label="Carregando a tarefa" /></section>
 
   const stats = task.stats
   return (

@@ -9,6 +9,7 @@ import { formatWhen } from '../Versions/format'
 import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
 import { useIsAdmin } from '../../services/user'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Dashboard.css'
 
 // Dashboard: primeiro escolhe o perfil de anotação; depois, à esquerda, de
@@ -55,7 +56,7 @@ function ProfilePicker() {
         </div>
       </div>
       {error && <p className="form-error">{error}</p>}
-      {profiles === null && !error && <p className="dashboard-hint">Carregando...</p>}
+      {profiles === null && !error && <PageLoader label="Carregando os perfis" />}
       {profiles && (
         <div className="profile-grid">
           {profiles.map((item, index) => (
@@ -154,7 +155,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
 
           <span className="eyebrow dashboard-side__group">Versões</span>
           {error && <p className="form-error">{error}</p>}
-          {datasets === null && <p className="dashboard-hint">Carregando...</p>}
+          {datasets === null && <PageLoader inline label="Carregando as versões" />}
           {datasets?.length === 0 && !error && (
             <p className="dashboard-hint">Nenhum dataset ainda. Monte a pesquisa à direita e use “Salvar como dataset”.</p>
           )}

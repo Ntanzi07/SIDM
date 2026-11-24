@@ -8,6 +8,7 @@ import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { getAnnotationProfile, getImage, getPackage, listPackageImages, reopenImage } from '../../services/api'
 import type { AnnotationProfile, ImageDetail } from '../../types/annotation'
 import { displayValue, fieldLabel } from '../../utils/annotationForm'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Viewer.css'
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -122,7 +123,7 @@ export function ImageViewerPage() {
       </div>
 
       {error && <p className="form-error">{error}</p>}
-      {loading && !image && <p className="viewer-empty">Carregando...</p>}
+      {loading && !image && <PageLoader label="Carregando as verificadas" />}
       {!loading && !image && !error && <p className="viewer-empty">Nenhuma imagem verificada neste pacote ainda.</p>}
 
       {image && (

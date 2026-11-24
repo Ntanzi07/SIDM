@@ -30,6 +30,7 @@ import {
 import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { AnnotationProfilesSection } from './AnnotationProfilesSection'
 import { ColumnPicker } from './ColumnPicker'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Settings.css'
 
 const DEFAULT_ANNOTATION_PROFILE = 'veiculos'
@@ -207,9 +208,10 @@ export function SettingsPage() {
 
   // Inline edit/rename state for equipment and camera
   const [editingRegistry, setEditingRegistry] = useState<EditingRegistry>(null)
+  const [loaded, setLoaded] = useState(false) // a primeira carga
 
   function loadCodes() {
-    Promise.all([listEquipments(), listCameras(), listInactiveEquipments(), listInactiveCameras()])
+    return Promise.all([listEquipments(), listCameras(), listInactiveEquipments(), listInactiveCameras()])
       .then(([equipmentNames, cameraNames, offEquipments, offCameras]) => {
         setEquipments(equipmentNames)
         setCameras(cameraNames)
@@ -220,17 +222,19 @@ export function SettingsPage() {
   }
 
   function loadProfiles() {
-    listAllImportProfiles()
+    return listAllImportProfiles()
       .then(setProfiles)
       .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis de importação.'))
   }
 
   useEffect(() => {
-    loadCodes()
-    loadProfiles()
-    listAnnotationProfiles()
-      .then(setAnnotationProfiles)
-      .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis de anotação.'))
+    void Promise.allSettled([
+      loadCodes(),
+      loadProfiles(),
+      listAnnotationProfiles()
+        .then(setAnnotationProfiles)
+        .catch((requestError: unknown) => setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis de anotação.')),
+    ]).then(() => setLoaded(true))
   }, [])
 
   const annotationProfile = annotationProfiles.find((p) => p.name === annotationProfileName)
@@ -722,6 +726,8 @@ export function SettingsPage() {
       </div>
     )
   }
+
+  if (!loaded) return <section className="package-page settings-page"><PageLoader label="Carregando as configurações" /></section>
 
   return (
     <section className="package-page settings-page">

@@ -4,6 +4,7 @@ import { listPackageTasks, listPackages, type PackageSummary } from '../../servi
 import type { Package } from '../../types/package'
 import { GridPicker, Menu, SearchField, SearchIcon } from '../../components/Toolbar/Toolbar'
 import { COLUMNS, savedColumns, saveColumns, type Columns, type MenuOption } from '../../components/Toolbar/columns'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Packages.css'
 
 // "há 3 dias"; vazio quando a data falta (pacotes antigos vêm sem ela)
@@ -207,9 +208,7 @@ export function PackagesPage() {
           ))}
         </div>
       ) : loading ? (
-        <div className="empty-package">
-          <p>Carregando pacotes...</p>
-        </div>
+        <PageLoader label="Carregando os pacotes" />
       ) : error ? (
         <div className="empty-package">
           <h2>Não foi possível carregar os pacotes</h2>
