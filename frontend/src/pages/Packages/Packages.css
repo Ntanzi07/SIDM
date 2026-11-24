@@ -123,7 +123,7 @@
 
 .filter-clear:hover {
   color: var(--text);
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: var(--border-hover);
 }
 
 .filter-menu__options {
@@ -380,7 +380,7 @@
   display: grid;
   place-items: center;
   background:
-    repeating-linear-gradient(135deg, transparent 0 10px, rgba(255, 255, 255, 0.025) 10px 11px),
+    repeating-linear-gradient(135deg, transparent 0 10px, var(--hatch) 10px 11px),
     var(--surface-2);
   color: var(--text-3);
   font-size: 34px;

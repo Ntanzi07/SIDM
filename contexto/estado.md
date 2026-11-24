@@ -4,6 +4,8 @@ Atualizado em 2026-11-23. Branch de trabalho: `fix/config-ini`.
 
 ## Pronto
 
+- Tema claro + botão claro/escuro no header (branch `feat/tema-claro`, ainda sem commit).
+
 - Monólito modular completo (`catalog`, `images`, `annotation`, `boxes`, `imports`, `exports`).
 - Perfis de anotação: cadastro, validação, editor em **Configurar → Perfis de anotação**,
   perfil por pacote, tela de anotação montada a partir do perfil, migração das imagens.

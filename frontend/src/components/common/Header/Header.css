@@ -44,7 +44,7 @@
 
 .app-header__link:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--hover);
 }
 
 /* ativo: com contorno, como o "Media Data" da referência */
@@ -81,7 +81,7 @@
 }
 
 .app-header__user-button:hover:not(:disabled) {
-  background: #ffffff;
+  background: var(--primary-hover);
 }
 
 .app-header__user-button:disabled {
@@ -106,5 +106,36 @@
 
   .app-header__user {
     margin-left: auto;
+  }
+}
+
+/* claro/escuro: um botão só com o ícone, entre o menu e o nome */
+.app-header__theme {
+  display: grid;
+  flex-shrink: 0;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  margin-left: -16px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: color 160ms var(--ease), background 160ms var(--ease);
+}
+
+.app-header__theme:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+@media (max-width: 760px) {
+  .app-header__theme {
+    margin-left: auto;
+  }
+
+  .app-header__user {
+    margin-left: 0;
   }
 }
