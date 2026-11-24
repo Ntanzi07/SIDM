@@ -66,7 +66,7 @@ do próprio JPEG**.
 ```
 SIDM/
 ├── .env / .env.example     portas, senhas do Mongo, pasta das imagens (.env fora do git)
-├── docker-compose.yml      mongo + backend, healthchecks, redes separadas
+├── docker-compose.yml      mongo + backend + frontend (nginx), healthchecks, redes separadas
 ├── mongo/init/
 │   ├── 00-users.js         cria o usuário sidm_app (readWrite só no banco sidm)
 │   └── 01-init.js          collections e índices
@@ -893,7 +893,11 @@ e a porta exposta vem do `BACKEND_PORT`.
 ```powershell
 docker compose up -d --build
 ```
-O backend fica em `http://localhost:<BACKEND_PORT>`.
+O sistema fica em `http://localhost:<FRONTEND_PORT>` (3000 por padrão) e o backend em
+`http://localhost:<BACKEND_PORT>`. O frontend é o site compilado num nginx, que repassa
+`/api` para o backend, como o proxy do `npm run dev`. Os containers voltam sozinhos
+(`restart: unless-stopped`). Depois de mudar o código, reconstrua o que mudou:
+`docker compose up -d --build frontend` (ou `backend`).
 
 ### 4. Teste rápido
 ```powershell

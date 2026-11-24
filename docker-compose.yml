@@ -53,17 +53,24 @@ services:
       - backend
       - frontend
 
-  # frontend:
-  #   build: ./frontend
-  #   container_name: sidm-frontend
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3000:80"
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   networks:
-  #     - frontend
+  # o site compilado num nginx; /api vai para o backend pela rede frontend
+  frontend:
+    build: ./frontend
+    container_name: sidm-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1, não localhost: no Alpine o localhost vai para o IPv6 (::1), e o nginx escuta só em IPv4
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - frontend
 
 networks:
   backend:   # mongo <-> backend

@@ -32,7 +32,7 @@ criar pacote ─▶ upload ─▶ (import de CSV/INI) ─▶ fila de anotação 
 | Backend | Go (ver `backend/go.mod`), `net/http` puro, driver oficial do Mongo v2 |
 | Banco | MongoDB 8 (sem replica set: **não há transações**) |
 | Frontend | React 19 + TypeScript + Vite, `react-router-dom`, CSS por página (sem framework de UI) |
-| Infra | `docker-compose.yml` (Mongo + backend); o frontend roda com `npm run dev` |
+| Infra | `docker-compose.yml` (Mongo + backend + frontend num nginx, porta `FRONTEND_PORT`, padrão 3000); para desenvolver o front, `npm run dev` |
 | Docs da API | `backend/internal/api/openapi.yaml`, servido em `/docs` |
 
 ## Pessoas e uso
