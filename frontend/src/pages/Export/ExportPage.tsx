@@ -22,6 +22,8 @@ import { FolderLevels } from './FolderLevels'
 import { Link } from 'react-router-dom'
 import { useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
+import { useIsAdmin } from '../../services/user'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Export.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -150,6 +152,7 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
 }
 
 export function ExportPage() {
+  const admin = useIsAdmin() // salvar e apagar perfis: só admin
   const [profiles, setProfiles] = useState<ExportProfile[]>([])
   const [packageProfiles, setPackageProfiles] = useState<Record<string, string>>({}) // pacote -> perfil de anotação
   const [tasks, setTasks] = useState<AnnotationTask[]>([])
@@ -162,6 +165,7 @@ export function ExportPage() {
   const [busy, setBusy] = useState<'' | 'preview' | 'save' | 'delete'>('')
   const [, setError] = useToastState('error')
   const [, setMessage] = useToastState('success')
+  const [loaded, setLoaded] = useState(false) // a primeira carga (perfis, pacotes, tarefas)
 
   useEffect(() => {
     let active = true
@@ -181,6 +185,7 @@ export function ExportPage() {
         }
       })
       .catch((requestError: unknown) => { if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar o export.') })
+      .finally(() => { if (active) setLoaded(true) })
     return () => { active = false }
   }, [setError])
 
@@ -353,6 +358,8 @@ export function ExportPage() {
   // Pacotes de outro perfil de anotação entram, mas sem os campos (não
   // passam nos filtros; vão para "Desconhecido").
   const otherProfile = (name: string) => Boolean(packageProfiles[name]) && packageProfiles[name] !== annotationName
+
+  if (!loaded) return <section className="export-page"><PageLoader label="Carregando o export" /></section>
 
   return (
     <section className="export-page">
@@ -649,12 +656,14 @@ export function ExportPage() {
                 Baixar zip
               </button>
               <span className="export-actions__spacer" />
-              {selected && !isBuiltin && (
+              {admin && selected && !isBuiltin && (
                 <button className="button button--danger" disabled={busy !== ''} onClick={() => void remove()} type="button">Apagar perfil</button>
               )}
-              <button className="button button--secondary" disabled={busy !== '' || !canSave} onClick={() => void save()} type="button">
-                {busy === 'save' ? 'Salvando...' : selected && !isBuiltin && selected === draft.name.trim() ? 'Salvar alterações' : 'Salvar como novo perfil'}
-              </button>
+              {admin && (
+                <button className="button button--secondary" disabled={busy !== '' || !canSave} onClick={() => void save()} type="button">
+                  {busy === 'save' ? 'Salvando...' : selected && !isBuiltin && selected === draft.name.trim() ? 'Salvar alterações' : 'Salvar como novo perfil'}
+                </button>
+              )}
             </div>
           </div>
 

@@ -16,6 +16,7 @@ import { formatWhen, keyInfo, valueText } from './format'
 import { spanText } from '../../components/Charts/palette'
 import { DatasetTimeline, VersionPanel, type PanelTab } from './VersionParts'
 import { useToastState } from '../../hooks/useToast'
+import { useIsAdmin } from '../../services/user'
 import './Versions.css'
 
 // Um dataset: a pesquisa salva, as versões (da mais nova para a mais velha),
@@ -180,6 +181,7 @@ function NewVersion({ dataset, onCreated }: { dataset: string; onCreated: (versi
 
 function DeleteDataset({ name }: { name: string }) {
   const navigate = useNavigate()
+  const admin = useIsAdmin() // apagar é só de admin
   const [confirming, setConfirming] = useState(false)
   const [, setError] = useToastState('error')
 
@@ -192,6 +194,7 @@ function DeleteDataset({ name }: { name: string }) {
     }
   }
 
+  if (!admin) return null
   return (
     <div className="delete-dataset">
       {confirming ? (

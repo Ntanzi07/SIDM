@@ -174,12 +174,15 @@ type Repo interface {
 type Images interface {
 	SearchIDs(ctx context.Context, q url.Values) ([]string, error)
 	List(ctx context.Context, f images.ImageFilter) ([]images.Image, int64, error)
+	// Restore: a volta de uma imagem (da lixeira, se foi apagada).
+	Restore(ctx context.Context, sha1 string, in images.RestoreInput, changedBy string) (*images.Image, bool, error)
 }
 
 // Boxes é o que o módulo lê das tarefas e caixas.
 type Boxes interface {
 	ListTasks(ctx context.Context) ([]boxes.Task, error)
 	FindSets(ctx context.Context, task string, shas []string) (map[string]boxes.Set, error)
+	RestoreSets(ctx context.Context, sha1, pkg string, tasks []string, frozen map[string]boxes.Set, user string) error
 }
 
 // Annotation: os perfis de anotação.

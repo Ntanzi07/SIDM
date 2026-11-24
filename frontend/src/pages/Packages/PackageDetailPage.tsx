@@ -10,7 +10,9 @@ import { ImportModal, type ImportSource } from './ImportModal'
 import { PackageImages } from './PackageImages'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import { useToastState } from '../../hooks/useToast'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Packages.css'
+import { useIsAdmin } from '../../services/user'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
 
@@ -18,6 +20,7 @@ const fmt = (n: number) => n.toLocaleString('pt-BR')
 // imports, e à direita as imagens em rolagem infinita.
 export function PackageDetailPage() {
   const navigate = useNavigate()
+  const admin = useIsAdmin() // apagar o pacote e trocar o perfil: só admin
   const { id } = useParams()
   const [selectedPackage, setSelectedPackage] = useState<PackageSummary | undefined>()
   const [upload, setUpload] = useState<UploadProgress | null>(null)
@@ -130,7 +133,7 @@ export function PackageDetailPage() {
   }
 
   if (loading) {
-    return <section className="package-page empty-package"><p>Carregando pacote...</p></section>
+    return <section className="package-page"><PageLoader label="Carregando o pacote" /></section>
   }
 
   if (!selectedPackage) {
@@ -158,7 +161,7 @@ export function PackageDetailPage() {
           <h1>{selectedPackage.name}</h1>
           <p>
             criado por {selectedPackage.created_by} · perfil de anotação{' '}
-            {selectedPackage.verified === 0 && annotationProfiles.length > 1 ? (
+            {admin && selectedPackage.verified === 0 && annotationProfiles.length > 1 ? (
               <select
                 aria-label="Perfil de anotação"
                 className="detail-profile-select"
@@ -175,7 +178,7 @@ export function PackageDetailPage() {
           </p>
         </div>
         <div className="detail-heading__actions">
-          <button className="button button--danger" disabled={saving} onClick={handleOpenDeleteModal} type="button">Excluir pacote</button>
+          {admin && <button className="button button--danger" disabled={saving} onClick={handleOpenDeleteModal} type="button">Excluir pacote</button>}
           <button
             className="button button--secondary"
             disabled={selectedPackage.verified === 0}

@@ -1,0 +1,47 @@
+/* A espera de uma tela: ocupa o lugar do conteúdo, centralizada. */
+.page-loader {
+  display: grid;
+  gap: 14px;
+  min-height: 52vh;
+  place-content: center;
+  justify-items: center;
+  opacity: 0;
+  animation: page-loader-in 260ms var(--ease) 150ms forwards;
+}
+
+/* dentro de uma parte da tela (um card, uma lista) */
+.page-loader--inline {
+  min-height: 160px;
+}
+
+.page-loader__ring {
+  width: 30px;
+  height: 30px;
+  border: 2.5px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: page-loader-spin 800ms linear infinite;
+}
+
+.page-loader__label {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+@keyframes page-loader-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes page-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .page-loader__ring {
+    animation-duration: 2.4s;
+  }
+}

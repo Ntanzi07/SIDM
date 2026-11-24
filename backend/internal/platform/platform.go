@@ -70,8 +70,9 @@ func LogError(err error) {
 	log.Printf("erro: %v", err)
 }
 
-// UserFrom diz quem está fazendo a ação.
-// TODO: quando tiver login, o usuário vem da sessão, não de um header.
+// UserFrom diz quem está fazendo a ação. No servidor, o X-User é escrito
+// pelo login (users.Protect, a partir da sessão): o que o navegador manda é
+// descartado. Nos testes dos módulos, vem direto no header.
 func UserFrom(r *http.Request) string {
 	if u := r.Header.Get("X-User"); u != "" {
 		return u

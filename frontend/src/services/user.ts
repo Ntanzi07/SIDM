@@ -1,35 +1,73 @@
-// Quem está usando o sistema. Ainda não há login: o nome vai no header
-// X-User de cada pedido (histórico das imagens e reserva da fila) e fica
-// guardado neste navegador.
-const STORAGE_KEY = 'sidm.user'
+import { useSyncExternalStore } from 'react'
 
-let current = read()
-const listeners = new Set<(user: string) => void>()
+// Quem está logado. A sessão é um cookie HttpOnly (o JavaScript não lê): o
+// app pergunta ao servidor (/auth/me) ao abrir e guarda a conta aqui.
+// undefined = ainda perguntando; null = ninguém logado.
 
-function read(): string {
-  try {
-    return localStorage.getItem(STORAGE_KEY)?.trim() ?? ''
-  } catch {
-    return ''
-  }
+export type Account = {
+  username: string // o nome no histórico das imagens (sai do e-mail no cadastro)
+  email?: string
+  name: string
+  role: 'admin' | 'user'
+  status: 'pending' | 'active' | 'disabled'
+  created_at: string
+  approved_by?: string
+  approved_at?: string
+  last_login?: string
 }
 
-export function getUser(): string {
+let current: Account | null | undefined
+const listeners = new Set<() => void>()
+
+export function getAccount(): Account | null | undefined {
   return current
 }
 
-export function setUser(name: string): void {
-  current = name.trim()
-  try {
-    if (current) localStorage.setItem(STORAGE_KEY, current)
-    else localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    // sem storage (modo privado etc.): vale só até recarregar a página
-  }
-  listeners.forEach((listener) => listener(current))
+// O nome de login (o mesmo do histórico das imagens e da fila).
+export function getUser(): string {
+  return current?.username ?? ''
 }
 
-export function subscribeUser(listener: (user: string) => void): () => void {
+export function isAdmin(): boolean {
+  return current?.role === 'admin'
+}
+
+export function setAccount(account: Account | null): void {
+  current = account
+  listeners.forEach((listener) => listener())
+}
+
+function subscribe(listener: () => void): () => void {
   listeners.add(listener)
   return () => { listeners.delete(listener) }
+}
+
+// A conta logada, atualizando a tela quando muda (entrar, sair, sessão vencida).
+export function useAccount(): Account | null | undefined {
+  return useSyncExternalStore(subscribe, getAccount)
+}
+
+// Só admin (apagar, Configurar, contas): para esconder o que não pode.
+export function useIsAdmin(): boolean {
+  return useAccount()?.role === 'admin'
+}
+
+// Quantas contas esperam aprovação (o selo do admin no menu). Quem muda a
+// lista (a tela de Usuários) avisa por aqui, e o selo acompanha na hora.
+let pending = 0
+const pendingListeners = new Set<() => void>()
+
+export function setPendingCount(count: number): void {
+  if (count === pending) return
+  pending = count
+  pendingListeners.forEach((listener) => listener())
+}
+
+function subscribePending(listener: () => void): () => void {
+  pendingListeners.add(listener)
+  return () => { pendingListeners.delete(listener) }
+}
+
+export function usePendingCount(): number {
+  return useSyncExternalStore(subscribePending, () => pending)
 }

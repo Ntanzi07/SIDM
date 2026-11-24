@@ -781,3 +781,31 @@ func TestMongoStats(t *testing.T) {
 		t.Errorf("p2 fora da lista: %+v", got)
 	}
 }
+
+// A lixeira pelo banco: o registro volta inteiro (a lista do campo como
+// []string, não bson.A) e gravar de novo substitui.
+func TestMongoLixeira(t *testing.T) {
+	s := testRepo(t)
+	ctx := context.Background()
+	img := Image{SHA1: "a", Package: "p", Status: StatusVerified, Path: "dataset/p/a.jpg", Ext: ".jpg",
+		Fields: map[string]any{"conditions": []string{"rain", "night"}}}
+	if err := s.PutTrash(ctx, &Trash{Image: img, DeletedBy: "maria", DeletedAt: ms(time.Now())}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PutTrash(ctx, &Trash{Image: img, DeletedBy: "joao", DeletedAt: ms(time.Now())}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.FindTrash(ctx, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DeletedBy != "joao" || got.Path != img.Path || !reflect.DeepEqual(got.Fields["conditions"], []string{"rain", "night"}) {
+		t.Errorf("da lixeira: %+v", got)
+	}
+	if err := s.DeleteTrash(ctx, "a"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.FindTrash(ctx, "a"); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("apagada da lixeira: %v", err)
+	}
+}

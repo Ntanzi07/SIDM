@@ -15,6 +15,7 @@ mexem nelas pelo `Service` dele.
 | `imports` | módulo | perfis de import, raio-x de arquivo, import de CSV/INI nos rascunhos | `import_profiles` |
 | `exports` | módulo | perfis de export salvos, preview e download do zip | `export_profiles` |
 | `versions` | módulo | datasets (pesquisas salvas) e versões congeladas deles, com o resumo para o dashboard | `datasets`, `versions`, `version_items` |
+| `users` | módulo | login: contas (admin/usuário, cadastro pendente até aprovar), sessões de 8 h, o middleware `Protect` (401/403) | `users`, `sessions` |
 | `filename` | biblioteca pura | nome v2 (formatar e ler), tabelas de códigos, sanitização | — |
 | `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import para os campos de um perfil de anotação (`annotation.Values`) | — |
 | `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC e só imagens (com `anotacoes.csv`) | — |
@@ -67,7 +68,8 @@ argumento do `api.New`.
 | Pasta | O que tem |
 |---|---|
 | `services/api.ts` | **todas** as chamadas HTTP (nenhuma tela usa `fetch` direto); `RequestError` com `problems` |
-| `services/user.ts` | o nome do usuário (vai no `X-User`) |
+| `services/user.ts` | a conta logada (`useAccount`, `useIsAdmin`); a sessão é o cookie, o app pergunta o `/auth/me` |
+| `app/auth/RequireLogin.tsx` | sem sessão, vai para `/login`; `RequireAdmin` guarda o Configurar e `/usuarios` |
 | `hooks/` | estado e regras das telas (`useAnnotator`, `useImageBoxes`) |
 | `types/` | os tipos da API (`annotation.ts` espelha o módulo `annotation`) |
 | `utils/annotationForm.ts` | conversão API ↔ formulário dos campos do perfil |

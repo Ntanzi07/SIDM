@@ -11,7 +11,11 @@ Metadados que já existem em outro lugar podem pré-preencher as anotações:
 um **CSV** exportado de outro sistema, ou o **INI que o equipamento grava dentro
 do próprio JPEG**.
 
-> **v1 interna:** não há login ainda. O usuário é informado no header `X-User`.
+> **Login:** cada pessoa tem uma conta (cadastro em `/login`, aprovado por um admin).
+> Entra-se pelo e-mail. O primeiro admin vem do `.env` (`SIDM_ADMIN_USER`,
+> `SIDM_ADMIN_EMAIL` e `SIDM_ADMIN_PASSWORD`). Pela API, entre com `POST /auth/login`
+> (`{"login": "<e-mail>", "password": "..."}`) e use o cookie `sidm_session`; o `X-User` mandado pelo
+> cliente é ignorado (o servidor usa o da sessão).
 > Rode apenas na rede interna.
 
 **Documentação interativa da API:** com o servidor rodando, abra `http://localhost:8080/docs`.
@@ -978,7 +982,7 @@ go tool cover -html=cover.out
 
 ## Próximos passos
 
-- [ ] **Login próprio** (usuário + senha bcrypt + sessão) no lugar do `X-User`
+- [x] **Login próprio** (usuário + senha PBKDF2 + sessão de 8 h) no lugar do `X-User`
 - [ ] Embutir o Swagger UI no binário (hoje vem de um CDN; não abre em rede sem internet)
 - [ ] Graceful shutdown
 - [ ] Validador `$jsonSchema` no Mongo

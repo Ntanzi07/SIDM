@@ -7,7 +7,16 @@ info:
 
     **Fluxo:** criar pacote → upload → fila de anotação (`/next`) → verificar (`PUT` com `complete: true`).
 
-    **v1 interna, sem login:** quem está agindo vai no header `X-User`. Rode só na rede interna.
+    **Login:** tudo, menos `/health`, a documentação e o `/auth/*` público, pede uma
+    sessão (o cookie `sidm_session`, de `POST /auth/login`, dura 8 horas). Sem
+    sessão: **401**; sem permissão: **403**. Quem está agindo vem da sessão: um
+    header `X-User` mandado pelo navegador é descartado (o servidor escreve o
+    da sessão). **Usuário normal** lê tudo e grava só: anotar (fila, campos,
+    caixas, cadastrar equipamento/câmera), importar (criar pacote, subir
+    imagens, CSV, caixas do CVAT), apagar imagens, baixar o export e criar
+    datasets e versões. **O resto é só admin** (403): tarefas e labels,
+    perfis (anotação, import, export), renomear/apagar pacotes, apagar
+    datasets e versões, cadastros e as contas (`/users`).
 
     **Listagens** respondem sempre `{"total": N, "items": [...]}`, com `limit` e `skip` para paginar.
 
@@ -15,6 +24,13 @@ info:
 
 tags:
   - name: sistema
+  - name: login
+    description: |
+      Contas e sessões. Quem se cadastra fica **pendente** até um admin aprovar.
+      A senha é guardada só como hash (PBKDF2-SHA256); a sessão é um cookie
+      HttpOnly. Entra-se pelo **e-mail** (ou pelo nome de usuário). O primeiro
+      admin vem do `.env` (`SIDM_ADMIN_USER`, `SIDM_ADMIN_EMAIL` e
+      `SIDM_ADMIN_PASSWORD`), só quando ainda não há nenhum admin ativo.
   - name: cadastros
     description: Equipamentos e câmeras.
   - name: pacotes
@@ -55,6 +71,168 @@ tags:
       CVAT (cvat.zip) e importa o export COCO 1.0 de volta, na tarefa.
 
 paths:
+  /auth/register:
+    post:
+      tags: [login]
+      summary: Cadastrar (fica pendente)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, password]
+              properties:
+                email: { type: string, format: email, example: maria.silva@empresa.com.br, description: "Único; é com ele que a pessoa entra." }
+                username: { type: string, example: maria.silva, description: "Opcional: sem ele, sai do e-mail (a parte antes do @; se já existe, ganha -2, -3...). É o nome do histórico das imagens." }
+                name: { type: string, example: Maria Silva }
+                password: { type: string, format: password, minLength: 8 }
+      responses:
+        "201":
+          description: Conta criada, pendente.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "409": { description: "E-mail que já tem conta.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /auth/login:
+    post:
+      tags: [login]
+      summary: Entrar
+      description: Abre uma sessão de 8 horas (cookie `sidm_session`). Depois de 5 senhas erradas seguidas, o usuário espera 5 minutos.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [login, password]
+              properties:
+                login: { type: string, example: maria.silva@empresa.com.br, description: "O e-mail (com @) ou o nome de usuário. `username` (o nome antigo do campo) ainda vale." }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Entrou.
+          headers:
+            Set-Cookie: { schema: { type: string, example: "sidm_session=...; Path=/; HttpOnly; SameSite=Lax" } }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { description: "Conta pendente ou desativada.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: "Muitas tentativas erradas.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+
+  /auth/logout:
+    post:
+      tags: [login]
+      summary: Sair
+      security: []
+      responses:
+        "204": { description: Saiu (o cookie é apagado). }
+
+  /auth/me:
+    get:
+      tags: [login]
+      summary: Quem está logado
+      security: []
+      responses:
+        "200":
+          description: A conta da sessão.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /auth/password:
+    put:
+      tags: [login]
+      summary: Trocar a própria senha
+      description: As outras sessões da pessoa caem; esta continua (ganha um cookie novo).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current, new]
+              properties:
+                current: { type: string, format: password }
+                new: { type: string, format: password, minLength: 8 }
+      responses:
+        "204": { description: Trocada. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /users:
+    get:
+      tags: [login]
+      summary: Listar as contas (admin)
+      responses:
+        "200":
+          description: As contas, por nome de usuário.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  items: { type: array, items: { $ref: "#/components/schemas/User" } }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /users/{username}:
+    patch:
+      tags: [login]
+      summary: Aprovar, desativar ou trocar o papel (admin)
+      description: O sistema nunca fica sem nenhum admin ativo (409). Desativar fecha as sessões da pessoa na hora.
+      parameters:
+        - { name: username, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status: { type: string, enum: [active, disabled], description: "active: aprova (pendente) ou reativa." }
+                role: { type: string, enum: [admin, user] }
+                name: { type: string }
+      responses:
+        "200":
+          description: A conta como ficou.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /users/{username}/password:
+    put:
+      tags: [login]
+      summary: Definir uma senha nova para alguém (admin)
+      description: Para quem esqueceu. As sessões da pessoa caem.
+      parameters:
+        - { name: username, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password]
+              properties:
+                password: { type: string, format: password, minLength: 8 }
+      responses:
+        "204": { description: Definida. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /health:
     get:
       tags: [sistema]
@@ -1353,6 +1531,74 @@ paths:
               schema: { $ref: "#/components/schemas/VersionDiff" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+  /datasets/{name}/versions/{number}/restore:
+    post:
+      tags: [versões]
+      summary: Voltar tudo para a versão (admin)
+      description: |
+        Todas as imagens que mudaram desde a versão voltam para ela: as
+        **alteradas** e as que **saíram** (apagadas, que saem da lixeira;
+        reabertas; ou que deixaram de passar na pesquisa). As que **entraram**
+        depois não mudam. Uma que falha não para as outras (vai em `failed`).
+        Segue até o fim mesmo se o cliente desistir de esperar.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: number, in: path, required: true, schema: { type: string, example: "3" } }
+      responses:
+        "200":
+          description: O que voltou.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version: { type: integer }
+                  restored: { type: integer }
+                  from_trash: { type: integer }
+                  added: { type: integer, description: Entraram depois da versão (não mudam). }
+                  failed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        sha1: { type: string }
+                        name: { type: string }
+                        error: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /datasets/{name}/versions/{number}/items/{sha1}/restore:
+    post:
+      tags: [versões]
+      summary: Voltar uma imagem para como estava na versão
+      description: |
+        Os campos, os objetos e as caixas de cada tarefa da versão voltam para a
+        imagem (como verificada; passa pelo perfil do pacote, como uma anotação
+        normal). Se a imagem foi apagada depois, sai da **lixeira** (o registro e
+        o arquivo). A versão não muda: a próxima registra a volta. O histórico
+        da imagem diz "via volta para a vN".
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+        - { name: number, in: path, required: true, schema: { type: string, example: "3" }, description: "3 ou v3 (o \"atual\" não vale: 400)." }
+        - { name: sha1, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Voltou.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sha1: { type: string }
+                  version: { type: integer }
+                  from_trash: { type: boolean, description: Estava apagada e saiu da lixeira. }
+                  package: { type: string }
+                  file_name: { type: string }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
   /datasets/{name}/diff/{sha1}:
     parameters:
       - { name: name, in: path, required: true, schema: { type: string } }
@@ -1537,8 +1783,13 @@ paths:
         "409": { $ref: "#/components/responses/Conflict" }
     delete:
       tags: [imagens]
-      summary: Excluir imagem (IRREVERSÍVEL)
-      description: Apaga o registro, o histórico e o arquivo. Recusa (409) se outra pessoa está anotando.
+      summary: Excluir imagem (vai para a lixeira)
+      description: |
+        Tira a imagem do pacote e guarda na **lixeira**: o registro inteiro
+        (coleção `images_trash`) e o arquivo (`lixeira/<sha1>.ext`). As caixas
+        saem; o histórico fica. Ela volta por uma versão que a tenha
+        (`POST /datasets/{name}/versions/{number}/items/{sha1}/restore`).
+        Recusa (409) se outra pessoa está anotando.
       parameters:
         - $ref: "#/components/parameters/SHA1"
         - $ref: "#/components/parameters/XUser"
@@ -1906,6 +2157,16 @@ components:
               file: { type: string, format: binary }
 
   responses:
+    Unauthorized:
+      description: Sem sessão (faça login).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: Só um admin pode fazer isso.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
     BadRequest:
       description: Dado inválido; a mensagem diz o quê.
       content:
@@ -1960,6 +2221,18 @@ components:
                     name: { type: string }
 
   schemas:
+    User:
+      type: object
+      properties:
+        username: { type: string, example: maria.silva, description: O nome no histórico das imagens. }
+        email: { type: string, format: email, example: maria.silva@empresa.com.br }
+        name: { type: string, example: Maria Silva }
+        role: { type: string, enum: [admin, user] }
+        status: { type: string, enum: [pending, active, disabled] }
+        created_at: { type: string, format: date-time }
+        approved_by: { type: string }
+        approved_at: { type: string, format: date-time }
+        last_login: { type: string, format: date-time }
     DatasetQuery:
       type: object
       properties:

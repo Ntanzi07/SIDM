@@ -1,11 +1,13 @@
 package versions
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 
+	"SIDM/internal/images"
 	"SIDM/internal/platform"
 )
 
@@ -37,6 +39,8 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "GET", Path: "/datasets/{name}/versions/{number}/stats", Handler: s.handleVersionStats},
 		{Method: "GET", Path: "/datasets/{name}/diff", Handler: s.handleDiff},
 		{Method: "GET", Path: "/datasets/{name}/diff/{sha1}", Handler: s.handleDiffItem},
+		{Method: "POST", Path: "/datasets/{name}/versions/{number}/items/{sha1}/restore", Handler: s.handleRestoreItem},
+		{Method: "POST", Path: "/datasets/{name}/versions/{number}/restore", Handler: s.handleRestoreAll},
 	}
 }
 
@@ -53,6 +57,8 @@ func writeErr(w http.ResponseWriter, err error) {
 		platform.WriteError(w, http.StatusConflict, "já existe um dataset com esse nome")
 	case errors.As(err, &conflict):
 		platform.WriteError(w, http.StatusConflict, conflict.Msg)
+	case errors.Is(err, images.ErrConflict):
+		platform.WriteError(w, http.StatusConflict, err.Error())
 	default:
 		platform.ServerError(w, err)
 	}
@@ -283,4 +289,44 @@ func (s *Service) handleVersionStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, st)
+}
+
+// POST /datasets/{name}/versions/{number}/items/{sha1}/restore
+// A imagem volta para como estava na versão (se foi apagada, sai da lixeira).
+func (s *Service) handleRestoreItem(w http.ResponseWriter, r *http.Request) {
+	n, ok := number(w, r)
+	if !ok {
+		return
+	}
+	u, ok := user(w, r)
+	if !ok {
+		return
+	}
+	res, err := s.RestoreItem(r.Context(), r.PathValue("name"), n, r.PathValue("sha1"), u)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, res)
+}
+
+// POST /datasets/{name}/versions/{number}/restore
+// Todas as imagens que mudaram desde a versão voltam para ela. Pode levar
+// um tempo (milhares de imagens): segue até o fim mesmo se o navegador
+// desistir de esperar.
+func (s *Service) handleRestoreAll(w http.ResponseWriter, r *http.Request) {
+	n, ok := number(w, r)
+	if !ok {
+		return
+	}
+	u, ok := user(w, r)
+	if !ok {
+		return
+	}
+	rep, err := s.RestoreAll(context.WithoutCancel(r.Context()), r.PathValue("name"), n, u)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, rep)
 }

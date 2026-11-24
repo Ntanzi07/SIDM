@@ -8,8 +8,11 @@ Se um pedido conflitar com uma destas regras, **pare e pergunte** em vez de segu
   leia o conteúdo de chaves privadas nem do `.env`; use as variáveis (`MONGO_ROOT_USER`,
   `MONGO_APP_PASSWORD`...) sem imprimir o valor. O `.env.example` mostra os nomes.
 - **PGP não é usado** no projeto. Não sugira nem adicione.
-- **Rede interna, sem login:** o usuário vem no header `X-User` (o frontend guarda o nome
-  no navegador). Não trate isso como autenticação; login próprio é um passo futuro.
+- **Login (módulo `users`):** sessão de 8 horas num cookie HttpOnly; no banco só o hash do
+  token e a senha em PBKDF2-SHA256. O `users.Protect` descarta o `X-User` do navegador e
+  escreve o da sessão (o resto lê `platform.UserFrom`). O usuário normal só grava o que está em
+  `userWrites` (users/http.go): rota nova que grava nasce só de admin. Mudou a regra? Mude
+  a lista e o `TestRegras`. Nunca logue senha nem token.
 - **Erro interno não vaza:** o cliente recebe "erro interno" (`platform.ServerError`) e o
   detalhe vai para o log.
 - **Menor privilégio:** o backend usa o usuário `sidm_app` (só `readWrite` no banco

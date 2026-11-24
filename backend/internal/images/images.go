@@ -154,6 +154,11 @@ type Repo interface {
 	ListImages(ctx context.Context, f ImageFilter) ([]Image, int64, error)
 	DeleteImage(ctx context.Context, sha1 string) error
 	DeleteImageHistory(ctx context.Context, sha1 string) error
+	// A lixeira (coleção images_trash): o registro de uma imagem apagada,
+	// para ela poder voltar por uma versão. Gravar de novo substitui.
+	PutTrash(ctx context.Context, t *Trash) error
+	FindTrash(ctx context.Context, sha1 string) (*Trash, error)
+	DeleteTrash(ctx context.Context, sha1 string) error
 	InsertHistory(ctx context.Context, entries []HistoryEntry) error
 	ExistingImages(ctx context.Context, ids []string) (map[string]ExistingImage, error)
 	FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]Image, error)
@@ -197,4 +202,12 @@ type Annotations interface {
 // Listener é avisado quando uma imagem é apagada (ex.: as caixas dela).
 type Listener interface {
 	DeleteImage(ctx context.Context, sha1 string) error
+}
+
+// Trash é uma imagem apagada, na lixeira: o registro inteiro (com o INI) e
+// quem apagou. O arquivo vai para lixeira/<sha1>.ext (files.TrashPath).
+type Trash struct {
+	Image     `bson:",inline"`
+	DeletedBy string    `bson:"deleted_by" json:"deleted_by"`
+	DeletedAt time.Time `bson:"deleted_at" json:"deleted_at"`
 }

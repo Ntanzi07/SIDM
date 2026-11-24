@@ -720,3 +720,33 @@ func (m *MongoRepo) MatchingIDs(ctx context.Context, f ImageFilter) ([]string, e
 // texto = []string, número = float64, data = time.Time). O módulo versions
 // usa para os itens congelados.
 func NormalizeValue(v any) any { return bsonValue(v) }
+
+// ---------- lixeira (images_trash) ----------
+
+func (m *MongoRepo) PutTrash(ctx context.Context, t *Trash) error {
+	_, err := m.db.Collection("images_trash").ReplaceOne(ctx, bson.D{{Key: "_id", Value: t.SHA1}}, t, options.Replace().SetUpsert(true))
+	if err != nil {
+		return fmt.Errorf("guardar %s na lixeira: %w", t.SHA1, err)
+	}
+	return nil
+}
+
+func (m *MongoRepo) FindTrash(ctx context.Context, sha1 string) (*Trash, error) {
+	var t Trash
+	err := m.db.Collection("images_trash").FindOne(ctx, bson.D{{Key: "_id", Value: sha1}}).Decode(&t)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, platform.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("buscar %s na lixeira: %w", sha1, err)
+	}
+	t.fromBSON()
+	return &t, nil
+}
+
+func (m *MongoRepo) DeleteTrash(ctx context.Context, sha1 string) error {
+	if _, err := m.db.Collection("images_trash").DeleteOne(ctx, bson.D{{Key: "_id", Value: sha1}}); err != nil {
+		return fmt.Errorf("tirar %s da lixeira: %w", sha1, err)
+	}
+	return nil
+}

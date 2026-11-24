@@ -25,6 +25,7 @@ import (
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
 	"SIDM/internal/platform"
+	"SIDM/internal/users"
 	"SIDM/internal/versions"
 )
 
@@ -38,6 +39,8 @@ type testEnv struct {
 	exp     *exports.Memory    // perfis de export
 	ann     *annotation.Memory // perfis de anotação
 	ver     *versions.Memory   // datasets e versões
+	usr     *users.Memory      // contas e sessões
+	usrSvc  *users.Service
 	srv     *Server
 	files   *files.Storage
 	root    string
@@ -74,9 +77,14 @@ func newTestEnv(t *testing.T) *testEnv {
 	ver := versions.NewMemory()
 	verSvc := versions.New(ver, imgSvc, bx, annSvc)
 	expSvc.UseVersions(verSvc)
-	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, ver: ver, files: fs, root: root}
+	users.HashIterations = 1000 // senão cada conta de teste leva meio segundo
+	usr := users.NewMemory()
+	usrSvc := users.New(usr)
+	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, ver: ver, usr: usr, usrSvc: usrSvc, files: fs, root: root}
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
-		annSvc, verSvc)
+		annSvc, verSvc, usrSvc)
+	// Sem o login (users.Protect): os testes dos módulos dizem quem é pelo
+	// X-User. O login é testado em users_test.go, com o Protect.
 	env.handler = env.srv.Routes()
 	return env
 }

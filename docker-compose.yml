@@ -36,6 +36,10 @@ services:
       MONGO_URI: "mongodb://${MONGO_APP_USER}:${MONGO_APP_PASSWORD}@mongo:27017/sidm?authSource=sidm"
       MONGO_DB: "sidm"
       IMAGES_DIR: "/data/images"
+      # o primeiro admin do login (só cria se ainda não há nenhum admin ativo)
+      SIDM_ADMIN_USER: ${SIDM_ADMIN_USER:-}
+      SIDM_ADMIN_EMAIL: ${SIDM_ADMIN_EMAIL:-}
+      SIDM_ADMIN_PASSWORD: ${SIDM_ADMIN_PASSWORD:-}
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:

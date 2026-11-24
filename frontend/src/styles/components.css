@@ -247,3 +247,13 @@ main {
     transition-duration: 1ms !important;
   }
 }
+
+/* ── Login ─────────────────────────────────────────────────── */
+/* enquanto pergunta ao servidor quem está logado */
+.auth-wait {
+  display: grid;
+  gap: 12px;
+  min-height: 60vh;
+  place-content: center;
+  justify-items: center;
+}

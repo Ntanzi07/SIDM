@@ -9,6 +9,8 @@ import { formatWhen } from '../Versions/format'
 import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
 import { useToastState } from '../../hooks/useToast'
+import { useIsAdmin } from '../../services/user'
+import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Dashboard.css'
 
 // Dashboard: primeiro escolhe o perfil de anotação; depois, à esquerda, de
@@ -54,7 +56,7 @@ function ProfilePicker() {
           <p>Escolha um perfil de anotação para ver os números das imagens e as versões dos datasets dele.</p>
         </div>
       </div>
-      {profiles === null && !error && <p className="dashboard-hint">Carregando...</p>}
+      {profiles === null && !error && <PageLoader label="Carregando os perfis" />}
       {profiles && (
         <div className="profile-grid">
           {profiles.map((item, index) => (
@@ -80,6 +82,7 @@ function ProfilePicker() {
 // ?dataset=nome&v=3 (sem v: a mais nova).
 function ProfileDashboard({ profile }: { profile: string }) {
   const navigate = useNavigate()
+  const admin = useIsAdmin() // apagar é só de admin
   const [params, setParams] = useSearchParams()
   // ?novo=1: todas as imagens, para montar e salvar um dataset novo
   const creatingDataset = params.get('novo') === '1'
@@ -151,7 +154,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
           {chosen && <small className="dashboard-side__note">o estado atual de <strong>{chosen.dataset.name}</strong> vira a v{(chosen.versions[0]?.number ?? 0) + 1}</small>}
 
           <span className="eyebrow dashboard-side__group">Versões</span>
-          {datasets === null && <p className="dashboard-hint">Carregando...</p>}
+          {datasets === null && <PageLoader inline label="Carregando as versões" />}
           {datasets?.length === 0 && !error && (
             <p className="dashboard-hint">Nenhum dataset ainda. Monte a pesquisa à direita e use “Salvar como dataset”.</p>
           )}
@@ -168,7 +171,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
                     {versions.length > 0 ? `${versions.length} versão(ões) · v${versions[0].number} ${formatWhen(versions[0].created_at)}` : 'sem versões'}
                   </small>
                 </button>
-                <button aria-label={`Apagar o dataset ${dataset.name}`} className="source-delete" onClick={() => setDeleting(dataset.name)} title="Apagar este dataset" type="button">✕</button>
+                {admin && <button aria-label={`Apagar o dataset ${dataset.name}`} className="source-delete" onClick={() => setDeleting(dataset.name)} title="Apagar este dataset" type="button">✕</button>}
                 {open && (
                   <ol className="source-versions">
                     <li>

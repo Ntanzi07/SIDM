@@ -22,6 +22,7 @@ type Memory struct {
 
 	Images  map[string]Image
 	History []HistoryEntry
+	Trash   map[string]Trash
 
 	LastFilter    ImageFilter // o filtro da última ListImages
 	ListErr       error       // ListImages falha
@@ -30,7 +31,7 @@ type Memory struct {
 }
 
 func NewMemory() *Memory {
-	return &Memory{Images: map[string]Image{}}
+	return &Memory{Images: map[string]Image{}, Trash: map[string]Trash{}}
 }
 
 // Update muda uma imagem com o lock (para os testes simularem outra pessoa
@@ -415,4 +416,31 @@ func (m *Memory) MatchingIDs(ctx context.Context, f ImageFilter) ([]string, erro
 	}
 	sort.Strings(ids)
 	return ids, nil
+}
+
+func (m *Memory) PutTrash(ctx context.Context, t *Trash) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.Trash == nil {
+		m.Trash = map[string]Trash{}
+	}
+	m.Trash[t.SHA1] = *t
+	return nil
+}
+
+func (m *Memory) FindTrash(ctx context.Context, sha1 string) (*Trash, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.Trash[sha1]
+	if !ok {
+		return nil, platform.ErrNotFound
+	}
+	return &t, nil
+}
+
+func (m *Memory) DeleteTrash(ctx context.Context, sha1 string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	delete(m.Trash, sha1)
+	return nil
 }

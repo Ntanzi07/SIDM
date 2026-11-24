@@ -44,6 +44,17 @@ func (f *fakeImages) List(ctx context.Context, flt images.ImageFilter) ([]images
 	return out, int64(len(out)), nil
 }
 
+// Restore: a volta, só na memória (o caminho de verdade é testado no api).
+func (f *fakeImages) Restore(ctx context.Context, sha1 string, in images.RestoreInput, changedBy string) (*images.Image, bool, error) {
+	img, ok := f.imgs[sha1]
+	if !ok {
+		return nil, false, platform.ErrNotFound
+	}
+	img.Fields, img.Objects = in.Fields, in.Objects
+	f.imgs[sha1] = img
+	return &img, false, nil
+}
+
 type fakeBoxes struct {
 	tasks []boxes.Task
 	sets  []boxes.Set
@@ -59,6 +70,15 @@ func (f *fakeBoxes) FindSets(ctx context.Context, task string, shas []string) (m
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeBoxes) RestoreSets(ctx context.Context, sha1, pkg string, tasks []string, frozen map[string]boxes.Set, user string) error {
+	f.sets = slices.DeleteFunc(f.sets, func(s boxes.Set) bool { return s.ImageID == sha1 && slices.Contains(tasks, s.Task) })
+	for task, set := range frozen {
+		set.Task, set.ImageID, set.Package = task, sha1, pkg
+		f.sets = append(f.sets, set)
+	}
+	return nil
 }
 
 type fakeAnnotation struct{}
