@@ -63,7 +63,7 @@ Atualizado em 2026-11-23. Branch de trabalho: `fix/config-ini`.
 - Recortes das letras da placa (anotar no recorte; decidir se o modelo treina na imagem inteira).
 - Mover os testes de cada módulo de `internal/api/` para o próprio módulo.
 - Login próprio no lugar do `X-User`; Swagger UI embutido (hoje vem de CDN); graceful shutdown.
-- O serviço `backend` do `docker-compose.yml` precisa ser reconstruído para ter o código novo.
+- Os serviços `backend` e `frontend` do `docker-compose.yml` são imagens: código novo só entra com `docker compose up -d --build <serviço>`.
 - Data do import: falta a prévia (endpoint que lê a data em imagens de exemplo, ✔/✘ no
   editor) e um aviso na anotação quando a data não deu para ler.
 - O editor de perfil de anotação ainda não tem onde marcar `repeat` (só pelo JSON).
