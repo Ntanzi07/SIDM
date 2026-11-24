@@ -175,7 +175,7 @@ func (s *Service) handleFolderFields(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	legacy := ""
-	if ap.Name == annotation.DefaultProfile {
+	if ap.Is(annotation.DefaultProfile) {
 		legacy = export.TemplateLegacy
 	}
 	platform.WriteJSON(w, http.StatusOK, map[string]any{

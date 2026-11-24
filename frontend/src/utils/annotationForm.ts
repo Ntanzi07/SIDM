@@ -6,6 +6,7 @@ import type {
   FormValue,
   FormValues,
   ImageDetail,
+  ObjectBox,
   ObjectType,
   ProfileField,
 } from '../types/annotation'
@@ -69,8 +70,29 @@ function valuesFrom(fields: ProfileField[], stored: Record<string, unknown> | un
 // Os tipos de objeto anotados aqui (os com caixa vêm do CVAT).
 export const listObjectTypes = (profile: AnnotationProfile) => profile.objects.filter((type) => !type.box)
 
-export function newObject(type: ObjectType): FormObject {
-  return { type: type.key, values: valuesFrom(type.fields, undefined, true) }
+export function newObject(type: ObjectType, box?: ObjectBox): FormObject {
+  const object: FormObject = { type: type.key, values: valuesFrom(type.fields, undefined, true) }
+  return box ? withBox(type, object, box) : object
+}
+
+// Liga (ou desliga, com box undefined) a caixa de um objeto. O que a label
+// da caixa diz vale para o objeto (motorcycle → tipo moto): troca o valor,
+// porque a caixa manda (o backend recusaria um valor diferente).
+export function withBox(type: ObjectType, object: FormObject, box: ObjectBox | undefined): FormObject {
+  if (!box) return { type: object.type, values: object.values }
+  const implied = type.box_labels?.find((label) => label.label === box.label)?.fields ?? {}
+  const values = { ...object.values }
+  for (const [key, value] of Object.entries(implied)) {
+    const field = type.fields.find((f) => f.key === key)
+    if (field) values[key] = toFormValue(field, value)
+  }
+  return { type: object.type, values, box }
+}
+
+// Os campos que a caixa ligada já diz (a tela trava esses).
+export function impliedKeys(type: ObjectType, object: FormObject): string[] {
+  if (!object.box) return []
+  return Object.keys(type.box_labels?.find((label) => label.label === object.box?.label)?.fields ?? {})
 }
 
 // Placa Mercosul: AAA1A11 (letra na 5ª posição). Antiga: AAA1111. Só
@@ -103,7 +125,7 @@ export function formFromImage(profile: AnnotationProfile, image: ImageDetail): A
     objects = (image.objects ?? []).flatMap((object: AnnotationObject) => {
       const type = types.find((t) => t.key === object.type)
       if (!type) return [] // tipo que o perfil não tem mais: o backend recusaria
-      return [{ type: type.key, values: valuesFrom(type.fields, object.fields, false) }]
+      return [{ type: type.key, values: valuesFrom(type.fields, object.fields, false), box: object.box }]
     })
   }
   objects.forEach((object) => guessPlateType(object.values))
@@ -124,7 +146,7 @@ export function formToAPI(profile: AnnotationProfile, form: AnnotationForm) {
     fields: pack(profile.fields, form.fields),
     objects: form.objects.map((object) => {
       const type = profile.objects.find((t) => t.key === object.type)
-      return { type: object.type, fields: type ? pack(type.fields, object.values) : {} }
+      return { type: object.type, fields: type ? pack(type.fields, object.values) : {}, ...(object.box ? { box: object.box } : {}) }
     }),
   }
 }

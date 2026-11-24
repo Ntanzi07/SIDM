@@ -695,3 +695,30 @@
   min-width: 0;
   padding: 0;
 }
+
+/* herança e caixas que representam um tipo */
+.ap-inherited {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--border-strong);
+  opacity: 0.85;
+}
+
+.ap-inherited > span,
+.ap-from {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.ap-box-labels {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-strong);
+}
+
+.ap-box-label {
+  align-items: flex-end;
+}

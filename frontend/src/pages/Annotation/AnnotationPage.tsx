@@ -6,8 +6,10 @@ import { ZoomView } from '../../components/ZoomView/ZoomView'
 import { boxPending, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
-import { fieldLabel, listObjectTypes } from '../../utils/annotationForm'
+import { fieldLabel, listObjectTypes, impliedKeys } from '../../utils/annotationForm'
 import { FieldInput } from './AnnotationFields'
+import { BoxLink } from './BoxLink'
+import { candidates, linkedKeys, toObjectBox } from '../../utils/boxLinks'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Annotation.css'
 
@@ -37,6 +39,10 @@ export function AnnotationPage() {
   const objectTypes = listObjectTypes(profile)
   const boxTypes = profile.objects.filter((type) => type.box)
   const countOf = (type: string) => form.objects.filter((object) => object.type === type).length
+  // as caixas que já são de um objeto (índice do objeto → caixa)
+  const links = linkedKeys(form.objects, boxSets)
+  const takenBy = (index: number) => new Set([...links].filter(([i]) => i !== index).map(([, key]) => key))
+  const showBox = (ref: BoxRef) => { setShowBoxes(true); selectBox(ref) }
   // Os problemas que não são de um campo só (ex.: "pelo menos 1 veículo").
   const generalProblems = annotator.problems.filter((problem) => problem.path === 'objects' || problem.path.endsWith('.type'))
 
@@ -208,9 +214,22 @@ export function AnnotationPage() {
                           Remover
                         </button>
                       </div>
+                      {(type.box_labels?.length ?? 0) > 0 && (
+                        <BoxLink
+                          object={object}
+                          onLink={(box) => annotator.linkBox(index, box)}
+                          onShow={showBox}
+                          sets={boxSets}
+                          taken={takenBy(index)}
+                          type={type}
+                        />
+                      )}
+                      {problemAt(`objects[${index}].box`) && <small className="annotation-field__error">{problemAt(`objects[${index}].box`)}</small>}
                       <div className="annotation-fields">
                         {type.fields.map((field) => (
                           <FieldInput
+                            // o que a caixa ligada já diz fica travado (troca a caixa para mudar)
+                            disabled={impliedKeys(type, object).includes(field.key)}
                             error={problemAt(`objects[${index}].${field.key}`)}
                             field={field}
                             key={field.key}
@@ -225,8 +244,29 @@ export function AnnotationPage() {
 
                 {objectTypes.map((type) => {
                   const full = (type.max ?? 0) > 0 && countOf(type.key) >= (type.max ?? 0)
+                  // as caixas deste tipo que ainda não são de nenhum objeto
+                  const used = new Set(links.values())
+                  const loose = candidates(type, boxSets).filter((option) => !used.has(option.key))
                   return (
                     <div className="annotation-object-type" key={type.key}>
+                      {loose.length > 0 && (
+                        <div className="box-link-loose">
+                          {loose.map((option) => (
+                            <div key={option.key}>
+                              <button className="box-link-loose__name" onClick={() => showBox(option.ref)} type="button">{option.name}</button>
+                              <span>ainda não é nenhum objeto da lista</span>
+                              <button
+                                className="button button--secondary button--sm"
+                                disabled={full}
+                                onClick={() => { annotator.addObject(type.key, toObjectBox(option.ref.task, option.box)); showBox(option.ref) }}
+                                type="button"
+                              >
+                                + {fieldLabel(type)} desta caixa
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {countOf(type.key) === 0 && (
                         <p className="annotation-hint">
                           Nenhum(a) {fieldLabel(type).toLowerCase()} nesta imagem.

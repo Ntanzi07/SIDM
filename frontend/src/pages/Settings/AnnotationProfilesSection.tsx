@@ -10,6 +10,8 @@ import {
 import type { AnnotationProfile, FieldType, ObjectType, ProfileField, ProfileOption } from '../../types/annotation'
 import { useToast, useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
+import { BoxLabelsEditor } from './BoxLabelsEditor'
+import { applyParent, ownFields, ownIndex, parentChoices } from './profileInheritance'
 
 // Editor dos PERFIS DE ANOTAÇÃO: o que se anota em cada imagem de um pacote.
 // Quem confere tudo é o backend (POST/PUT /annotation-profiles): os erros
@@ -275,6 +277,18 @@ function FieldsEditor({ base, fields, onChange, problems, readOnly }: FieldsEdit
   )
 }
 
+// Os campos que vieram do pai, só para ver (mudam no perfil de onde vieram).
+function Inherited({ fields }: { fields: ProfileField[] }) {
+  const inherited = fields.filter((f) => f.from)
+  if (inherited.length === 0) return null
+  const from = [...new Set(inherited.map((f) => f.from))].join(', ')
+  return (
+    <div className="ap-inherited">
+      <span>Herdados de {from}: {inherited.map((f) => f.label || f.key).join(', ')}</span>
+    </div>
+  )
+}
+
 const empty = (): AnnotationProfile => ({ name: '', description: '', fields: [], objects: [] })
 
 // A seção tem duas telas no menu de Configurar, como os perfis de import:
@@ -331,7 +345,7 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
   // Uma cópia editável (do padrão, por exemplo): o nome muda e sai o "padrão".
   function duplicate(profile: AnnotationProfile) {
     const copy = structuredClone(profile)
-    open({ ...copy, name: `${profile.name}-copia`, builtin: undefined, created_by: undefined, updated_at: undefined }, true)
+    open({ ...copy, name: `${profile.name}-copia`, builtin: undefined, created_by: undefined, updated_at: undefined, lineage: undefined }, true)
   }
 
   async function save() {
@@ -401,11 +415,12 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
                 <strong className="profile-item__name">
                   {p.name}
                   {p.builtin && <span className="profile-type-badge">padrão</span>}
+                  {p.extends && <span className="profile-type-badge">estende {p.extends}</span>}
                 </strong>
                 {p.description && <span className="profile-item__desc">{p.description}</span>}
               </div>
               <div className="profile-item__actions">
-                <button className="button button--secondary button--sm" onClick={() => open(p, false)} type="button">{p.builtin ? 'Ver' : 'Editar'}</button>
+                <button className="button button--secondary button--sm" onClick={() => open(p, false)} type="button">{p.builtin ? 'Abrir' : 'Editar'}</button>
                 <button className="button button--secondary button--sm" onClick={() => duplicate(p)} type="button">Duplicar</button>
                 {!p.builtin && <button className="button button--danger button--sm" onClick={() => void remove(p.name)} type="button">Apagar</button>}
               </div>
@@ -428,7 +443,7 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
           <div className="profile-header-flex">
             <div>
               <h2>{isNew ? 'Criar novo perfil de anotação' : readOnly ? `Perfil padrão: ${draft.name}` : `Editar perfil: ${draft.name}`}</h2>
-              <p>{readOnly ? 'Só leitura. Para mudar, use Duplicar.' : 'Os campos da imagem e os tipos de objeto que se anotam nos pacotes deste perfil.'}</p>
+              <p>{readOnly ? 'Perfil padrão: aqui só mudam as caixas ligadas a cada tipo de objeto. Para mudar o resto, use Duplicar.' : 'Os campos da imagem e os tipos de objeto que se anotam nos pacotes deste perfil.'}</p>
             </div>
             {readOnly && (
               <div className="profile-item__actions">
@@ -454,9 +469,36 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
             </label>
           </div>
           {under(problems, 'name').map((p) => <small className="ap-error" key={p.msg}>nome: {p.msg}</small>)}
+          <div className="ap-row">
+            <label className="ap-inline">
+              <span>Estende (herda os campos e os tipos de)</span>
+              <select
+                disabled={readOnly}
+                onChange={(e) => setDraft(applyParent(draft, profiles.find((p) => p.name === e.target.value)))}
+                value={draft.extends ?? ''}
+              >
+                <option value="">Nenhum</option>
+                {parentChoices(profiles, isNew ? '' : draft.name).map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+              </select>
+            </label>
+            {draft.extends && (
+              <p className="ap-small ap-grow">
+                Os pacotes deste perfil entram nos datasets e na pesquisa de {draft.extends}. O herdado aparece só para
+                leitura: muda no perfil {draft.extends}.
+              </p>
+            )}
+          </div>
+          {under(problems, 'extends').map((p) => <small className="ap-error" key={p.msg}>estende: {p.msg}</small>)}
 
           <h4>Campos da imagem</h4>
-          <FieldsEditor base="fields" fields={draft.fields} onChange={(fields) => setDraft({ ...draft, fields })} problems={problems} readOnly={readOnly} />
+          <Inherited fields={draft.fields} />
+          <FieldsEditor
+            base="fields"
+            fields={ownFields(draft.fields)}
+            onChange={(fields) => setDraft({ ...draft, fields: [...draft.fields.filter((f) => f.from), ...fields] })}
+            problems={problems}
+            readOnly={readOnly}
+          />
 
           <h4>Tipos de objeto</h4>
           <p className="ap-small">
@@ -464,15 +506,16 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
             imagem, preenchida na tela de anotação (como os veículos).
           </p>
           {draft.objects.map((object, i) => {
-            const path = `objects[${i}]`
+            const path = `objects[${ownIndex(draft.objects, i)}]`
             const own = problems.filter((p) => p.path === path || p.path === `${path}.key`)
+            const locked = readOnly || Boolean(object.from)
             return (
               <div className={own.length ? 'ap-object ap-field--error' : 'ap-object'} key={i}>
                 <div className="ap-row">
                   <label className="ap-inline">
                     <span>Nome na tela</span>
                     <input
-                      disabled={readOnly}
+                      disabled={locked}
                       onBlur={() => { if (!object.key && object.label) setObject(i, { key: slug(object.label) }) }}
                       onChange={(e) => setObject(i, { label: e.target.value })}
                       placeholder="ex.: Capacete"
@@ -481,32 +524,48 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
                   </label>
                   <label className="ap-inline">
                     <span>Chave (label do CVAT, se tiver caixa)</span>
-                    <input disabled={readOnly} onChange={(e) => setObject(i, { key: e.target.value })} placeholder="ex.: helmet" value={object.key} />
+                    <input disabled={locked} onChange={(e) => setObject(i, { key: e.target.value })} placeholder="ex.: helmet" value={object.key} />
                   </label>
                   <label className="ap-check">
-                    <input checked={Boolean(object.box)} disabled={readOnly} onChange={(e) => setObject(i, { box: e.target.checked || undefined })} type="checkbox" />
+                    <input checked={Boolean(object.box)} disabled={locked} onChange={(e) => setObject(i, { box: e.target.checked || undefined, box_labels: e.target.checked ? undefined : object.box_labels })} type="checkbox" />
                     Tem caixa (CVAT)
                   </label>
                   {!object.box && (
                     <>
                       <label className="ap-inline ap-num">
                         <span>Mínimo</span>
-                        <input disabled={readOnly} min={0} onChange={(e) => setObject(i, { min: e.target.value === '' ? undefined : Number(e.target.value) })} type="number" value={object.min ?? ''} />
+                        <input disabled={locked} min={0} onChange={(e) => setObject(i, { min: e.target.value === '' ? undefined : Number(e.target.value) })} type="number" value={object.min ?? ''} />
                       </label>
                       <label className="ap-inline ap-num">
                         <span>Máximo (0 = sem limite)</span>
-                        <input disabled={readOnly} min={0} onChange={(e) => setObject(i, { max: e.target.value === '' ? undefined : Number(e.target.value) })} type="number" value={object.max ?? ''} />
+                        <input disabled={locked} min={0} onChange={(e) => setObject(i, { max: e.target.value === '' ? undefined : Number(e.target.value) })} type="number" value={object.max ?? ''} />
                       </label>
                     </>
                   )}
-                  {!readOnly && (
+                  {!locked && (
                     <div className="ap-row-actions">
                       <button className="button button--danger button--sm" onClick={() => setDraft({ ...draft, objects: draft.objects.filter((_, j) => j !== i) })} type="button">Remover</button>
                     </div>
                   )}
+                  {object.from && <span className="ap-from">tipo de {object.from}: aqui dá para acrescentar campos e caixas</span>}
                 </div>
                 {own.map((p) => <small className="ap-error" key={p.path + p.msg}>{p.msg}</small>)}
-                <FieldsEditor base={`${path}.fields`} fields={object.fields} onChange={(fields) => setObject(i, { fields })} problems={problems} readOnly={readOnly} />
+                <Inherited fields={object.fields} />
+                <FieldsEditor
+                  base={`${path}.fields`}
+                  fields={ownFields(object.fields)}
+                  onChange={(fields) => setObject(i, { fields: [...object.fields.filter((f) => f.from), ...fields] })}
+                  problems={problems}
+                  readOnly={readOnly}
+                />
+                {!object.box && (
+                  <BoxLabelsEditor
+                    object={object}
+                    onChange={(box_labels) => setObject(i, { box_labels: box_labels.length ? box_labels : undefined })}
+                    problems={under(problems, `objects[${i}].box_labels`)}
+                    readOnly={false} // até num padrão: labels novas aparecem com tarefas novas
+                  />
+                )}
               </div>
             )
           })}
@@ -529,7 +588,7 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
 
           <div className="profile-submit-row">
             <button className="button button--secondary" onClick={close} type="button">{isNew ? 'Cancelar' : 'Fechar'}</button>
-            {!readOnly && (
+            {(!readOnly || draft.builtin) && (
               <button className="button button--primary" disabled={saving} onClick={() => void save()} type="button">
                 {saving ? 'Salvando...' : isNew ? 'Criar perfil' : 'Salvar perfil'}
               </button>

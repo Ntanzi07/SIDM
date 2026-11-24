@@ -93,13 +93,9 @@ func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
 	platform.WriteJSON(w, http.StatusCreated, p)
 }
 
-// PUT /annotation-profiles/{name}  (os padrões não)
+// PUT /annotation-profiles/{name}  (de um padrão, só as caixas dos tipos)
 func (s *Service) handleReplace(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if err := editable(name); err != nil {
-		writeErr(w, err, name)
-		return
-	}
 	var p Profile
 	if !decode(w, r, &p) {
 		return

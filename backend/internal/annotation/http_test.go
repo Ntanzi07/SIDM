@@ -11,6 +11,7 @@ import (
 )
 
 type env struct {
+	svc *Service
 	mem *Memory
 	h   http.Handler
 }
@@ -22,7 +23,7 @@ func newEnv() *env {
 	for _, rt := range svc.Routes() {
 		mux.HandleFunc(rt.Method+" "+rt.Path, rt.Handler)
 	}
-	return &env{mem: mem, h: mux}
+	return &env{mem: mem, svc: svc, h: mux}
 }
 
 func (e *env) do(method, path, body string) *httptest.ResponseRecorder {
@@ -84,8 +85,39 @@ func TestHTTPPadraoNaoMuda(t *testing.T) {
 	e := newEnv()
 	b, _ := json.Marshal(Vehicles())
 	status(t, e.do("POST", "/annotation-profiles", string(b)), http.StatusBadRequest)
-	status(t, e.do("PUT", "/annotation-profiles/veiculos", string(b)), http.StatusBadRequest)
 	status(t, e.do("DELETE", "/annotation-profiles/veiculos", ""), http.StatusBadRequest)
+
+	// do padrão, só as caixas dos tipos mudam (o resto que vier é ignorado)
+	p := Vehicles()
+	p.Description = "trocada"
+	p.Fields = p.Fields[:1]
+	p.Objects[0].BoxLabels = []BoxLabel{{Label: " motorcycle ", Fields: map[string]any{"type": "motorcycle"}}}
+	b, _ = json.Marshal(p)
+	status(t, e.do("PUT", "/annotation-profiles/veiculos", string(b)), http.StatusOK)
+	rec := e.do("GET", "/annotation-profiles/veiculos", "")
+	var got Profile
+	json.Unmarshal(rec.Body.Bytes(), &got)
+	if got.Description != Vehicles().Description || len(got.Fields) != len(Vehicles().Fields) || !got.Builtin ||
+		len(got.Objects[0].BoxLabels) != 1 || got.Objects[0].BoxLabels[0].Label != "motorcycle" {
+		t.Errorf("padrão com caixas: %+v", got)
+	}
+	rec = e.do("GET", "/annotation-profiles", "")
+	if strings.Count(rec.Body.String(), `"name":"veiculos"`) != 1 {
+		t.Errorf("o registro das caixas apareceu como outro perfil: %s", rec.Body.String())
+	}
+	// o filho não repete a caixa do pai
+	status(t, e.do("POST", "/annotation-profiles", `{"name": "moto", "extends": "veiculos", "objects": [{"key": "vehicle", "fields": [], "box_labels": [{"label": "motorcycle"}]}]}`), http.StatusBadRequest)
+	// valor que o campo não aceita
+	p.Objects[0].BoxLabels[0].Fields = map[string]any{"type": "aviao"}
+	b, _ = json.Marshal(p)
+	status(t, e.do("PUT", "/annotation-profiles/veiculos", string(b)), http.StatusBadRequest)
+	// tirar todas as caixas
+	p.Objects[0].BoxLabels = nil
+	b, _ = json.Marshal(p)
+	status(t, e.do("PUT", "/annotation-profiles/veiculos", string(b)), http.StatusOK)
+	if prof, _ := e.svc.FindProfile(t.Context(), "veiculos"); len(prof.Objects[0].BoxLabels) != 0 {
+		t.Errorf("caixas não saíram: %+v", prof.Objects[0].BoxLabels)
+	}
 }
 
 func TestHTTPInvalidoListaProblemas(t *testing.T) {

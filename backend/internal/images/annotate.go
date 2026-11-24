@@ -48,7 +48,7 @@ func (s *Service) finalName(ctx context.Context, img *Image, p *annotation.Profi
 		}
 	}
 
-	if p.Name != annotation.DefaultProfile {
+	if !p.Is(annotation.DefaultProfile) { // o nome v2 é dos veiculos (e de quem os estende)
 		return img.SHA1 + img.Ext, "", ""
 	}
 	// O Format valida os códigos e os formatos do v2.

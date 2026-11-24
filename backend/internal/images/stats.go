@@ -206,9 +206,20 @@ func (s *Service) searchFilter(ctx context.Context, profile string, f ImageFilte
 	if p, err = s.profileNamed(ctx, profile); err != nil {
 		return nil, f, false, err
 	}
-	pkgs, err := s.catalog.PackagesWithProfile(ctx, p.Name)
-	if err != nil {
-		return nil, f, false, err
+	// os pacotes do perfil e dos que o estendem (moto e caminhão contam em veiculos)
+	family := []string{p.Name}
+	if s.annots != nil {
+		if family, err = s.annots.Family(ctx, p.Name); err != nil {
+			return nil, f, false, err
+		}
+	}
+	var pkgs []string
+	for _, name := range family {
+		got, err := s.catalog.PackagesWithProfile(ctx, name)
+		if err != nil {
+			return nil, f, false, err
+		}
+		pkgs = append(pkgs, got...)
 	}
 	asked := f.Packages
 	if f.Package != "" {

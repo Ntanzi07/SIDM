@@ -407,3 +407,84 @@
   margin: 12px 0 0;
   padding-left: 22px;
 }
+
+/* a caixa de um objeto (Veículo 1 = 1. motorcycle) */
+.box-link {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+  margin-bottom: 14px;
+}
+
+.box-link label {
+  display: grid;
+  flex: 1 1 260px;
+  gap: 6px;
+}
+
+.box-link label > span {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.box-link small {
+  flex-basis: 100%;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.box-link--lost select {
+  border-color: var(--warning);
+}
+
+.box-link--empty {
+  margin: 0 0 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* caixas que ainda não são de nenhum objeto */
+.box-link-loose {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+}
+
+.box-link-loose > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.box-link-loose__name {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.box-link-loose__name:hover {
+  text-decoration: underline;
+}
+
+.box-link-loose .button {
+  margin-left: auto;
+}
+
+/* campo que a caixa ligada já diz */
+.annotation-field select:disabled,
+.annotation-field input:disabled {
+  opacity: 0.75;
+  cursor: not-allowed;
+}

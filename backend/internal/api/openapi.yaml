@@ -993,7 +993,7 @@ paths:
     put:
       tags: [perfis de anotação]
       summary: Atualizar perfil de anotação
-      description: O padrão não pode ser alterado (salve uma cópia com outro nome).
+      description: De um perfil padrão, só mudam as `box_labels` de cada tipo de objeto (o resto que vier é ignorado; para mudar o resto, salve uma cópia com outro nome).
       requestBody:
         required: true
         content:
@@ -2408,6 +2408,19 @@ components:
         max: { type: number, description: number }
         integer: { type: boolean, description: number }
         ref: { type: string, enum: [equipment, camera], description: "ref: qual cadastro." }
+        from: { type: string, readOnly: true, description: "Herdado: o perfil de onde o campo veio. Ao gravar, os que têm `from` são ignorados (cada perfil guarda só os seus)." }
+
+    BoxRef:
+      type: object
+      description: A caixa (do CVAT) que é o objeto. As caixas não têm id fixo, então vai a label e a posição.
+      required: [task, label]
+      properties:
+        task: { type: string, example: helmet_detection }
+        label: { type: string, example: motorcycle }
+        x: { type: number }
+        y: { type: number }
+        w: { type: number }
+        h: { type: number }
 
     AnnotationProfile:
       type: object
@@ -2416,9 +2429,24 @@ components:
         name: { type: string, example: capacete-moto }
         description: { type: string }
         builtin: { type: boolean, readOnly: true }
+        extends:
+          type: string
+          example: veiculos
+          description: |
+            O perfil pai: este tem todos os campos e tipos de objeto dele, mais os
+            seus (um campo do pai não pode ser repetido; um tipo do pai pode ser
+            repetido só para acrescentar campos e `box_labels`). A pesquisa e os
+            datasets do pai incluem os pacotes dos filhos. Até 5 níveis; sem
+            círculo. Um pai com filhos não se apaga.
+        lineage:
+          type: array
+          readOnly: true
+          items: { type: string }
+          example: [moto, veiculos]
+          description: O próprio nome e os dos pais, do mais perto ao mais longe.
         fields:
           type: array
-          description: Os campos da imagem.
+          description: Os campos da imagem (os herdados primeiro, com `from`).
           items: { $ref: "#/components/schemas/AnnotationField" }
         objects:
           type: array
@@ -2435,6 +2463,21 @@ components:
               fields:
                 type: array
                 items: { $ref: "#/components/schemas/AnnotationField" }
+              box_labels:
+                type: array
+                description: |
+                  Só nos tipos de lista: as labels de caixa que representam um objeto
+                  deste tipo, e o que cada uma já diz dele. Na anotação, o objeto
+                  aponta a sua caixa (`box`); o que a label diz preenche os campos
+                  vazios, e um valor diferente é 400.
+                items:
+                  type: object
+                  required: [label]
+                  properties:
+                    label: { type: string, example: motorcycle }
+                    fields: { type: object, additionalProperties: true, example: { type: motorcycle } }
+                    from: { type: string, readOnly: true }
+              from: { type: string, readOnly: true, description: "Herdado: o perfil de onde o tipo veio." }
         created_by: { type: string, readOnly: true }
         updated_at: { type: string, format: date-time, readOnly: true }
 
@@ -2452,6 +2495,7 @@ components:
             properties:
               type: { type: string, example: vehicle }
               fields: { type: object, additionalProperties: true }
+              box: { $ref: "#/components/schemas/BoxRef" }
 
     ExportProfile:
       type: object

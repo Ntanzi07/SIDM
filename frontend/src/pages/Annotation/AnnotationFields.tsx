@@ -41,17 +41,18 @@ type SelectFieldProps = {
   onChange: (value: string) => void
   required?: boolean
   error?: string
+  disabled?: boolean
   help?: string
 }
 
-function SelectField({ label, value, options, onChange, required, error, help }: SelectFieldProps) {
+function SelectField({ label, value, options, onChange, required, error, help, disabled }: SelectFieldProps) {
   // Valor que não está na lista (ex.: veio de um import sem tradução). Sem
   // isto, o navegador mostraria a primeira opção, e escolher essa opção não
   // dispararia mudança: o valor errado ficaria preso.
   const invalid = value !== '' && !options.some(([option]) => option === value)
   return (
     <FieldWrap error={error} help={help} invalid={invalid} label={label} required={required} unknown={value === ''}>
-      <select value={value} onChange={(event) => onChange(event.target.value)}>
+      <select disabled={disabled} value={value} onChange={(event) => onChange(event.target.value)}>
         {invalid && <option value={value}>"{value}" (inválido: escolha outro)</option>}
         <option value="">Não informado</option>
         {options.map(([option, name]) => <option key={option} value={option}>{name}</option>)}
@@ -173,26 +174,28 @@ type FieldInputProps = {
   value: FormValue
   onChange: (value: FormValue) => void
   error?: string
+  disabled?: boolean // o valor vem de outro lugar (ex.: da caixa ligada ao objeto)
 }
 
 // FieldInput: o controle de UM campo do perfil.
-export function FieldInput({ field, value, onChange, error }: FieldInputProps) {
+export function FieldInput({ field, value, onChange, error, disabled }: FieldInputProps) {
   const label = fieldLabel(field)
   const text = typeof value === 'string' ? value : ''
   const common = { error, help: field.help, label, required: field.required }
+  const select = { ...common, disabled }
 
   switch (field.type) {
     case 'choice':
       return (
         <SelectField
-          {...common}
+          {...select}
           onChange={onChange}
           options={(field.options ?? []).map((option) => [option.value, option.label || option.value] as const)}
           value={text}
         />
       )
     case 'bool':
-      return <SelectField {...common} onChange={onChange} options={[['true', 'Sim'], ['false', 'Não']]} value={text} />
+      return <SelectField {...select} onChange={onChange} options={[['true', 'Sim'], ['false', 'Não']]} value={text} />
     case 'multi': {
       const chosen = Array.isArray(value) ? value : []
       return (
@@ -236,6 +239,7 @@ export function FieldInput({ field, value, onChange, error }: FieldInputProps) {
       return (
         <FieldWrap {...common} unknown={text === ''}>
           <input
+            disabled={disabled}
             inputMode={field.integer ? 'numeric' : 'decimal'}
             max={field.max}
             min={field.min}
@@ -250,6 +254,7 @@ export function FieldInput({ field, value, onChange, error }: FieldInputProps) {
       return (
         <FieldWrap {...common} unknown={text === ''}>
           <input
+            disabled={disabled}
             maxLength={field.max_len || undefined}
             onChange={(event) => onChange(field.upper ? event.target.value.toUpperCase() : event.target.value)}
             placeholder={field.help || (field.required ? '' : 'Não sabe? Deixe vazio')}

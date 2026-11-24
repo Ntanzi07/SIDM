@@ -28,6 +28,7 @@ func (ps *problems) add(path, format string, args ...any) {
 func (p *Profile) Normalize() {
 	p.Name = strings.TrimSpace(p.Name)
 	p.Description = strings.TrimSpace(p.Description)
+	p.Extends = strings.TrimSpace(p.Extends)
 	if p.Fields == nil {
 		p.Fields = []Field{}
 	}
@@ -42,6 +43,9 @@ func (p *Profile) Normalize() {
 			o.Fields = []Field{}
 		}
 		normFields(o.Fields)
+		for j := range o.BoxLabels {
+			o.BoxLabels[j].Label = strings.TrimSpace(o.BoxLabels[j].Label)
+		}
 	}
 }
 
@@ -65,6 +69,9 @@ func (p *Profile) Validate() error {
 		ps.add("name", `use só letras minúsculas, números e "-" (até 48), ex.: "capacete-moto"`)
 	}
 	validFields(&ps, "fields", p.Fields)
+	if p.Extends != "" && !ValidName(p.Extends) {
+		ps.add("extends", "nome de perfil inválido: %q", p.Extends)
+	}
 
 	seen := map[string]bool{}
 	for i, o := range p.Objects {

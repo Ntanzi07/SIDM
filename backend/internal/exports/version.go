@@ -90,14 +90,17 @@ func (s *Service) PrepareVersion(ctx context.Context, p *export.Profile, tasks [
 	if want == "" {
 		want = annotation.DefaultProfile
 	}
-	if p.Builtin {
-		p.AnnotationProfile = v.Profile
-	} else if want != v.Profile {
-		return &InvalidError{fmt.Sprintf("o perfil de export %q é do perfil de anotação %q, e a %s é do %q", p.Name, want, versionText(v), v.Profile)}
-	}
 	ap, err := s.AnnotationProfile(ctx, v.Profile)
 	if err != nil {
 		return err
+	}
+	// um salvo para "veiculos" serve para uma versão de "moto", que estende veiculos
+	if p.Builtin {
+		p.AnnotationProfile = v.Profile
+	} else if !ap.Is(want) {
+		return &InvalidError{fmt.Sprintf("o perfil de export %q é do perfil de anotação %q, e a %s é do %q", p.Name, want, versionText(v), v.Profile)}
+	} else {
+		p.AnnotationProfile = v.Profile
 	}
 	p.Bind(ap)
 	// Quem decide as imagens é a versão.

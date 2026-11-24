@@ -242,3 +242,53 @@ func TestPerfilDeImportAntigoViraObjects(t *testing.T) {
 		t.Errorf("perfil = %+v (objects=%+v)", p, p.Objects)
 	}
 }
+
+// Herança: um pacote de "moto" (que estende veiculos) anota os campos dos
+// dois, o veículo liga com a caixa motorcycle, e a pesquisa de veiculos
+// conta o pacote de moto.
+func TestPerfilQueEstendeEhLigaCaixa(t *testing.T) {
+	env := newTestEnv(t)
+	assertStatus(t, env.doJSON("POST", "/annotation-profiles", `{"name": "moto", "extends": "veiculos",
+		"fields": [{"key": "riders", "type": "number", "integer": true, "min": 1, "max": 3}],
+		"objects": [{"key": "vehicle", "fields": [], "box_labels": [{"label": "motorcycle", "fields": {"type": "motorcycle"}}]}]}`), http.StatusCreated)
+	rec := env.do("GET", "/annotation-profiles/moto", nil, nil)
+	var p struct {
+		Extends string
+		Lineage []string
+		Fields  []struct{ Key, From string }
+	}
+	decode(t, rec, &p)
+	if p.Extends != "veiculos" || len(p.Lineage) != 2 || p.Fields[0].From != "veiculos" || p.Fields[len(p.Fields)-1].Key != "riders" {
+		t.Errorf("perfil: %+v", p)
+	}
+	assertStatus(t, env.doJSON("POST", "/packages", `{"name": "motos", "profile": "moto"}`), http.StatusCreated)
+	sha := env.uploadTo(t, "motos", upFile{"m.jpg", "uma moto"})[0].SHA1
+
+	body := `{"fields": {"riders": 2, "day_time": "night"}, "objects": [{"type": "vehicle", "fields": {"plate": "ABC1D23"},
+		"box": {"task": "helmet_detection", "label": "motorcycle", "x": 1, "y": 2, "w": 3, "h": 4}}]}`
+	assertStatus(t, env.doJSON("PUT", "/images/"+sha, body), http.StatusOK)
+	img := env.img.Images[sha]
+	if img.Fields["riders"] != 2.0 || len(img.Objects) != 1 || img.Objects[0].Box == nil || img.Objects[0].Fields["type"] != "motorcycle" {
+		t.Errorf("anotação: %+v %+v", img.Fields, img.Objects)
+	}
+	// a caixa diz moto e o tipo está carro: 400 com o caminho
+	bad := strings.Replace(body, `"plate": "ABC1D23"`, `"plate": "ABC1D23", "type": "car"`, 1)
+	if rec := env.doJSON("PUT", "/images/"+sha, bad); rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "objects[0].type") {
+		t.Errorf("tipo contra a caixa: %d %s", rec.Code, rec.Body.String())
+	}
+
+	// a pesquisa de veiculos inclui o pacote de moto (os campos do pai existem nele)
+	rec = env.do("GET", "/images/stats?profile=veiculos&status=all", nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var st struct {
+		Total    int64
+		Packages map[string]int64
+	}
+	decode(t, rec, &st)
+	if st.Total != 1 || st.Packages["motos"] != 1 {
+		t.Errorf("veiculos com a moto: %+v (%s)", st, rec.Body.String())
+	}
+	// veiculos não se apaga? (é padrão) — o pai salvo com filho não se apaga
+	assertStatus(t, env.doJSON("POST", "/annotation-profiles", `{"name": "moto-noite", "extends": "moto", "fields": []}`), http.StatusCreated)
+	assertStatus(t, env.do("DELETE", "/annotation-profiles/moto", nil, nil), http.StatusBadRequest)
+}

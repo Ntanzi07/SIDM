@@ -197,6 +197,8 @@ type ImportProfiles interface {
 // Annotations busca o perfil de ANOTAÇÃO de um pacote.
 type Annotations interface {
 	FindProfile(ctx context.Context, name string) (*annotation.Profile, error)
+	// Family: o perfil e os que o estendem (a pesquisa de um olha os pacotes de todos).
+	Family(ctx context.Context, name string) ([]string, error)
 }
 
 // Listener é avisado quando uma imagem é apagada (ex.: as caixas dela).

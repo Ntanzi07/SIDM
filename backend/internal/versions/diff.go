@@ -307,10 +307,10 @@ func diffObjects(a, b []annotation.Object) []Change {
 		for i := range n {
 			var fa, fb map[string]any
 			if i < len(ta[t]) {
-				fa = ta[t][i].Fields
+				fa = withBox(ta[t][i])
 			}
 			if i < len(tb[t]) {
-				fb = tb[t][i].Fields
+				fb = withBox(tb[t][i])
 			}
 			prefix := "objects." + t + "."
 			if n > 1 {
@@ -319,6 +319,20 @@ func diffObjects(a, b []annotation.Object) []Change {
 			out = append(out, diffFields(prefix, fa, fb)...)
 		}
 	}
+	return out
+}
+
+// withBox: os campos do objeto e a caixa ligada a ele (como "caixa"), para
+// a troca de caixa aparecer no "o que mudou".
+func withBox(o annotation.Object) map[string]any {
+	if o.Box == nil {
+		return o.Fields
+	}
+	out := make(map[string]any, len(o.Fields)+1)
+	for k, v := range o.Fields {
+		out[k] = v
+	}
+	out["caixa"] = fmt.Sprintf("%s: %s (%.0f, %.0f)", o.Box.Task, o.Box.Label, o.Box.X, o.Box.Y)
 	return out
 }
 

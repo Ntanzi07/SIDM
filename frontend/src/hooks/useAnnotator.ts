@@ -22,8 +22,8 @@ import {
   type Problem,
 } from '../services/api'
 import { getUser } from '../services/user'
-import type { AnnotationForm, AnnotationProfile, FormValue, ImageDetail } from '../types/annotation'
-import { formFromImage, formToAPI, listObjectTypes, newObject } from '../utils/annotationForm'
+import type { AnnotationForm, AnnotationProfile, FormValue, ImageDetail, ObjectBox } from '../types/annotation'
+import { formFromImage, formToAPI, listObjectTypes, newObject, withBox } from '../utils/annotationForm'
 import { isEmptyValue, loadLast, saveLast } from '../utils/repeatFields'
 import { notify } from '../services/toast'
 import { useToastState } from './useToast'
@@ -280,10 +280,23 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     }))
   }, [])
 
-  const addObject = useCallback((type: string) => {
+  // box: já nasce ligado a uma caixa (ex.: "+ veículo da caixa motorcycle").
+  const addObject = useCallback((type: string, box?: ObjectBox) => {
     const objectType = listObjectTypes(profile).find((t) => t.key === type)
     if (!objectType) return
-    setForm((currentForm) => ({ ...currentForm, objects: [...currentForm.objects, newObject(objectType)] }))
+    setForm((currentForm) => ({ ...currentForm, objects: [...currentForm.objects, newObject(objectType, box)] }))
+  }, [profile])
+
+  // Liga (ou desliga, com undefined) a caixa de um objeto.
+  const linkBox = useCallback((index: number, box: ObjectBox | undefined) => {
+    setForm((currentForm) => ({
+      ...currentForm,
+      objects: currentForm.objects.map((object, i) => {
+        if (i !== index) return object
+        const type = listObjectTypes(profile).find((t) => t.key === object.type)
+        return type ? withBox(type, object, box) : object
+      }),
+    }))
   }, [profile])
 
   // Pode ficar sem nenhum objeto (ex.: imagem sem veículo).
@@ -350,6 +363,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     updateField,
     updateObject,
     addObject,
+    linkBox,
     removeObject,
     skip,
     previous,

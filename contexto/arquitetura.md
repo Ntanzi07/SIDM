@@ -10,7 +10,7 @@ mexem nelas pelo `Service` dele.
 |---|---|---|---|
 | `catalog` | módulo | pacotes, equipamentos, câmeras | `packages`, `equipments`, `cameras` |
 | `images` | módulo | upload, INI, fila, anotação, verificação, histórico, migrações | `images`, `image_history` |
-| `annotation` | módulo | perfis de anotação (campos e tipos de objeto), `Check`/`Fit` dos valores | `annotation_profiles` |
+| `annotation` | módulo | perfis de anotação (campos e tipos de objeto), herança (`extends`, `inherit.go`), caixa ligada a objeto (`box_labels`, `links.go`), `Check`/`Fit` dos valores | `annotation_profiles` |
 | `boxes` | módulo | tarefas de anotação, caixas do CVAT (import COCO, `cvat.zip`) | `annotation_tasks`, `image_boxes` |
 | `imports` | módulo | perfis de import, raio-x de arquivo, import de CSV/INI nos rascunhos | `import_profiles` |
 | `exports` | módulo | perfis de export salvos, preview e download do zip | `export_profiles` |
@@ -73,6 +73,7 @@ argumento do `api.New`.
 | `hooks/` | estado e regras das telas (`useAnnotator`, `useImageBoxes`) |
 | `types/` | os tipos da API (`annotation.ts` espelha o módulo `annotation`) |
 | `utils/annotationForm.ts` | conversão API ↔ formulário dos campos do perfil |
+| `utils/boxLinks.ts` | achar a caixa ligada a um objeto (posição/IoU) e as caixas que podem ser um objeto do tipo |
 | `utils/boxes.ts` | caixas do CVAT: cor por label, tipo de objeto com caixa de uma label, pendência de atributo obrigatório |
 | `utils/importProfiles.ts` | ordem e rótulo dos perfis de import nas telas de pacote (os do perfil do pacote primeiro; o `splice-ini` vem escolhido) |
 | `utils/repeatFields.ts` | os valores da última imagem salva por pacote (campos com `repeat`), no `localStorage` |

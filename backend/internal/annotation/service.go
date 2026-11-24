@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"SIDM/internal/platform"
 )
 
 type Service struct {
@@ -21,26 +23,51 @@ func New(repo Repo) *Service {
 // deste módulo: o main cria os dois e depois liga).
 func (s *Service) SetPackages(p Packages) { s.packages = p }
 
-// ListProfiles: os padrões e depois os salvos, por nome.
+// ListProfiles: os padrões e depois os salvos, por nome, já com a herança.
+// Um perfil cujo pai sumiu (não devia acontecer: o pai não se apaga com
+// filhos) vem sem os campos do pai e é logado.
 func (s *Service) ListProfiles(ctx context.Context) ([]Profile, error) {
 	saved, err := s.repo.ListProfiles(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return append(Builtins(), saved...), nil
+	var out []Profile
+	for _, b := range Builtins() {
+		p, err := s.builtinWithLabels(ctx, b)
+		if err != nil {
+			return nil, err
+		}
+		r, _ := s.resolve(ctx, p) // um padrão não estende ninguém: não falha
+		out = append(out, *r)
+	}
+	for i := range saved {
+		if _, builtin := Builtin(saved[i].Name); builtin {
+			continue // as caixas de um padrão (já entraram acima)
+		}
+		r, err := s.resolve(ctx, &saved[i])
+		if err != nil {
+			platform.LogError(fmt.Errorf("perfil de anotação %s: %w", saved[i].Name, err))
+			out = append(out, saved[i])
+			continue
+		}
+		out = append(out, *r)
+	}
+	return out, nil
 }
 
-// FindProfile busca um padrão ou um salvo (platform.ErrNotFound se nenhum).
+// FindProfile busca um padrão ou um salvo (platform.ErrNotFound se nenhum),
+// já com os campos herdados dos pais.
 func (s *Service) FindProfile(ctx context.Context, name string) (*Profile, error) {
-	if p, ok := Builtin(name); ok {
-		return &p, nil
+	p, err := s.raw(ctx, name)
+	if err != nil {
+		return nil, err
 	}
-	return s.repo.FindProfile(ctx, name)
+	return s.resolve(ctx, p)
 }
 
 // CreateProfile valida e cadastra (platform.ErrDuplicate se o nome existe).
 func (s *Service) CreateProfile(ctx context.Context, p *Profile, user string) error {
-	if err := s.prepare(p); err != nil {
+	if err := s.prepare(ctx, p); err != nil {
 		return err
 	}
 	if _, builtin := Builtin(p.Name); builtin {
@@ -51,15 +78,19 @@ func (s *Service) CreateProfile(ctx context.Context, p *Profile, user string) er
 }
 
 // ReplaceProfile grava a nova versão de um perfil salvo, mantendo quem criou.
+// De um perfil padrão, só as caixas que representam os tipos mudam.
 func (s *Service) ReplaceProfile(ctx context.Context, p *Profile) error {
-	if err := editable(p.Name); err != nil {
-		return err
+	if b, builtin := Builtin(p.Name); builtin {
+		return s.replaceBuiltinLabels(ctx, b, p)
 	}
-	if err := s.prepare(p); err != nil {
+	if err := s.prepare(ctx, p); err != nil {
 		return err
 	}
 	old, err := s.repo.FindProfile(ctx, p.Name)
 	if err != nil {
+		return err
+	}
+	if err := s.checkFamily(ctx, p); err != nil {
 		return err
 	}
 	p.CreatedBy, p.UpdatedAt = old.CreatedBy, s.now()
@@ -70,6 +101,11 @@ func (s *Service) ReplaceProfile(ctx context.Context, p *Profile) error {
 func (s *Service) DeleteProfile(ctx context.Context, name string) error {
 	if err := editable(name); err != nil {
 		return err
+	}
+	if family, err := s.Family(ctx, name); err != nil {
+		return err
+	} else if len(family) > 1 {
+		return &InvalidError{Msg: fmt.Sprintf("o perfil %q é estendido por %s: apague ou mude esses antes", name, strings.Join(family[1:], ", "))}
 	}
 	if s.packages != nil {
 		using, err := s.packages.PackagesWithProfile(ctx, name)
@@ -88,15 +124,28 @@ func (s *Service) DeleteProfile(ctx context.Context, name string) error {
 	return s.repo.DeleteProfile(ctx, name)
 }
 
-func (s *Service) prepare(p *Profile) error {
+// prepare: só o que é do perfil (os herdados que a tela devolveu saem),
+// limpo e conferido sozinho e junto com os pais.
+func (s *Service) prepare(ctx context.Context, p *Profile) error {
 	p.Builtin = false // só o código marca perfil padrão
+	own(p)
 	p.Normalize()
-	return p.Validate()
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if p.Extends == p.Name && p.Name != "" {
+		return &InvalidError{Msg: "um perfil não estende ele mesmo", Problems: []Problem{{Path: "extends", Msg: "escolha outro perfil"}}}
+	}
+	r, err := s.resolveWith(ctx, p, p)
+	if err != nil {
+		return err
+	}
+	return r.validateLinks()
 }
 
 func editable(name string) error {
 	if _, builtin := Builtin(name); builtin {
-		return &InvalidError{Msg: fmt.Sprintf("%q é um perfil padrão e não pode ser alterado nem apagado: salve uma cópia com outro nome", name)}
+		return &InvalidError{Msg: fmt.Sprintf("%q é um perfil padrão e não pode ser apagado", name)}
 	}
 	return nil
 }

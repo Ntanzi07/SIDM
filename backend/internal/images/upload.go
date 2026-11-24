@@ -159,7 +159,7 @@ func (s *Service) ingestOne(ctx context.Context, pkg string, annot *annotation.P
 	// Se o nome original já está no padrão v2 E o hash do nome bate com o
 	// conteúdo, pré-preenche a anotação (o v2 só existe no perfil veiculos).
 	// Continua pending: alguém confere.
-	if annot.Name == annotation.DefaultProfile {
+	if annot.Is(annotation.DefaultProfile) {
 		if meta, err := filename.Parse(name); err == nil && meta.SHA1 == sum {
 			fit, _ := annot.Fit(ValuesFromMeta(meta))
 			if MergeAnnotation(img, fit, false) {

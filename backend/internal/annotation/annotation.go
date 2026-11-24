@@ -17,6 +17,7 @@ package annotation
 
 import (
 	"context"
+	"slices"
 	"time"
 )
 
@@ -72,6 +73,10 @@ type Field struct {
 	Integer bool     `json:"integer,omitempty" bson:"integer,omitempty"`
 
 	Ref string `json:"ref,omitempty" bson:"ref,omitempty"` // ref: equipment ou camera
+
+	// From: o perfil de onde o campo veio (herança). Só na resposta: no
+	// banco cada perfil guarda só os campos dele.
+	From string `json:"from,omitempty" bson:"-"`
 }
 
 // ObjectType é um tipo de objeto que aparece na imagem.
@@ -84,17 +89,46 @@ type ObjectType struct {
 	Min    int     `json:"min,omitempty" bson:"min,omitempty"` // quantos por imagem, no mínimo, para verificar
 	Max    int     `json:"max,omitempty" bson:"max,omitempty"` // no máximo (0 = sem limite)
 	Fields []Field `json:"fields" bson:"fields"`
+	// BoxLabels: as labels de caixa (do CVAT) que representam um objeto
+	// deste tipo, e o que cada uma já diz dele (motorcycle → vehicle_type =
+	// moto). Na anotação, cada objeto pode apontar para a sua caixa.
+	BoxLabels []BoxLabel `json:"box_labels,omitempty" bson:"box_labels,omitempty"`
+	// From: o perfil de onde o tipo veio (herança). Um perfil filho pode
+	// repetir a chave de um tipo do pai só para acrescentar campos.
+	From string `json:"from,omitempty" bson:"-"`
+}
+
+// BoxLabel: uma label de caixa que representa um tipo de objeto, e os
+// valores que ela implica nos campos dele.
+type BoxLabel struct {
+	Label  string         `json:"label" bson:"label"`
+	Fields map[string]any `json:"fields,omitempty" bson:"fields,omitempty"`
+	From   string         `json:"from,omitempty" bson:"-"` // herdada (só na resposta)
 }
 
 // Profile é um perfil de anotação.
 type Profile struct {
-	Name        string       `json:"name" bson:"name"`
-	Description string       `json:"description,omitempty" bson:"description,omitempty"`
-	Builtin     bool         `json:"builtin,omitempty" bson:"-"` // padrão do código: não pode ser alterado
-	Fields      []Field      `json:"fields" bson:"fields"`
-	Objects     []ObjectType `json:"objects" bson:"objects"`
-	CreatedBy   string       `json:"created_by,omitempty" bson:"created_by,omitempty"`
-	UpdatedAt   time.Time    `json:"updated_at,omitzero" bson:"updated_at"`
+	Name        string `json:"name" bson:"name"`
+	Description string `json:"description,omitempty" bson:"description,omitempty"`
+	Builtin     bool   `json:"builtin,omitempty" bson:"-"` // padrão do código: não pode ser alterado
+	// Extends: o perfil pai. O filho tem todos os campos e tipos de objeto
+	// dele, mais os seus (ex.: "moto" estende "veiculos" e acrescenta
+	// quantas pessoas estão na moto). Uma pesquisa do pai inclui os
+	// pacotes dos filhos: os campos do pai existem em todos.
+	Extends string `json:"extends,omitempty" bson:"extends,omitempty"`
+	// Lineage: o próprio nome e os dos pais, do mais perto ao mais longe
+	// (só na resposta).
+	Lineage   []string     `json:"lineage,omitempty" bson:"-"`
+	Fields    []Field      `json:"fields" bson:"fields"`
+	Objects   []ObjectType `json:"objects" bson:"objects"`
+	CreatedBy string       `json:"created_by,omitempty" bson:"created_by,omitempty"`
+	UpdatedAt time.Time    `json:"updated_at,omitzero" bson:"updated_at"`
+}
+
+// Is diz se o perfil é name ou estende name (direto ou não). Ex.: um perfil
+// "moto" que estende "veiculos" é "veiculos" (tem os campos do nome v2).
+func (p *Profile) Is(name string) bool {
+	return p.Name == name || slices.Contains(p.Lineage, name)
 }
 
 // Field devolve o campo da imagem com essa chave.
@@ -131,6 +165,22 @@ func (o *ObjectType) Field(key string) (*Field, bool) {
 type Object struct {
 	Type   string         `json:"type" bson:"type"`
 	Fields map[string]any `json:"fields" bson:"fields"`
+	// Box: a caixa (do CVAT) que é este objeto, se ligada (ex.: o Veículo 1
+	// é a caixa motorcycle da tarefa helmet_detection). A label tem que
+	// estar nas BoxLabels do tipo.
+	Box *BoxRef `json:"box,omitempty" bson:"box,omitempty"`
+}
+
+// BoxRef aponta uma caixa de uma tarefa. As caixas não têm id fixo (uma
+// tarefa importada de novo troca todas): a caixa é achada pela label e pela
+// posição (a mais parecida, se mudou um pouco).
+type BoxRef struct {
+	Task  string  `json:"task" bson:"task"`
+	Label string  `json:"label" bson:"label"`
+	X     float64 `json:"x" bson:"x"`
+	Y     float64 `json:"y" bson:"y"`
+	W     float64 `json:"w" bson:"w"`
+	H     float64 `json:"h" bson:"h"`
 }
 
 // Repo é a coleção annotation_profiles.

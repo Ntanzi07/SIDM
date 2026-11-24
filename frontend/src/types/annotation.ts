@@ -25,6 +25,15 @@ export type ProfileField = {
   max?: number
   integer?: boolean
   ref?: 'equipment' | 'camera'
+  from?: string // herdado: o perfil de onde o campo veio (só leitura)
+}
+
+// Uma label de caixa que representa um tipo de objeto, e o que ela já diz
+// dele (motorcycle → type = motorcycle).
+export type BoxLabel = {
+  label: string
+  fields?: Record<string, unknown>
+  from?: string // herdada
 }
 
 export type ObjectType = {
@@ -34,12 +43,16 @@ export type ObjectType = {
   min?: number
   max?: number // 0 = sem limite
   fields: ProfileField[]
+  box_labels?: BoxLabel[] // só nos tipos de lista: as caixas que são um objeto deste tipo
+  from?: string // herdado: o perfil de onde o tipo veio
 }
 
 export type AnnotationProfile = {
   name: string
   description?: string
   builtin?: boolean
+  extends?: string // o perfil pai: este tem os campos dele, mais os seus
+  lineage?: string[] // o próprio e os pais, do mais perto ao mais longe
   fields: ProfileField[]
   objects: ObjectType[]
   created_by?: string
@@ -50,7 +63,12 @@ export type AnnotationProfile = {
 export type AnnotationObject = {
   type: string
   fields: Record<string, unknown>
+  box?: ObjectBox // a caixa que é este objeto (ex.: a motorcycle do Veículo 1)
 }
+
+// A caixa ligada a um objeto: a tarefa, a label e a posição (as caixas não
+// têm id fixo; uma tarefa importada de novo troca todas).
+export type ObjectBox = { task: string; label: string; x: number; y: number; w: number; h: number }
 
 export type ImageDetail = {
   sha1: string
@@ -74,7 +92,7 @@ export type ImageDetail = {
 // utils/annotationForm.ts.
 export type FormValue = string | string[]
 export type FormValues = Record<string, FormValue>
-export type FormObject = { type: string; values: FormValues }
+export type FormObject = { type: string; values: FormValues; box?: ObjectBox }
 export type AnnotationForm = { fields: FormValues; objects: FormObject[] }
 
 export type AnnotationCodes = {

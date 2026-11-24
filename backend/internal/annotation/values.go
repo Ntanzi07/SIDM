@@ -51,7 +51,18 @@ func (p *Profile) Check(v Values, complete bool) (Values, error) {
 			continue
 		}
 		count[o.Type]++
-		out.Objects = append(out.Objects, Object{Type: o.Type, Fields: checkFields(&ps, path, t.Fields, o.Fields, complete)})
+		fields := checkFields(&ps, path, t.Fields, implied(t, o), complete)
+		box := checkLink(&ps, path, t, o, fields)
+		if box != nil {
+			for _, prev := range out.Objects {
+				if prev.Box != nil && sameBox(prev.Box, box) {
+					ps.add(path+".box", "esta caixa já é de outro objeto")
+					box = nil
+					break
+				}
+			}
+		}
+		out.Objects = append(out.Objects, Object{Type: o.Type, Fields: fields, Box: box})
 	}
 	for _, t := range p.Objects {
 		if t.Box {

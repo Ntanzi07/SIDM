@@ -103,7 +103,7 @@ func normalized(fields map[string]any) map[string]any {
 func normalizedObjects(objs []annotation.Object) []annotation.Object {
 	out := make([]annotation.Object, len(objs))
 	for i, o := range objs {
-		out[i] = annotation.Object{Type: o.Type, Fields: normalized(o.Fields)}
+		out[i] = annotation.Object{Type: o.Type, Fields: normalized(o.Fields), Box: o.Box}
 	}
 	return out
 }
