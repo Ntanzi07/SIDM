@@ -25,6 +25,7 @@ import (
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
 	"SIDM/internal/platform"
+	"SIDM/internal/processing"
 	"SIDM/internal/users"
 	"SIDM/internal/versions"
 )
@@ -81,8 +82,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	usr := users.NewMemory()
 	usrSvc := users.New(usr)
 	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, ver: ver, usr: usr, usrSvc: usrSvc, files: fs, root: root}
+	procSvc := processing.New(processing.NewMemory(), imgSvc, svc, fs, bx) // sem modelos: as rotas, para a doc e o login
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
-		annSvc, verSvc, usrSvc)
+		annSvc, verSvc, usrSvc, procSvc)
 	// Sem o login (users.Protect): os testes dos módulos dizem quem é pelo
 	// X-User. O login é testado em users_test.go, com o Protect.
 	env.handler = env.srv.Routes()

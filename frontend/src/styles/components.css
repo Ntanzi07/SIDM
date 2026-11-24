@@ -43,6 +43,7 @@ h2 {
 .search-page,
 .versions-page,
 .tasks-page,
+.processing-page,
 .dashboard-page {
   width: min(1180px, calc(100% - 48px));
   max-width: none;
@@ -74,6 +75,7 @@ h2 {
 .viewer-page > .back-button:first-child,
 .annotation-page > .back-button:first-child,
 .tasks-page > .back-button:first-child,
+.processing-page > .back-button:first-child,
 .dashboard-page > .back-button:first-child {
   display: flex;
   width: fit-content;

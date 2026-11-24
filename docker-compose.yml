@@ -40,6 +40,16 @@ services:
       SIDM_ADMIN_USER: ${SIDM_ADMIN_USER:-}
       SIDM_ADMIN_EMAIL: ${SIDM_ADMIN_EMAIL:-}
       SIDM_ADMIN_PASSWORD: ${SIDM_ADMIN_PASSWORD:-}
+      # Processar: o detector de placas (container lpr-class, do .deb
+      # splice-lpr), publicado no host na porta 54321. Não usa o LPR_ADDR do
+      # .env: aquele é o do go run (127.0.0.1), que dentro do container é o
+      # próprio container.
+      LPR_ADDR: ${LPR_DOCKER_ADDR:-host.docker.internal:54321}
+      # o contador de eixos (container axlecounter.software, rede do host, porta 54323)
+      AXLE_ADDR: ${AXLE_DOCKER_ADDR:-host.docker.internal:54323}
+    extra_hosts:
+      # no Linux o host.docker.internal não existe sozinho: aponta para o host
+      - "host.docker.internal:host-gateway"
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:

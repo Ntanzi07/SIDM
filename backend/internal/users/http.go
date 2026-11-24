@@ -38,7 +38,8 @@ func public(method, path string) bool {
 }
 
 // userWrites: o que o usuário normal pode GRAVAR (no formato das rotas do
-// Go). Ler (GET) ele pode tudo, menos as contas. Ele anota, importa (cria
+// Go). Ler (GET) ele pode tudo, menos as contas e a página Processar
+// (adminAreas). Ele anota, importa (cria
 // pacote, sobe imagens, importa CSV e caixas), apaga imagens, baixa o export
 // e cria datasets e versões. O resto (tarefas e labels, perfis, renomear e
 // apagar pacotes, apagar datasets e versões, contas) é só de admin.
@@ -83,16 +84,25 @@ var userMux = func() *http.ServeMux {
 }()
 
 // adminOnly: o que o usuário normal não pode. Toda gravação que não está em
-// userWrites, e as contas.
+// userWrites, e tudo (até ler) das contas e da página Processar.
 func adminOnly(r *http.Request) bool {
-	if r.URL.Path == "/users" || strings.HasPrefix(r.URL.Path, "/users/") {
-		return true
+	for _, prefix := range adminAreas {
+		if r.URL.Path == prefix || strings.HasPrefix(r.URL.Path, prefix+"/") {
+			return true
+		}
 	}
 	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return false
 	}
 	_, pattern := userMux.Handler(r)
 	return pattern == ""
+}
+
+// adminAreas: as rotas que o usuário normal nem lê (o caminho e o que vem
+// abaixo dele).
+var adminAreas = []string{
+	"/users",      // as contas
+	"/processing", // a página Processar (modelos de IA)
 }
 
 type ctxKey struct{}

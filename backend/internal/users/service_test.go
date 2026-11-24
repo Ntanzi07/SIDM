@@ -170,6 +170,13 @@ func TestRegras(t *testing.T) {
 		{"DELETE", "/equipments/x", true},
 		{"GET", "/users", true},
 		{"PATCH", "/users/maria", true},
+		// a página Processar: só admin, até para ler
+		{"GET", "/processing/models", true},
+		{"GET", "/processing/runs", true},
+		{"GET", "/processing/runs/20261124-1", true},
+		{"POST", "/processing/runs", true},
+		{"POST", "/processing/runs/20261124-1/cancel", true},
+		{"GET", "/processingx", false}, // só o caminho e o que vem abaixo dele
 	}
 	for _, c := range cases {
 		r := httptest.NewRequest(c.method, c.path, nil)

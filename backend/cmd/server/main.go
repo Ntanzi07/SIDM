@@ -12,13 +12,16 @@ import (
 
 	"SIDM/internal/annotation"
 	"SIDM/internal/api"
+	"SIDM/internal/axle"
 	"SIDM/internal/boxes"
 	"SIDM/internal/catalog"
 	"SIDM/internal/exports"
 	"SIDM/internal/files"
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
+	"SIDM/internal/lpr"
 	"SIDM/internal/platform"
+	"SIDM/internal/processing"
 	"SIDM/internal/users"
 	"SIDM/internal/versions"
 )
@@ -129,8 +132,37 @@ func main() {
 	usr := users.New(usrRepo)
 	ensureAdmin(ctx, usr)
 
+	// Pré-anotação por modelos de IA. Cada modelo entra se a variável dele
+	// estiver no ambiente. O LPR é o container lpr-class (instalado pelo .deb
+	// splice-lpr), em LPR_ADDR (ex.: 127.0.0.1:54321).
+	var models []processing.Model
+	if addr := os.Getenv("LPR_ADDR"); addr != "" {
+		models = append(models, processing.NewLPR(lpr.NewClient(addr, 30*time.Second)))
+		log.Printf("modelo LPR em %s", addr)
+	} else {
+		log.Printf("LPR_ADDR não definido: o modelo LPR fica desligado na página Processar")
+	}
+	// O contador de eixos é o container axlecounter.software (do .deb de
+	// mesmo nome), em AXLE_ADDR (ex.: 127.0.0.1:54323).
+	if addr := os.Getenv("AXLE_ADDR"); addr != "" {
+		models = append(models, processing.NewAxle(axle.NewClient(addr, 30*time.Second)))
+		log.Printf("modelo de eixos em %s", addr)
+	} else {
+		log.Printf("AXLE_ADDR não definido: o contador de eixos fica desligado na página Processar")
+	}
+	procRepo := processing.NewMongoRepo(db)
+	if err := procRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar os processamentos no Mongo: %v", err)
+	}
+	proc := processing.New(procRepo, img, cat, fs, bx, models...)
+	if n, err := proc.MarkInterrupted(ctx); err != nil {
+		log.Fatalf("falha ao marcar os processamentos interrompidos: %v", err)
+	} else if n > 0 {
+		log.Printf("%d processamento(s) interrompido(s) pela parada do servidor", n)
+	}
+
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
-	srv := api.New(ping, cat, img, bx, imp, exp, ann, ver, usr)
+	srv := api.New(ping, cat, img, bx, imp, exp, ann, ver, usr, proc)
 
 	log.Printf("SIDM ouvindo em %s", addr)
 	log.Fatal(http.ListenAndServe(addr, usr.Protect(srv.Routes())))

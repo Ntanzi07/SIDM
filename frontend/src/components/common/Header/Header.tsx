@@ -31,6 +31,7 @@ function ThemeToggle() {
 const LINKS = [
   { to: '/', label: 'Pacotes', also: '/pacotes' },
   { to: '/tarefas', label: 'Tarefas' },
+  { to: '/processar', label: 'Processar', admin: true },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/exportar', label: 'Exportar' },
   { to: '/configurar', label: 'Configurar', admin: true },

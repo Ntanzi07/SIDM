@@ -70,6 +70,19 @@ tags:
       sobrescrever a outra. O SIDM não desenha caixas: manda as imagens para o
       CVAT (cvat.zip) e importa o export COCO 1.0 de volta, na tarefa.
 
+  - name: processar
+    description: |
+      Pré-anotação por **modelos de IA**: um modelo passa pelas imagens dos
+      pacotes escolhidos (só pendentes, só verificadas ou todas) e grava as
+      caixas que achou numa **tarefa** (padrão `pre-<modelo>`), para uma pessoa
+      só corrigir. Hoje há o **LPR** (o detector de placas da Splice, o container
+      `lpr-class`, ligado por `LPR_ADDR`) e o contador de **eixos** (o container
+      `axlecounter.software`, ligado por `AXLE_ADDR`). O arquivo nunca muda, os campos e o
+      status das imagens também não. Caixas que vieram do CVAT ou foram
+      editadas no SIDM **nunca** são sobrescritas: a imagem é pulada e entra no
+      relatório. Um processamento por modelo de cada vez, em segundo plano.
+      **Todas as rotas são só de admin**, até as de leitura (403 para o usuário normal).
+
 paths:
   /auth/register:
     post:
@@ -2084,6 +2097,97 @@ paths:
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /processing/models:
+    get:
+      tags: [processar]
+      summary: Os modelos ligados, com o estado de cada um
+      description: |
+        Cada modelo responde a um ping (prazo de 1 s). `available: false` =
+        o modelo não respondeu (o detalhe vai para o log do servidor); `busy` =
+        há um processamento rodando nele.
+      responses:
+        "200":
+          description: Lista (vazia se nenhum modelo estiver configurado).
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProcessingModel" } }
+  /processing/runs:
+    get:
+      tags: [processar]
+      summary: Os últimos processamentos, mais novos primeiro
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 50, minimum: 1, maximum: 200 } }
+      responses:
+        "200":
+          description: Lista (os que estão rodando vêm com o progresso de agora).
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ProcessingRun" } }
+    post:
+      tags: [processar]
+      summary: Inicia um processamento
+      description: |
+        Confere o pedido, cria a tarefa se ela não existir (ou junta as labels
+        do modelo que faltam) e solta o processamento em segundo plano. Acompanhe
+        por `GET /processing/runs/{id}`. Rodar de novo é seguro: só as caixas do
+        próprio modelo são regravadas.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProcessingRunInput" }
+      responses:
+        "202":
+          description: Começou.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcessingRun" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Já há um processamento rodando nesse modelo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: O modelo não está respondendo.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+  /processing/runs/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [processar]
+      summary: Um processamento, com o progresso e o relatório
+      responses:
+        "200":
+          description: O processamento.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcessingRun" }
+        "404": { $ref: "#/components/responses/NotFound" }
+  /processing/runs/{id}/cancel:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [processar]
+      summary: Pede para parar um processamento
+      description: Para depois da imagem que está no modelo; o que já foi gravado fica.
+      responses:
+        "200":
+          description: Pedido aceito (o status vira `canceled` em instantes).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcessingRun" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: O processamento já terminou.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
 components:
   parameters:
     Inactive:
@@ -2371,6 +2475,57 @@ components:
                     from: { type: integer }
                     to: { type: integer }
               edited: { type: boolean, description: "As mesmas quantidades, mas as caixas mudaram (posição, tamanho, atributos)." }
+    ProcessingModel:
+      type: object
+      properties:
+        key: { type: string, example: lpr }
+        label: { type: string, example: LPR (placas) }
+        description: { type: string }
+        default_task: { type: string, example: pre-lpr }
+        labels: { type: array, items: { type: string }, description: as labels que o modelo gera (entram na tarefa) }
+        default_min_score: { type: number, description: o score mínimo se o pedido não disser outro }
+        score_help: { type: string, description: a que o score mínimo se aplica }
+        available: { type: boolean }
+        error: { type: string }
+        busy: { type: boolean }
+    ProcessingRunInput:
+      type: object
+      required: [model, packages]
+      properties:
+        model: { type: string, example: lpr }
+        packages: { type: array, items: { type: string }, minItems: 1, maxItems: 200 }
+        scope: { type: string, enum: [pending, verified, all], default: pending, description: quais imagens dos pacotes entram }
+        task: { type: string, description: "a tarefa das caixas (padrão: a do modelo, ex. pre-lpr)" }
+        min_score: { type: number, minimum: 0, maximum: 1, description: "abaixo dele, fica de fora (padrão: o default_min_score do modelo; no LPR vale para os caracteres)" }
+    ProcessingRun:
+      type: object
+      properties:
+        id: { type: string, example: 20261124-132000-a1b2c3 }
+        model: { type: string }
+        packages: { type: array, items: { type: string } }
+        scope: { type: string, enum: [pending, verified, all] }
+        task: { type: string }
+        min_score: { type: number }
+        status: { type: string, enum: [running, done, failed, canceled, interrupted] }
+        message: { type: string, description: o motivo de um failed }
+        total: { type: integer, description: imagens que entraram }
+        done: { type: integer, description: já passaram pelo modelo }
+        written: { type: integer, description: imagens com caixas gravadas }
+        boxes: { type: integer }
+        skipped: { type: integer, description: puladas porque as caixas vieram do CVAT ou foram editadas }
+        skipped_ids: { type: array, items: { type: string }, description: as primeiras 50 }
+        error_count: { type: integer }
+        errors:
+          type: array
+          description: as primeiras 50
+          items:
+            type: object
+            properties:
+              sha1: { type: string }
+              msg: { type: string }
+        started_by: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
     Counts:
       type: object
       description: Valor → quantidade.

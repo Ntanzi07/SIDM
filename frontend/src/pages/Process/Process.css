@@ -1,0 +1,190 @@
+/* Processar. O layout (lista à esquerda, cartão à direita, cartões de
+   opção, pacotes e ações) é o do Exportar (Export.css); aqui só o que é da
+   página. Tudo dos tokens do theme.css. */
+
+/* estado do modelo na lista da esquerda */
+.export-profile .process-state--on {
+  color: var(--success);
+}
+
+.export-profile .process-state--busy {
+  color: var(--warning);
+}
+
+.export-profile .process-state--off {
+  color: var(--danger);
+}
+
+.process-aside-gap {
+  margin-top: 18px;
+}
+
+/* as três opções de imagens numa linha */
+.export-formats.process-scopes {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+/* "Opções avançadas" (tarefa e score), fechado por padrão */
+.process-advanced {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.process-advanced small {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.process-advanced__arrow {
+  width: 10px;
+  color: var(--text-3);
+}
+
+.process-advanced + .profile-form-grid {
+  margin-top: 14px;
+}
+
+/* ── Em andamento ─────────────────────────────────────────────── */
+.process-current {
+  margin-bottom: 16px;
+  border-color: var(--accent-border);
+}
+
+.process-current__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.process-current__head h2 {
+  margin: 0;
+}
+
+.process-current__bar {
+  width: 100%;
+  margin-top: 16px;
+}
+
+/* ── Histórico ────────────────────────────────────────────────── */
+.process-table {
+  width: 100%;
+  margin-top: 12px;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.process-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.process-table td {
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-2);
+}
+
+.process-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.process-row {
+  cursor: pointer;
+  transition: background 160ms var(--ease);
+}
+
+.process-row:hover,
+.process-row--open {
+  background: var(--hover);
+}
+
+.process-detail td {
+  padding: 4px 10px 16px;
+  background: var(--hover);
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.process-detail p {
+  margin: 0 0 6px;
+}
+
+.process-bad {
+  color: var(--danger);
+}
+
+.process-errors {
+  display: grid;
+  gap: 4px;
+  max-height: 200px;
+  margin: 6px 0 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.process-errors code {
+  color: var(--text-3);
+}
+
+.process-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.process-status--running {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.process-status--done {
+  border-color: var(--success-border);
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.process-status--failed {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.process-status--canceled,
+.process-status--interrupted {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+  color: var(--warning);
+}
+
+@media (max-width: 900px) {
+  .export-formats.process-scopes {
+    grid-template-columns: 1fr;
+  }
+
+  .process-table {
+    display: block;
+    overflow-x: auto;
+  }
+}

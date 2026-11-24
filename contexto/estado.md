@@ -1,9 +1,16 @@
 # Estado atual
 
-Atualizado em 2026-11-23. Branch de trabalho: `fix/config-ini`.
+Atualizado em 2026-11-24. Branch de trabalho: `feat/integracao-ia`.
 
 ## Pronto
 
+- Página **Processar** (`/processar`, branch `feat/integracao-ia`, ainda sem commit):
+  pré-anotação pelo detector de placas `lpr-class` (módulo `processing`, biblioteca
+  `lpr`). Escolhe pacotes e escopo (pendentes/verificadas/todas), grava só caixas na
+  tarefa `pre-lpr`, pula o que veio do CVAT ou foi editado; histórico com relatório. Só admin (nem aparece para o usuário normal).
+  Testado ponta a ponta com o `lpr-class` de verdade (imagens sintéticas).
+  Segundo modelo: o contador de **eixos** (`axlecounter.software`, tarefa `pre-eixos`),
+  também testado com o servidor de verdade.
 - Tema claro + botão claro/escuro no header (branch `feat/tema-claro`, ainda sem commit).
 
 - Monólito modular completo (`catalog`, `images`, `annotation`, `boxes`, `imports`, `exports`).
@@ -57,6 +64,9 @@ Atualizado em 2026-11-23. Branch de trabalho: `fix/config-ini`.
   versões pelo `hash` de cada item, e o detalhe do que mudou numa imagem) e a tela Versões
   (`/versoes`; o dataset nasce na Pesquisa, "Salvar como dataset"). Próxima: o export de uma versão (com o número no manifesto do zip, para o DVC do lado do treino).
 - Depois: levar os atributos das caixas para o export; histórico das edições de atributo.
+- Processar: testar o LPR e os eixos com fotos reais (localmente, nunca no repositório) e
+  ajustar o score mínimo padrão; próximos modelos entram como adaptadores
+  (`processing.Model`).
 
 ## Pendências menores
 
