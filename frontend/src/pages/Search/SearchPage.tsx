@@ -4,10 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import {
   createDataset,
   getImageStats,
+  getVersionStats,
   getLabelStats,
   listAnnotationProfiles,
-  listPackagesOfProfile,
-  listTasks,
   searchImages,
   type Counts,
   type DatasetQuery,
@@ -19,22 +18,22 @@ import {
 } from '../../services/api'
 import type { AnnotationProfile } from '../../types/annotation'
 import { fieldLabel } from '../../utils/annotationForm'
-import { facetsOf, fmt, toggle, valuesOf } from '../../utils/stats'
-import { Chips, CountCard, LabelCard } from '../../components/Stats/StatsCards'
+import { facetsOf, fmt, valuesOf } from '../../utils/stats'
+import { CountCard, LabelCard } from '../../components/Stats/StatsCards'
 import '../Packages/Packages.css'
 import './Search.css'
 
 // Pesquisa/dashboard: quantas imagens de UM perfil de anotação têm cada valor
 // de cada campo. Clicar num valor filtra por ele.
-export function SearchPage() {
+// version: pesquisa dentro de uma versão congelada, ou do agora do dataset
+// (só verificadas; sem lista de imagens nem salvar).
+export type VersionSource = { dataset: string; number: number } // number 0 = o agora (não salvo)
+
+export function SearchPage({ profileName, version }: { profileName: string; version?: VersionSource }) {
   const [profiles, setProfiles] = useState<AnnotationProfile[]>([])
-  const [profileName, setProfileName] = useState('')
-  const [status, setStatus] = useState<StatsStatus>('verified')
+  // só verificadas e todas as tarefas; o pacote filtra clicando na barra
+  const status: StatsStatus = 'verified'
   const [chosenPackages, setChosenPackages] = useState<string[]>([]) // vazio = todos
-  const [packages, setPackages] = useState<string[]>([])
-  const [tasks, setTasks] = useState<string[]>([])
-  const [allTasks, setAllTasks] = useState(true)
-  const [chosenTasks, setChosenTasks] = useState<string[]>([])
   const [labels, setLabels] = useState<LabelStats | null>(null)
   const [showImages, setShowImages] = useState(false) // a lista de imagens fica aberta entre as pesquisas
   const [filters, setFilters] = useState<Record<string, string>>({})
@@ -51,9 +50,6 @@ export function SearchPage() {
 
   useEffect(() => {
     let active = true
-    listTasks()
-      .then((items) => { if (active) setTasks(items.map((item) => item.name).sort()) })
-      .catch(() => { if (active) setTasks([]) })
     listAnnotationProfiles()
       .then((items) => { if (active) setProfiles(items) })
       .catch((requestError: unknown) => {
@@ -62,21 +58,29 @@ export function SearchPage() {
     return () => { active = false }
   }, [])
 
-  // Trocar de perfil começa uma pesquisa nova.
-  function chooseProfile(name: string) {
-    setProfileName(name)
-    setChosenPackages([])
-    setFilters({})
-    setStats(null)
-    setLabels(null)
-    setPackages([])
-    if (name) {
-      listPackagesOfProfile(name).then(setPackages).catch(() => setPackages([]))
-    }
-  }
+  // numa versão: tudo numa chamada só (contas e caixas dos itens congelados)
+  const versionKey = version ? `${version.dataset}#${version.number}` : ''
+  useEffect(() => {
+    if (!version) return
+    let active = true
+    const key = JSON.stringify([profileName, status, chosenPackages, filters])
+    getVersionStats(version.dataset, version.number, { packages: chosenPackages, filters }, [])
+      .then((result) => {
+        if (!active) return
+        setStats(result.images)
+        setLabels(result.labels)
+        setError('')
+      })
+      .catch((requestError: unknown) => {
+        if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível pesquisar na versão.')
+      })
+      .finally(() => { if (active) setResultKey(key) })
+    return () => { active = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- versionKey resume a versão
+  }, [versionKey, profileName, chosenPackages, filters])
 
   useEffect(() => {
-    if (!profileName) return
+    if (!profileName || version) return
     let active = true
     const key = JSON.stringify([profileName, status, chosenPackages, filters])
     getImageStats({ profile: profileName, status, packages: chosenPackages, filters })
@@ -90,20 +94,19 @@ export function SearchPage() {
       })
       .finally(() => { if (active) setResultKey(key) })
     return () => { active = false }
-  }, [profileName, status, chosenPackages, filters])
+  }, [profileName, chosenPackages, filters, version])
 
   // As labels: as mesmas imagens da pesquisa, nas tarefas escolhidas.
-  const noTasks = !allTasks && chosenTasks.length === 0
   useEffect(() => {
-    if (!profileName || noTasks) return
+    if (!profileName || version) return
     let active = true
-    getLabelStats({ profile: profileName, status, packages: chosenPackages, filters }, allTasks ? [] : chosenTasks)
+    getLabelStats({ profile: profileName, status, packages: chosenPackages, filters }, [])
       .then((result) => { if (active) setLabels(result) })
       .catch((requestError: unknown) => {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível contar as labels.')
       })
     return () => { active = false }
-  }, [profileName, status, chosenPackages, filters, allTasks, chosenTasks, noTasks])
+  }, [profileName, chosenPackages, filters, version])
 
   function setFilter(key: string, value: string) {
     setFilters((current) => {
@@ -117,18 +120,7 @@ export function SearchPage() {
   const activeFilters = Object.keys(filters).length
 
   return (
-    <section className="search-page">
-      <div className="page-heading">
-        <div>
-          <h1>Pesquisa</h1>
-          <p>Quantas imagens de um perfil de anotação têm cada valor, por pacote. Clique num valor para filtrar por ele.</p>
-        </div>
-        {profile && !saving && (
-          <button className="button button--secondary" onClick={() => setSaving(true)} type="button">
-            Salvar como dataset
-          </button>
-        )}
-      </div>
+    <div className="search-body">
       {error && <p className="form-error">{error}</p>}
       {profile && saving && (
         <SaveDataset
@@ -137,95 +129,49 @@ export function SearchPage() {
           query={{
             packages: chosenPackages,
             filters: Object.entries(filters).map(([key, value]) => ({ key, value })),
-            tasks: allTasks ? [] : chosenTasks,
+            tasks: [],
           }}
           status={status}
         />
       )}
 
-      <div className="create-card search-controls">
-        <div className="search-controls__row">
-          <label className="search-select">
-            <span>Perfil de anotação</span>
-            <select onChange={(event) => chooseProfile(event.target.value)} value={profileName}>
-              <option value="">Escolha um perfil</option>
-              {profiles.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-            </select>
-          </label>
-          {profile && (
-            <>
-              <label className="search-select">
-                <span>Imagens</span>
-                <select onChange={(event) => setStatus(event.target.value as StatsStatus)} value={status}>
-                  <option value="verified">Verificadas</option>
-                  <option value="pending">Pendentes</option>
-                  <option value="all">Todas</option>
-                </select>
-              </label>
-            </>
-          )}
-        </div>
-
-        {profile && (
-          <Chips
-            all={chosenPackages.length === 0}
-            allLabel="Todos"
-            chosen={chosenPackages}
-            empty="Nenhum pacote usa este perfil."
-            items={packages}
-            onAll={() => setChosenPackages([])}
-            onToggle={(name) => setChosenPackages((current) => toggle(current, name))}
-            title="Pacotes"
-          />
+      {/* Sem cartão de busca: os filtros vêm de clicar nos gráficos (a rosca,
+          as barras), e aparecem aqui como etiquetas para tirar. */}
+      <div className="search-filterbar">
+        <span className="eyebrow">Filtros</span>
+        {chosenPackages.map((name) => (
+          <button className="search-filterbar__chip" key={`pkg-${name}`} onClick={() => setChosenPackages([])} title="Tirar o filtro" type="button">
+            Pacote: <strong>{name}</strong> <span aria-hidden="true">✕</span>
+          </button>
+        ))}
+        {activeFilters === 0 && chosenPackages.length === 0 && <span className="search-filterbar__hint">nenhum · clique num valor dos gráficos para filtrar</span>}
+        {Object.entries(filters).map(([key, value]) => {
+          const facet = facets.find((item) => item.key === key)
+          const label = facet ? valuesOf(facet.field).find((item) => item.value === value)?.label ?? value : value
+          return (
+            <button className="search-filterbar__chip" key={key} onClick={() => setFilter(key, '')} title="Tirar o filtro" type="button">
+              {facet?.title ?? key}: <strong>{label}</strong> <span aria-hidden="true">✕</span>
+            </button>
+          )
+        })}
+        {activeFilters + chosenPackages.length > 1 && (
+          <button className="search-filterbar__clear" onClick={() => { setFilters({}); setChosenPackages([]) }} type="button">Limpar</button>
         )}
-        {profile && (
-          <Chips
-            all={allTasks}
-            allLabel="Todas"
-            chosen={chosenTasks}
-            empty="Nenhuma tarefa cadastrada."
-            items={tasks}
-            onAll={() => { setAllTasks(true); setChosenTasks([]) }}
-            onToggle={(name) => { setAllTasks(false); setChosenTasks((current) => toggle(allTasks ? [] : current, name)) }}
-            title="Tarefas (labels do CVAT)"
-          />
-        )}
-
-        {profile && facets.length > 0 && (
-          <div className="search-controls__filters">
-            {facets.map((facet) => (
-              <label className="search-select" key={facet.key}>
-                <span>{facet.title}</span>
-                <select onChange={(event) => setFilter(facet.key, event.target.value)} value={filters[facet.key] ?? ''}>
-                  <option value="">Todos</option>
-                  {valuesOf(facet.field).map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
-                </select>
-              </label>
-            ))}
-          </div>
-        )}
-        {activeFilters > 0 && (
-          <button className="button button--secondary button--sm" onClick={() => setFilters({})} type="button">
-            Limpar filtros ({activeFilters})
+        {!version && profile && !saving && (
+          <button className="button button--secondary button--sm search-filterbar__save" onClick={() => setSaving(true)} type="button">
+            Salvar como dataset
           </button>
         )}
       </div>
 
-      {!profile && <p className="profile-name-hint">Escolha um perfil de anotação para começar.</p>}
+      {!profile && profiles.length > 0 && <p className="profile-name-hint">O perfil {profileName} não existe.</p>}
 
       {profile && stats && (
         <div className={loading ? 'search-results search-results--loading' : 'search-results'}>
-          <div className="search-total">
-            <strong>{fmt(stats.total)}</strong>
-            <span>
-              imagem(ns) {status === 'verified' ? 'verificada(s)' : status === 'pending' ? 'pendente(s)' : ''} no perfil {stats.profile}
-              {activeFilters > 0 ? ' com os filtros' : ''}
-            </span>
-          </div>
 
-          {!noTasks && labels && labels.tasks.length > 0 && (
+          {labels && labels.tasks.length > 0 && (
             <>
-              <h2 className="search-section">Labels do CVAT</h2>
+              <h2 className="search-section">Caixas por label</h2>
               <div className="search-grid">
                 {labels.tasks.map((task) => <LabelCard key={task.task} searchImages={labels.images} task={task} />)}
               </div>
@@ -234,20 +180,16 @@ export function SearchPage() {
           )}
           <div className="search-grid">
             <CountCard
+              headline={{
+                value: stats.total,
+                caption: `imagem(ns) verificada(s)${activeFilters + chosenPackages.length > 0 ? ' com os filtros' : ''}${version ? (version.number === 0 ? ' agora' : ` na v${version.number}`) : ''}`,
+              }}
+              active={chosenPackages[0]}
+              onPick={(name) => setChosenPackages((current) => (current[0] === name ? [] : [name]))}
               rows={Object.keys(stats.packages).sort().map((name) => ({ value: name, label: name, count: stats.packages[name] }))}
               of={stats.total}
-              title="Por pacote"
+              title="Imagens por pacote"
             />
-            {status === 'all' && (
-              <CountCard
-                rows={[
-                  { value: 'verified', label: 'Verificadas', count: stats.status.verified ?? 0 },
-                  { value: 'pending', label: 'Pendentes', count: stats.status.pending ?? 0 },
-                ]}
-                of={stats.total}
-                title="Por status"
-              />
-            )}
             {Object.entries(stats.objects).map(([type, item]) => (
               <div className="search-card" key={type}>
                 <h2>{fieldLabel(profile.objects.find((object) => object.key === type) ?? { key: type })}</h2>
@@ -270,6 +212,7 @@ export function SearchPage() {
               return (
                 <CountCard
                   active={filters[facet.key]}
+                  donut={facet.field.type !== 'multi'}
                   key={facet.key}
                   missing={missing}
                   note={facet.field.type === 'multi' ? 'Uma imagem pode ter vários valores: a soma passa do total.' : facet.objectType ? 'Conta objetos.' : undefined}
@@ -277,22 +220,23 @@ export function SearchPage() {
                   onPick={(value) => setFilter(facet.key, filters[facet.key] === value ? '' : value)}
                   rows={rows}
                   title={facet.title}
+                  unit={facet.objectType ? 'objetos' : 'imagens'}
                 />
               )
             })}
           </div>
 
 
-          <ImageList
+          {!version && <ImageList
             key={requestKey}
             onOpen={() => setShowImages(true)}
             open={showImages}
             search={{ profile: profileName, status, packages: chosenPackages, filters }}
             total={stats.total}
-          />
+          />}
         </div>
       )}
-    </section>
+    </div>
   )
 }
 
@@ -412,7 +356,7 @@ function SaveDataset({ profile, query, status, onCancel }: {
     setError('')
     try {
       const dataset = await createDataset({ name: name.trim(), profile, description, query })
-      navigate(`/versoes/${encodeURIComponent(dataset.name)}`)
+      navigate(`/dashboard/${encodeURIComponent(dataset.profile)}?dataset=${encodeURIComponent(dataset.name)}`, { state: { fresh: Date.now() } })
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível salvar o dataset.')
       setBusy(false)

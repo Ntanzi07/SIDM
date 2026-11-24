@@ -49,7 +49,7 @@
   outline: none;
 }
 
-.search-page > .profile-name-hint {
+.search-body > .profile-name-hint {
   margin-top: 24px;
 }
 
@@ -79,11 +79,16 @@
   font-size: 14px;
 }
 
+/* os cartões em colunas, cada um com a sua altura (sem o buraco que uma
+   grade deixa ao lado de um cartão alto) */
 .search-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-  align-items: start;
+  columns: 3 280px;
+  column-gap: 16px;
+}
+
+.search-grid > * {
+  margin-bottom: 16px;
+  break-inside: avoid;
 }
 
 .search-card {
@@ -126,7 +131,7 @@
 
 .search-bar {
   display: grid;
-  grid-template-columns: minmax(90px, 140px) 1fr 82px;
+  grid-template-columns: minmax(0, 1.1fr) minmax(48px, 1fr) auto;
   align-items: center;
   gap: 10px;
   width: 100%;
@@ -261,7 +266,8 @@
 
 .search-labels__line {
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) 80px 36px;
+  /* o texto quebra; a barra e a % não vazam do cartão estreito */
+  grid-template-columns: minmax(0, 1fr) minmax(48px, 80px) 38px;
   align-items: center;
   gap: 10px;
   padding: 2px 0;
@@ -324,4 +330,80 @@
 .save-dataset__actions {
   display: flex;
   gap: 10px;
+}
+
+.search-card__headline {
+  margin: -2px 0 14px;
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.search-card__headline strong {
+  margin-right: 6px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+}
+
+.search-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  margin-bottom: 20px;
+}
+
+.search-filterbar .eyebrow {
+  margin-right: 4px;
+}
+
+.search-filterbar__hint {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.search-filterbar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px 5px 12px;
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--text-2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  animation: rise 240ms var(--ease) both;
+}
+
+.search-filterbar__chip strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.search-filterbar__chip span {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.search-filterbar__chip:hover span {
+  color: var(--danger);
+}
+
+.search-filterbar__clear {
+  border: 0;
+  background: none;
+  color: var(--text-3);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12.5px;
+  text-decoration: underline;
+}
+
+.search-filterbar__save {
+  margin-left: auto;
 }

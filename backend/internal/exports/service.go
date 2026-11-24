@@ -26,6 +26,7 @@ type Service struct {
 	catalog    Catalog
 	files      Files
 	annotation Annotation
+	versions   Versions // nil: sem o export de versões (UseVersions)
 	now        func() time.Time
 }
 
@@ -174,17 +175,7 @@ func (s *Service) Prepare(ctx context.Context, p *export.Profile, tasks []string
 // Collect passa pelas imagens do perfil e monta os itens do dataset e o
 // resumo. Os arquivos só são abertos na hora de escrever o zip.
 func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item, *Preview, error) {
-	prev := &Preview{
-		Profile: p.Name, Task: strings.Join(p.Tasks, " + "), Tasks: p.Tasks, AllTasks: p.AllTasks, Format: p.Format, Layout: p.Layout, Split: p.Split,
-		Images: map[string]int{}, Folders: map[string]int{}, Examples: []string{}, Boxes: map[string]int{}, Packages: p.Packages,
-	}
-	if prev.Packages == nil {
-		prev.Packages = []string{}
-	}
-	labels := export.NewLabels(p.Labels)
-	seen := map[string]int{}
-	var items []export.Item
-
+	c := s.newCollector(p)
 	pkgs := p.Packages
 	if len(pkgs) == 0 {
 		pkgs = []string{""} // todos
@@ -216,70 +207,104 @@ func (s *Service) Collect(ctx context.Context, p *export.Profile) ([]export.Item
 					return nil, nil, err
 				}
 			}
-			for _, img := range imgs {
-				set, found := mergeSets(img.SHA1, byTask)
-				switch {
-				case !p.NeedsTasks(): // só imagens: toda verificada que passa nos filtros
-				case found == 0:
-					prev.Skipped.NotAnnotated++
-					continue
-				case p.AllTasks && found < len(p.Tasks):
-					prev.Skipped.MissingTasks++
-					continue
-				}
-				// O "nome" da imagem: o v2 (file_name) se ela tem, senão o do
-				// disco (<sha1>.ext). É o que o modo de nome padrão usa.
-				stored := img.FileName
-				if stored == "" {
-					stored = path.Base(img.Path)
-				}
-				meta := imageMeta(&img)
-				nameMeta := export.NameMeta(img.SHA1, stored, img.OriginalName, meta)
-				item := export.Item{
-					SHA1: img.SHA1, Width: set.Width, Height: set.Height,
-					FileName: p.FileNameOf(nameMeta, path.Ext(stored)),
-					Meta:     nameMeta,
-					Split:    export.SplitOf(img.SHA1, p.Split),
-					Open:     s.opener(img.Path),
-				}
-				if p.Layout == export.LayoutFolders {
-					item.Dir = p.Dir(meta, item.Split)
-				}
-				for _, b := range set.Boxes {
-					if name, ok := labels.Map(b.Label); ok {
-						b.Label = name
-						item.Boxes = append(item.Boxes, b)
-						seen[name]++
-					}
-				}
-				switch {
-				case !p.NeedsTasks(): // sem caixas: não é negativa
-				case len(set.Boxes) == 0: // negativa: entra sem caixas
-					prev.Negatives++
-				case len(item.Boxes) == 0: // tinha caixas, mas de labels que não entram
-					prev.Skipped.WithoutLabels++
-					continue
-				}
-				items = append(items, item)
-				if len(prev.Examples) < 3 {
-					prev.Examples = append(prev.Examples, path.Join(item.Dir, item.FileName))
-				}
-				prev.Images[item.Split]++
-				if item.Dir != "" {
-					prev.Folders[item.Dir]++
-				}
-				for _, b := range item.Boxes {
-					prev.Boxes[b.Label]++
-				}
+			for i := range imgs {
+				c.add(&imgs[i], byTask)
 			}
 			if len(imgs) < pageSize {
 				break
 			}
 		}
 	}
-	prev.Total = len(items)
-	prev.Classes = labels.Classes(seen)
+	items, prev := c.done()
 	return items, prev, nil
+}
+
+// collector monta os itens e o resumo, uma imagem por vez (a mesma conta
+// para as imagens de hoje e para as de uma versão).
+type collector struct {
+	s      *Service
+	p      *export.Profile
+	prev   *Preview
+	labels *export.Labels
+	seen   map[string]int
+	items  []export.Item
+}
+
+func (s *Service) newCollector(p *export.Profile) *collector {
+	prev := &Preview{
+		Profile: p.Name, Task: strings.Join(p.Tasks, " + "), Tasks: p.Tasks, AllTasks: p.AllTasks, Format: p.Format, Layout: p.Layout, Split: p.Split,
+		Images: map[string]int{}, Folders: map[string]int{}, Examples: []string{}, Boxes: map[string]int{}, Packages: p.Packages,
+	}
+	if prev.Packages == nil {
+		prev.Packages = []string{}
+	}
+	return &collector{s: s, p: p, prev: prev, labels: export.NewLabels(p.Labels), seen: map[string]int{}}
+}
+
+// add: uma imagem verificada, com as caixas de cada tarefa (na ordem do
+// perfil). Ela entra ou é contada como pulada.
+func (c *collector) add(img *images.Image, byTask []map[string]boxes.Set) {
+	p, prev := c.p, c.prev
+	set, found := mergeSets(img.SHA1, byTask)
+	switch {
+	case !p.NeedsTasks(): // só imagens: toda verificada que passa nos filtros
+	case found == 0:
+		prev.Skipped.NotAnnotated++
+		return
+	case p.AllTasks && found < len(p.Tasks):
+		prev.Skipped.MissingTasks++
+		return
+	}
+	// O "nome" da imagem: o v2 (file_name) se ela tem, senão o do
+	// disco (<sha1>.ext). É o que o modo de nome padrão usa.
+	stored := img.FileName
+	if stored == "" {
+		stored = path.Base(img.Path)
+	}
+	meta := imageMeta(img)
+	nameMeta := export.NameMeta(img.SHA1, stored, img.OriginalName, meta)
+	item := export.Item{
+		SHA1: img.SHA1, Width: set.Width, Height: set.Height,
+		FileName: p.FileNameOf(nameMeta, path.Ext(stored)),
+		Meta:     nameMeta,
+		Split:    export.SplitOf(img.SHA1, p.Split),
+		Open:     c.s.opener(img.Path),
+	}
+	if p.Layout == export.LayoutFolders {
+		item.Dir = p.Dir(meta, item.Split)
+	}
+	for _, b := range set.Boxes {
+		if name, ok := c.labels.Map(b.Label); ok {
+			b.Label = name
+			item.Boxes = append(item.Boxes, b)
+			c.seen[name]++
+		}
+	}
+	switch {
+	case !p.NeedsTasks(): // sem caixas: não é negativa
+	case len(set.Boxes) == 0: // negativa: entra sem caixas
+		prev.Negatives++
+	case len(item.Boxes) == 0: // tinha caixas, mas de labels que não entram
+		prev.Skipped.WithoutLabels++
+		return
+	}
+	c.items = append(c.items, item)
+	if len(prev.Examples) < 3 {
+		prev.Examples = append(prev.Examples, path.Join(item.Dir, item.FileName))
+	}
+	prev.Images[item.Split]++
+	if item.Dir != "" {
+		prev.Folders[item.Dir]++
+	}
+	for _, b := range item.Boxes {
+		prev.Boxes[b.Label]++
+	}
+}
+
+func (c *collector) done() ([]export.Item, *Preview) {
+	c.prev.Total = len(c.items)
+	c.prev.Classes = c.labels.Classes(c.seen)
+	return c.items, c.prev
 }
 
 // mergeSets junta as caixas de uma imagem nas tarefas (na ordem do perfil)

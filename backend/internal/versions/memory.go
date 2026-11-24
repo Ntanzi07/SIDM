@@ -176,3 +176,10 @@ func (m *Memory) FindItem(ctx context.Context, version, sha1 string) (*Item, err
 	}
 	return nil, platform.ErrNotFound
 }
+
+func (m *Memory) DeleteVersion(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Versions = slices.DeleteFunc(m.Versions, func(v Version) bool { return v.ID == id })
+	return nil
+}

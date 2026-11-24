@@ -110,22 +110,47 @@ func TestMongoVersoes(t *testing.T) {
 	if st.Images.Total == 0 {
 		t.Errorf("pesquisa na versão pelo banco: %+v", st.Images)
 	}
+	// o export da versão lendo do banco: a lista vira []string (as pastas e
+	// os nomes do export usam)
+	fz, err := s.Frozen(ctx, "motos", 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tags any
+	for _, im := range fz.Images {
+		if im.SHA1 == "a" {
+			tags = im.Fields["tags"]
+		}
+	}
+	if !reflect.DeepEqual(tags, []string{"x"}) {
+		t.Errorf("tags no export: %#v", tags)
+	}
 	if d, _ := s.Diff(ctx, "motos", 3, 4); len(d.Changed) != 1 || d.Changed[0].SHA1 != "a" || d.Changed[0].FileName != "a_v2.jpg" {
 		t.Errorf("diff tags: %+v", d)
 	}
 
 	// com versões, não apaga; sem, apaga
 	var conflict *ConflictError
-	if err := s.DeleteDataset(ctx, "motos"); !errors.As(err, &conflict) {
+	if err := s.DeleteDataset(ctx, "motos", false); !errors.As(err, &conflict) {
 		t.Errorf("apagar com versões: %v", err)
 	}
 	if _, err := s.CreateDataset(ctx, DatasetInput{Name: "vazio", Profile: "veiculos"}, "n"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeleteDataset(ctx, "vazio"); err != nil {
+	if err := s.DeleteDataset(ctx, "vazio", false); err != nil {
 		t.Errorf("apagar sem versões: %v", err)
 	}
 	if _, err := r.FindDataset(ctx, "vazio"); !errors.Is(err, platform.ErrNotFound) {
 		t.Errorf("apagado: %v", err)
+	}
+	// com as versões, pelo banco: some tudo (as versões e os itens)
+	if err := s.DeleteDataset(ctx, "motos", true); err != nil {
+		t.Fatalf("apagar com as versões: %v", err)
+	}
+	if list, _ := r.ListVersions(ctx, "motos"); len(list) != 0 {
+		t.Errorf("versões que sobraram: %d", len(list))
+	}
+	if items, _, _ := r.ListItems(ctx, got.ID, 10, 0); len(items) != 0 {
+		t.Errorf("itens que sobraram: %d", len(items))
 	}
 }

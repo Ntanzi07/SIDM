@@ -213,3 +213,10 @@ func (m *MongoRepo) FindItem(ctx context.Context, version, sha1 string) (*Item, 
 	}
 	return &it, nil
 }
+
+func (m *MongoRepo) DeleteVersion(ctx context.Context, id string) error {
+	if _, err := m.versions().DeleteOne(ctx, bson.D{{Key: "_id", Value: id}}); err != nil {
+		return fmt.Errorf("apagar a versão %s: %w", id, err)
+	}
+	return nil
+}

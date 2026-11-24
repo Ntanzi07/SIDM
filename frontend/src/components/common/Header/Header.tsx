@@ -49,8 +49,7 @@ function UserName() {
 const LINKS = [
   { to: '/', label: 'Pacotes', also: '/pacotes' },
   { to: '/tarefas', label: 'Tarefas' },
-  { to: '/pesquisa', label: 'Pesquisa' },
-  { to: '/versoes', label: 'Versões' },
+  { to: '/dashboard', label: 'Dashboard' },
   { to: '/exportar', label: 'Exportar' },
   { to: '/configurar', label: 'Configurar' },
 ]

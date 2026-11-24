@@ -125,7 +125,9 @@ func (s *Service) handleUpdateDataset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleDeleteDataset(w http.ResponseWriter, r *http.Request) {
-	if err := s.DeleteDataset(r.Context(), r.PathValue("name")); err != nil {
+	// ?versoes=apagar: apaga também as versões (o histórico)
+	withVersions := r.URL.Query().Get("versoes") == "apagar"
+	if err := s.DeleteDataset(r.Context(), r.PathValue("name"), withVersions); err != nil {
 		writeErr(w, err)
 		return
 	}

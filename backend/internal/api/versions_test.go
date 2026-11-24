@@ -1,12 +1,18 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
 	"SIDM/internal/boxes"
+	"SIDM/internal/export"
+	"SIDM/internal/exports"
 	"SIDM/internal/platform"
 	"SIDM/internal/versions"
 )
@@ -130,4 +136,85 @@ func TestVersoesDeDataset(t *testing.T) {
 	assertStatus(t, env.do("GET", "/datasets/motos-noite/versions/9", nil, nil), http.StatusNotFound)
 	assertStatus(t, env.do("GET", "/datasets/motos-noite/versions/x", nil, nil), http.StatusBadRequest)
 	assertStatus(t, env.do("DELETE", "/datasets/motos-noite", nil, nil), http.StatusConflict)
+	assertStatus(t, env.do("DELETE", "/datasets/motos-noite?versoes=apagar", nil, nil), http.StatusNoContent)
+	assertStatus(t, env.do("GET", "/datasets/motos-noite", nil, nil), http.StatusNotFound)
+}
+
+// Baixar uma versão: o zip sai com a anotação CONGELADA (mudar as caixas
+// depois não muda a v1), e o "agora" (number 0) com a de hoje.
+func TestExportDeVersao(t *testing.T) {
+	env := newTestEnv(t)
+	n1, n2, _ := seedExport(t, env)
+	assertStatus(t, env.do("POST", "/datasets", strings.NewReader(`{"name": "noite", "profile": "veiculos",
+		"query": {"filters": [{"key": "fields.day_time", "value": "night"}]}}`),
+		map[string]string{"Content-Type": "application/json", "X-User": "nathan"}), http.StatusCreated)
+	assertStatus(t, env.do("POST", "/datasets/noite/versions", strings.NewReader(`{"message": "v1"}`),
+		map[string]string{"Content-Type": "application/json", "X-User": "nathan"}), http.StatusCreated)
+
+	// depois da v1: n1 troca as caixas e n2 vira de dia
+	putTask(env, exportTask, n1, "moto")
+	assertStatus(t, env.doJSON("PUT", "/images/"+n2, completeBody(func(b map[string]any) { b["day_time"] = "day" })), http.StatusOK)
+
+	v1, code, msg := preview(t, env, `{"profile": "yolo", "tasks": ["veiculos"], "version": {"dataset": "noite", "number": 1}}`)
+	if code != http.StatusOK {
+		t.Fatalf("preview v1: %d %s", code, msg)
+	}
+	if v1.Version == nil || v1.Version.Number != 1 || v1.Total != 3 || v1.Boxes["carro"] != 1 || v1.Boxes["moto"] != 0 {
+		t.Errorf("v1 (congelada): total %d, caixas %v, versão %+v", v1.Total, v1.Boxes, v1.Version)
+	}
+	now, code, msg := preview(t, env, `{"profile": "yolo", "tasks": ["veiculos"], "version": {"dataset": "noite", "number": 0}}`)
+	if code != http.StatusOK {
+		t.Fatalf("preview agora: %d %s", code, msg)
+	}
+	if now.Total != 2 || now.Boxes["moto"] != 1 || now.Boxes["carro"] != 0 {
+		t.Errorf("agora: total %d, caixas %v", now.Total, now.Boxes)
+	}
+	// sem tarefa no pedido: as da versão
+	if all, code, _ := preview(t, env, `{"profile": "rf-detr", "version": {"dataset": "noite", "number": 1}}`); code != http.StatusOK || len(all.Tasks) != 2 {
+		t.Errorf("sem tarefa: %d %v", code, all.Tasks)
+	}
+
+	// erros: tarefa fora da versão, versão e dataset que não existem
+	if _, code, msg := preview(t, env, `{"profile": "yolo", "tasks": ["nao-existe"], "version": {"dataset": "noite", "number": 1}}`); code != http.StatusBadRequest || !strings.Contains(msg, "versão 1") {
+		t.Errorf("tarefa fora: %d %s", code, msg)
+	}
+	if _, code, _ := preview(t, env, `{"profile": "yolo", "version": {"dataset": "noite", "number": 9}}`); code != http.StatusNotFound {
+		t.Errorf("versão 9: %d", code)
+	}
+	if _, code, _ := preview(t, env, `{"profile": "yolo", "version": {"dataset": "nao-existe", "number": 0}}`); code != http.StatusNotFound {
+		t.Errorf("dataset: %d", code)
+	}
+
+	// o zip: nome com a versão e o export_info.json dizendo qual
+	form := url.Values{"request": {`{"profile": "yolo", "tasks": ["veiculos"], "version": {"dataset": "noite", "number": 1}}`}}
+	rec := env.do("POST", "/exports/download", strings.NewReader(form.Encode()),
+		map[string]string{"Content-Type": "application/x-www-form-urlencoded"})
+	assertStatus(t, rec, http.StatusOK)
+	if cd := rec.Header().Get("Content-Disposition"); !strings.Contains(cd, `filename="noite-v1-yolo.zip"`) {
+		t.Errorf("Content-Disposition = %q", cd)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var info struct {
+		Info struct {
+			Version exports.VersionInfo `json:"version"`
+		} `json:"info"`
+		Result export.Result `json:"result"`
+	}
+	images := 0
+	for _, f := range zr.File {
+		if strings.HasPrefix(f.Name, "images/") && strings.HasSuffix(f.Name, ".jpg") {
+			images++
+		}
+		if f.Name == "export_info.json" {
+			rc, _ := f.Open()
+			_ = json.NewDecoder(rc).Decode(&info)
+			rc.Close()
+		}
+	}
+	if images != 3 || info.Info.Version.Dataset != "noite" || info.Info.Version.Number != 1 || info.Info.Version.ID == "" || len(info.Result.Missing) != 0 {
+		t.Errorf("zip: %d imagens, info %+v, faltando %v", images, info.Info.Version, info.Result.Missing)
+	}
 }

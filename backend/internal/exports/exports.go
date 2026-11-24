@@ -78,6 +78,8 @@ type Preview struct {
 	Boxes     map[string]int `json:"boxes"`     // por classe
 	Skipped   Skipped        `json:"skipped"`
 	Packages  []string       `json:"packages"` // os que entraram (vazio no perfil = todos)
+	// Version: no export de uma versão, qual (as imagens são as dela).
+	Version *VersionInfo `json:"version,omitempty"`
 }
 
 // Skipped são as imagens verificadas que ficaram de fora.

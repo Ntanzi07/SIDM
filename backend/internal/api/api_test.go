@@ -73,6 +73,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	bx.Listen(expSvc)
 	ver := versions.NewMemory()
 	verSvc := versions.New(ver, imgSvc, bx, annSvc)
+	expSvc.UseVersions(verSvc)
 	env := &testEnv{cat: cat, box: box, img: img, imgSvc: imgSvc, imp: imp, exp: exp, ann: ann, ver: ver, files: fs, root: root}
 	env.srv = New(func(context.Context) error { return env.pingErr }, svc, imgSvc, bx, impSvc, expSvc,
 		annSvc, verSvc)

@@ -1212,7 +1212,13 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
     delete:
       tags: [versões]
-      summary: Apaga um dataset sem versões
+      summary: Apaga um dataset
+      description: |
+        Some a pesquisa salva. Com versões, só com ?versoes=apagar: aí somem
+        também as versões e os itens congelados (o histórico). As imagens e a
+        anotação delas não são tocadas.
+      parameters:
+        - { name: versoes, in: query, description: "apagar = apaga junto as versões", schema: { type: string, enum: [apagar] } }
       responses:
         "204": { description: Apagado. }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2287,6 +2293,19 @@ components:
           type: string
           example: capacete
           description: "Uma tarefa só (o formato de antes): o mesmo que tasks com um item."
+        version:
+          type: object
+          description: |
+            Baixar uma versão de um dataset: as imagens e a anotação são as
+            congeladas nela (mudanças depois não entram). Do perfil valem o
+            formato, a divisão, as pastas, os nomes e as labels; os pacotes e
+            os filtros dele não. As tarefas têm que estar na versão (sem
+            tarefa, entram todas as dela). O zip sai como
+            `<dataset>-v<n>-<perfil>.zip`, e o `export_info.json` diz a versão.
+          required: [dataset]
+          properties:
+            dataset: { type: string, example: veiculos-tudo }
+            number: { type: integer, minimum: 0, example: 3, description: "0 = o estado atual do dataset (sem gravar)." }
 
     ExportPreview:
       type: object
@@ -2336,6 +2355,18 @@ components:
         packages:
           type: array
           items: { type: string }
+        version:
+          type: object
+          description: Só no export de uma versão.
+          properties:
+            dataset: { type: string }
+            number: { type: integer, description: 0 = o estado atual. }
+            id: { type: string }
+            message: { type: string }
+            created_by: { type: string }
+            created_at: { type: string, format: date-time }
+            annotation_profile: { type: string }
+            images: { type: integer, description: Imagens na versão. }
 
     Box:
       type: object

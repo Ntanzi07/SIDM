@@ -116,6 +116,7 @@ func main() {
 		log.Fatalf("falha ao preparar as versões no Mongo: %v", err)
 	}
 	ver := versions.New(verRepo, img, bx, ann)
+	exp.UseVersions(ver) // baixar uma versão de um dataset
 
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
 	srv := api.New(ping, cat, img, bx, imp, exp, ann, ver)

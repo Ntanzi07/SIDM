@@ -3,6 +3,7 @@ package exports
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"SIDM/internal/annotation"
 	"SIDM/internal/export"
 	"SIDM/internal/platform"
+	"SIDM/internal/versions"
 )
 
 const maxExportProfileBytes = 64 << 10
@@ -190,10 +192,14 @@ func (s *Service) handleFolderFields(w http.ResponseWriter, r *http.Request) {
 // montado na tela, sem salvar). As tarefas do pedido valem mais que as do
 // perfil; se nenhum dos dois tem tarefa, é erro. "task" (uma só) é o formato
 // de antes e ainda vale.
+//
+// Com "version": {"dataset": "motos", "number": 3}, as imagens e a anotação
+// são as congeladas na versão (0 = o estado atual do dataset).
 type request struct {
 	Profile json.RawMessage `json:"profile"`
 	Tasks   []string        `json:"tasks"`
 	Task    string          `json:"task"`
+	Version *VersionRef     `json:"version"`
 }
 
 // tasks: as tarefas do pedido (vazio = as do perfil).
@@ -210,69 +216,105 @@ func (r request) tasks() []string {
 // profileFromRequest resolve e confere o perfil do pedido. O download também
 // aceita o pedido num campo de formulário "request" (assim o navegador baixa
 // o zip direto para o disco, sem segurar tudo na memória).
-func (s *Service) profileFromRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, bool) {
-	p, tasks, ok := s.parseRequest(w, r)
+// Com versão, volta também a versão congelada.
+func (s *Service) profileFromRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, *versions.Frozen, bool) {
+	p, tasks, ref, ok := s.parseRequest(w, r)
 	if !ok {
-		return nil, false
+		return nil, nil, false
+	}
+	if ref != nil {
+		fz, err := s.FindVersion(r.Context(), *ref)
+		if err != nil {
+			writeVersionErr(w, err, *ref)
+			return nil, nil, false
+		}
+		if err := s.PrepareVersion(r.Context(), p, tasks, fz); err != nil {
+			writeErr(w, err, "")
+			return nil, nil, false
+		}
+		return p, fz, true
 	}
 	if err := s.Prepare(r.Context(), p, tasks); err != nil {
 		writeErr(w, err, "")
-		return nil, false
+		return nil, nil, false
 	}
-	return p, true
+	return p, nil, true
 }
 
-func (s *Service) parseRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, []string, bool) {
+// writeVersionErr: a versão que não existe vira 404; um pedido que o
+// versions recusa, 400.
+func writeVersionErr(w http.ResponseWriter, err error, ref VersionRef) {
+	if errors.Is(err, platform.ErrInvalid) {
+		platform.WriteError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	msg := fmt.Sprintf("a versão %d do dataset %q não existe", ref.Number, ref.Dataset)
+	if ref.Number == 0 {
+		msg = fmt.Sprintf("o dataset %q não existe", ref.Dataset)
+	}
+	writeErr(w, err, msg)
+}
+
+// collect: as imagens de hoje ou as da versão.
+func (s *Service) collect(ctx context.Context, p *export.Profile, fz *versions.Frozen) ([]export.Item, *Preview, error) {
+	if fz != nil {
+		items, prev := s.CollectVersion(p, fz)
+		return items, prev, nil
+	}
+	return s.Collect(ctx, p)
+}
+
+func (s *Service) parseRequest(w http.ResponseWriter, r *http.Request) (*export.Profile, []string, *VersionRef, bool) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxExportProfileBytes)
 	var raw []byte
 	if strings.HasPrefix(r.Header.Get("Content-Type"), "application/x-www-form-urlencoded") {
 		if err := r.ParseForm(); err != nil {
 			platform.WriteError(w, http.StatusBadRequest, "formulário inválido: "+err.Error())
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 		raw = []byte(r.PostForm.Get("request"))
 	} else {
 		var err error
 		if raw, err = io.ReadAll(r.Body); err != nil {
 			platform.WriteError(w, http.StatusBadRequest, "erro lendo o pedido: "+err.Error())
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
 	}
 	var req request
 	if err := json.Unmarshal(raw, &req); err != nil || len(req.Profile) == 0 {
 		platform.WriteError(w, http.StatusBadRequest, `esperado {"profile": "nome", "task": "tarefa"} ou {"profile": {...}, "task": "tarefa"}`)
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	var name string
 	if json.Unmarshal(req.Profile, &name) == nil {
 		p, err := s.FindProfile(r.Context(), name)
 		if err != nil {
 			writeErr(w, err, notFoundMsg(name))
-			return nil, nil, false
+			return nil, nil, nil, false
 		}
-		return p, req.tasks(), true
+		return p, req.tasks(), req.Version, true
 	}
 	var p export.Profile
 	dec := json.NewDecoder(bytes.NewReader(req.Profile))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&p); err != nil {
 		platform.WriteError(w, http.StatusBadRequest, "perfil inválido: "+err.Error())
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
 	p.Normalize() // "task" (uma tarefa, o formato antigo) vira "tasks"
 	// Perfil montado na tela e ainda não salvo: o nome só vai no nome do zip.
 	// Um padrão sem mudanças (só a tarefa escolhida) é o próprio padrão.
 	if b, builtin := export.Builtin(p.Name); builtin && sameProfile(p, b) {
 		b.Tasks, b.AllTasks = p.Tasks, p.AllTasks
-		return &b, req.tasks(), true
+		return &b, req.tasks(), req.Version, true
 	} else if builtin || p.Name == "" {
 		p.Name = "personalizado"
 	}
 	if err := s.Validate(r.Context(), &p); err != nil {
 		writeErr(w, err, "")
-		return nil, nil, false
+		return nil, nil, nil, false
 	}
-	return &p, req.tasks(), true
+	return &p, req.tasks(), req.Version, true
 }
 
 // sameProfile: os dois perfis geram o mesmo dataset (as tarefas não contam:
@@ -289,11 +331,11 @@ func sameProfile(a, b export.Profile) bool {
 
 // POST /exports/preview  (o que vai sair: imagens por grupo, caixas por classe)
 func (s *Service) handlePreview(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.profileFromRequest(w, r)
+	p, fz, ok := s.profileFromRequest(w, r)
 	if !ok {
 		return
 	}
-	_, prev, err := s.Collect(r.Context(), p)
+	_, prev, err := s.collect(r.Context(), p, fz)
 	if err != nil {
 		platform.ServerError(w, err)
 		return
@@ -304,18 +346,23 @@ func (s *Service) handlePreview(w http.ResponseWriter, r *http.Request) {
 // POST /exports/download
 // O zip é gerado enquanto é baixado (não ocupa disco no servidor).
 func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
-	p, ok := s.profileFromRequest(w, r)
+	p, fz, ok := s.profileFromRequest(w, r)
 	if !ok {
 		return
 	}
-	items, prev, err := s.Collect(r.Context(), p)
+	items, prev, err := s.collect(r.Context(), p, fz)
 	if err != nil {
 		platform.ServerError(w, err)
 		return
 	}
 	if len(items) == 0 {
 		msg := "nenhuma imagem verificada passa nos filtros deste perfil"
-		if p.NeedsTasks() {
+		switch {
+		case fz != nil && p.NeedsTasks():
+			msg = fmt.Sprintf("nenhuma imagem da %s está anotada em %s", versionText(fz.Version), tasksText(p))
+		case fz != nil:
+			msg = fmt.Sprintf("a %s não tem imagens", versionText(fz.Version))
+		case p.NeedsTasks():
 			msg = fmt.Sprintf("nenhuma imagem verificada e anotada em %s passa nos filtros deste perfil", tasksText(p))
 		}
 		platform.WriteError(w, http.StatusBadRequest, msg)
@@ -323,12 +370,20 @@ func (s *Service) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	now := s.now()
+	// O nome do zip: o perfil; de uma versão, <dataset>-v<n>-<perfil>.
+	zipName := fmt.Sprintf("%s-%s", p.Name, now.Format("20060102-1504"))
+	if fz != nil {
+		zipName = fmt.Sprintf("%s-%s-%s", fz.Version.Dataset, versionTag(fz.Version.Number, now), p.Name)
+	}
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s-%s.zip"`, p.Name, now.Format("20060102-1504")))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, zipName))
 	zw := zip.NewWriter(w)
 	info := map[string]any{
 		"generated_by": "SIDM", "generated_at": now, "user": platform.UserFrom(r),
 		"profile": p, "preview": prev,
+	}
+	if fz != nil {
+		info["version"] = prev.Version // de qual versão saiu (dataset, número, id)
 	}
 	if _, err := export.Write(zw, *p, items, prev.Classes, info); err != nil {
 		platform.LogError(fmt.Errorf("export %s: %w", p.Name, err))
@@ -351,4 +406,12 @@ func tasksText(p *export.Profile) string {
 		return "todas as tarefas " + strings.Join(quoted, ", ")
 	}
 	return "alguma das tarefas " + strings.Join(quoted, ", ")
+}
+
+// versionTag: "v3" (o estado atual, que não é versão: "atual-<data>").
+func versionTag(number int, now time.Time) string {
+	if number == 0 {
+		return "atual-" + now.Format("20060102-1504")
+	}
+	return fmt.Sprintf("v%d", number)
 }

@@ -786,6 +786,8 @@ export type ExportPreview = {
   // not_annotated: em nenhuma das tarefas; missing_tasks: com all_tasks, em só parte delas
   skipped: { not_annotated: number; missing_tasks: number; without_labels: number }
   packages: string[]
+  // só no export de uma versão (number 0 = o estado atual)
+  version?: { dataset: string; number: number; id?: string; message: string; images: number }
 }
 
 // Um metadado da imagem (de um perfil de anotação) que pode virar pasta ou
@@ -854,6 +856,22 @@ export async function previewExport(profile: ExportProfile): Promise<ExportPrevi
 // O zip pode ter gigas: em vez de baixar pelo fetch (que seguraria tudo na
 // memória), manda um formulário, e o navegador salva direto no disco.
 export function downloadExport(profile: ExportProfile): void {
+  submitDownload({ profile: exportBody(profile) })
+}
+
+// Uma versão de um dataset (number 0 = o estado atual): as imagens e a
+// anotação congeladas nela, no formato do perfil de export (pelo nome).
+export type VersionExport = { profile: string; tasks?: string[]; version: { dataset: string; number: number } }
+
+export async function previewVersionExport(body: VersionExport): Promise<ExportPreview> {
+  return request<ExportPreview>('/exports/preview', { method: 'POST', body: JSON.stringify(body) })
+}
+
+export function downloadVersionExport(body: VersionExport): void {
+  submitDownload(body)
+}
+
+function submitDownload(body: unknown): void {
   // Alvo: um iframe escondido. Assim a página não sai do lugar (nem se a
   // resposta for um erro); a tela libera o download só depois da prévia.
   let frame = document.getElementById('sidm-download-frame') as HTMLIFrameElement | null
@@ -872,7 +890,7 @@ export function downloadExport(profile: ExportProfile): void {
   const field = document.createElement('input')
   field.type = 'hidden'
   field.name = 'request'
-  field.value = JSON.stringify({ profile: exportBody(profile) })
+  field.value = JSON.stringify(body)
   form.appendChild(field)
   document.body.appendChild(form)
   form.submit()
@@ -1024,6 +1042,7 @@ export type VersionDiff = {
   removed: DiffRef[]
   changed: DiffRef[]
   unchanged: number
+  counts: { added: number; removed: number; changed: number; unchanged: number }
 }
 
 // Uma mudança: null = não informado.
@@ -1059,9 +1078,10 @@ export async function createDataset(input: { name: string; profile: string; desc
   return request<Dataset>('/datasets', { method: 'POST', body: JSON.stringify(input) })
 }
 
-// Só sem versões (o backend recusa com 409).
-export async function deleteDataset(name: string): Promise<void> {
-  return request<void>(`/datasets/${encodeURIComponent(name)}`, { method: 'DELETE' })
+// withVersions: apaga junto as versões (o histórico). Sem isso, o backend
+// recusa (409) um dataset com versões. As imagens não são tocadas.
+export async function deleteDataset(name: string, withVersions = false): Promise<void> {
+  return request<void>(`/datasets/${encodeURIComponent(name)}${withVersions ? '?versoes=apagar' : ''}`, { method: 'DELETE' })
 }
 
 export async function listVersions(dataset: string): Promise<Version[]> {
@@ -1073,15 +1093,41 @@ export async function createVersion(dataset: string, message: string): Promise<V
   return request<Version>(`/datasets/${encodeURIComponent(dataset)}/versions`, { method: 'POST', body: JSON.stringify({ message }) })
 }
 
-// from = 0: contra nada (a "to" é a primeira versão: tudo entrou).
+// Uma versão na URL: o número, ou "atual" para o agora (0: o estado atual do
+// dataset, montado na hora e sem gravar).
+const versionParam = (number: number) => (number === 0 ? 'atual' : String(number))
+
+// from = 0: contra nada (a "to" é a primeira) ou, com to = 0 (agora), contra
+// a mais nova.
 function diffParams(from: number, to: number): string {
-  const query = new URLSearchParams({ to: String(to) })
+  const query = new URLSearchParams({ to: versionParam(to) })
   if (from > 0) query.set('from', String(from))
   return query.toString()
 }
 
 export async function getVersionDiff(dataset: string, from: number, to: number): Promise<VersionDiff> {
   return request<VersionDiff>(`/datasets/${encodeURIComponent(dataset)}/diff?${diffParams(from, to)}`)
+}
+
+// A pesquisa dentro de uma versão: as mesmas contas da Pesquisa, sobre as
+// imagens congeladas (filtros de campo, pacotes e tarefas).
+export async function getVersionStats(dataset: string, number: number, query: { packages: string[]; filters: Record<string, string> }, tasks: string[]): Promise<{ images: ImageStats; labels: LabelStats }> {
+  const params = new URLSearchParams()
+  for (const name of query.packages) params.append('package', name)
+  for (const [key, value] of Object.entries(query.filters)) if (value) params.set(key, value)
+  for (const task of tasks) params.append('task', task)
+  return request<{ images: ImageStats; labels: LabelStats }>(`/datasets/${encodeURIComponent(dataset)}/versions/${versionParam(number)}/stats?${params.toString()}`)
+}
+
+// O agora do dataset como uma versão (number 0), sem gravar.
+export async function getCurrentVersion(dataset: string): Promise<Version> {
+  return request<Version>(`/datasets/${encodeURIComponent(dataset)}/versions/atual`)
+}
+
+// Só as contas do diff (as listas vêm vazias): para a linha do tempo.
+export async function getVersionDiffCounts(dataset: string, from: number, to: number): Promise<VersionDiff['counts']> {
+  const result = await request<VersionDiff>(`/datasets/${encodeURIComponent(dataset)}/diff?${diffParams(from, to)}&summary=1`)
+  return result.counts
 }
 
 export async function getItemDiff(dataset: string, from: number, to: number, sha1: string): Promise<ItemDiff> {

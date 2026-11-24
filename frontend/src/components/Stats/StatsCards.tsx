@@ -1,4 +1,7 @@
+import { useState } from 'react'
 import type { LabelStats } from '../../services/api'
+import { Donut } from '../Charts/Donut'
+import { MISSING_COLOR, PALETTE } from '../Charts/palette'
 import { fmt, pct } from '../../utils/stats'
 import '../../pages/Search/Search.css'
 
@@ -77,7 +80,7 @@ export function Chips({ title, items, chosen, all, allLabel, empty, onAll, onTog
 
 // Um cartão de contagens: uma barra por valor (a % é do total do cartão) e o
 // "Não informado" no fim.
-export function CountCard({ title, rows, of, missing, note, active, onPick }: {
+export function CountCard({ title, rows, of, missing, note, active, onPick, donut = false, unit = 'imagens', headline }: {
   title: string
   rows: Array<{ value: string; label: string; count: number }>
   of: number
@@ -85,11 +88,20 @@ export function CountCard({ title, rows, of, missing, note, active, onPick }: {
   note?: string
   active?: string
   onPick?: (value: string) => void
+  // em rosca (com a legenda ao lado). Só para valores que se excluem (cada
+  // imagem conta uma vez): numa lista de vários, a soma passa do total.
+  donut?: boolean
+  unit?: string // o que se conta (o meio da rosca): imagens, objetos
+  headline?: { value: number; caption: string } // o número grande em cima das barras
 }) {
   const all = missing !== undefined ? [...rows, { value: '', label: 'Não informado', count: missing }] : rows
+  if (donut && all.length > 0 && all.length <= 9) {
+    return <DonutCard active={active} all={all} note={note} of={of} onPick={onPick} title={title} unit={unit} />
+  }
   return (
     <div className="search-card">
       <h2>{title}</h2>
+      {headline && <p className="search-card__headline"><strong>{fmt(headline.value)}</strong> <span>{headline.caption}</span></p>}
       {note && <p className="profile-name-hint">{note}</p>}
       {rows.length === 0 && missing === undefined && <p className="profile-name-hint">Nenhuma imagem.</p>}
       <ul className="search-bars">
@@ -121,6 +133,61 @@ export function CountCard({ title, rows, of, missing, note, active, onPick }: {
           )
         })}
       </ul>
+    </div>
+  )
+}
+
+function DonutCard({ title, all, of, note, active, onPick, unit }: {
+  title: string
+  unit: string
+  all: Array<{ value: string; label: string; count: number }>
+  of: number
+  note?: string
+  active?: string
+  onPick?: (value: string) => void
+}) {
+  const [hovered, setHovered] = useState<string | undefined>()
+  const segments = all.map((row, i) => ({
+    key: row.value || '__missing',
+    label: row.label,
+    count: row.count,
+    color: row.value === '' ? MISSING_COLOR : PALETTE[i % PALETTE.length],
+  }))
+  const pick = (key: string) => { if (onPick && key !== '__missing') onPick(key) }
+  return (
+    <div className="search-card">
+      <h2>{title}</h2>
+      {note && <p className="profile-name-hint">{note}</p>}
+      <div className="donut-card">
+        <Donut centerLabel={unit} hovered={hovered} onHover={setHovered} onPick={onPick ? pick : undefined} segments={segments} total={of} />
+        <ul className="donut-legend">
+          {segments.map((item) => {
+            const className = [
+              'donut-legend__row',
+              hovered === item.key ? 'donut-legend__row--on' : '',
+              hovered && hovered !== item.key ? 'donut-legend__row--dim' : '',
+              active && item.key === active ? 'donut-legend__row--active' : '',
+            ].filter(Boolean).join(' ')
+            const content = (
+              <>
+                <i style={{ background: item.color }} />
+                <span>{item.label}</span>
+                <strong>{fmt(item.count)}</strong>
+                <small>{pct(item.count, of)}</small>
+              </>
+            )
+            return (
+              <li key={item.key} onMouseEnter={() => setHovered(item.key)} onMouseLeave={() => setHovered(undefined)}>
+                {onPick && item.key !== '__missing' ? (
+                  <button className={className} onClick={() => pick(item.key)} title={active === item.key ? 'Tirar o filtro' : 'Filtrar por este valor'} type="button">{content}</button>
+                ) : (
+                  <div className={className}>{content}</div>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      </div>
     </div>
   )
 }

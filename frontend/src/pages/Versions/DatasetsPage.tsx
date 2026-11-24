@@ -1,47 +1,53 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { listDatasets, type Dataset } from '../../services/api'
+import { Link } from 'react-router-dom'
+import { listDatasets, listVersions, type Dataset } from '../../services/api'
+import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
 import { formatWhen } from './format'
 import './Versions.css'
 
-// Versões: os datasets (pesquisas salvas) e a versão mais nova de cada um.
-// Um dataset nasce na Pesquisa ("Salvar como dataset").
-export function DatasetsPage() {
-  const navigate = useNavigate()
+// Os datasets (pesquisas salvas) de um perfil e a versão mais nova de cada
+// um: a aba Versões do Dashboard. Um dataset nasce na aba Dados ("Salvar
+// como dataset").
+export function DatasetList({ profile }: { profile: string }) {
   const [datasets, setDatasets] = useState<Dataset[] | null>(null)
   const [error, setError] = useState('')
+  const [history, setHistory] = useState<Record<string, number[]>>({})
 
   useEffect(() => {
     let active = true
     listDatasets()
-      .then((items) => { if (active) setDatasets(items) })
+      .then((items) => {
+        if (!active) return
+        const mine = items.filter((item) => item.profile === profile)
+        setDatasets(mine)
+        // as imagens de cada versão, para a linha pequena do cartão
+        for (const item of mine) {
+          if (!item.latest) continue
+          listVersions(item.name)
+            .then((list) => {
+              if (active) setHistory((current) => ({ ...current, [item.name]: list.map((v) => v.summary.images.total).reverse() }))
+            })
+            .catch(() => { /* só informativo */ })
+        }
+      })
       .catch((requestError: unknown) => {
         if (!active) return
         setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os datasets.')
         setDatasets([])
       })
     return () => { active = false }
-  }, [])
+  }, [profile])
 
   return (
-    <section className="versions-page">
-      <div className="page-heading">
-        <div>
-          <h1>Versões</h1>
-          <p>Cada dataset é uma pesquisa salva. Uma versão congela as imagens verificadas e a anotação delas: pronta para treinar, e nunca muda.</p>
-        </div>
-        <button className="button button--primary" onClick={() => navigate('/pesquisa')} type="button">
-          Novo dataset pela Pesquisa
-        </button>
-      </div>
+    <div className="versions-list">
       {error && <p className="form-error">{error}</p>}
 
       {datasets === null && <p className="versions-hint">Carregando...</p>}
       {datasets?.length === 0 && !error && (
         <div className="versions-empty">
           <p>Nenhum dataset ainda.</p>
-          <p className="versions-hint">Na Pesquisa, escolha o perfil, os pacotes, os filtros e as tarefas, e use “Salvar como dataset”.</p>
+          <p className="versions-hint">Na aba Dados, escolha os pacotes, os filtros e as tarefas, e use “Salvar como dataset”.</p>
         </div>
       )}
 
@@ -66,6 +72,11 @@ export function DatasetsPage() {
                       {dataset.latest.created_by} · {formatWhen(dataset.latest.created_at)} · {fmt(dataset.latest.images)} imagem(ns)
                     </small>
                   </div>
+                  {(history[dataset.name]?.length ?? 0) > 1 && (
+                    <span className="dataset-card__spark" title="Imagens por versão">
+                      <Sparkline values={history[dataset.name]} width={90} height={30} />
+                    </span>
+                  )}
                 </div>
               ) : (
                 <p className="dataset-card__none">Nenhuma versão ainda</p>
@@ -74,6 +85,6 @@ export function DatasetsPage() {
           ))}
         </div>
       )}
-    </section>
+    </div>
   )
 }

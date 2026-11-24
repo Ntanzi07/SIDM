@@ -162,10 +162,19 @@ func TestCriarDatasetEVersao(t *testing.T) {
 		t.Errorf("itens gravados: %d", len(mem.Items))
 	}
 
-	// com versões, não apaga
+	// com versões, só apaga pedindo junto o histórico
 	var conflict *ConflictError
-	if err := s.DeleteDataset(ctx, "motos-noite"); !errors.As(err, &conflict) {
-		t.Errorf("apagar com versões: %v", err)
+	if err := s.DeleteDataset(ctx, "motos-noite", false); !errors.As(err, &conflict) {
+		t.Errorf("apagar com versões sem pedir: %v", err)
+	}
+	if err := s.DeleteDataset(ctx, "motos-noite", true); err != nil {
+		t.Fatalf("apagar com as versões: %v", err)
+	}
+	if len(mem.Versions) != 0 || len(mem.Items) != 0 || len(mem.Datasets) != 0 {
+		t.Errorf("sobrou: %d versões, %d itens, %d datasets", len(mem.Versions), len(mem.Items), len(mem.Datasets))
+	}
+	if err := s.DeleteDataset(ctx, "motos-noite", true); !errors.Is(err, platform.ErrNotFound) {
+		t.Errorf("apagar de novo: %v", err)
 	}
 }
 
@@ -198,7 +207,7 @@ func TestDatasetInvalido(t *testing.T) {
 	if _, err := s.CreateVersion(ctx, "vazio", "nada", "n"); !errors.Is(err, platform.ErrInvalid) {
 		t.Errorf("versão vazia: %v", err)
 	}
-	if err := s.DeleteDataset(ctx, "vazio"); err != nil {
+	if err := s.DeleteDataset(ctx, "vazio", false); err != nil {
 		t.Errorf("apagar sem versões: %v", err)
 	}
 }

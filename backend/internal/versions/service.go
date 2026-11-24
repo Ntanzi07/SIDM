@@ -190,13 +190,28 @@ func (s *Service) UpdateDataset(ctx context.Context, name string, in DatasetInpu
 }
 
 // DeleteDataset: só sem versões (uma versão pode ter treinado um modelo).
-func (s *Service) DeleteDataset(ctx context.Context, name string) error {
-	v, err := s.repo.LastVersion(ctx, name)
+// DeleteDataset apaga a pesquisa salva. Com versões, só se withVersions:
+// aí some também o histórico (as versões e os itens congelados). As imagens
+// e a anotação delas não são tocadas. A ordem (itens, versão, dataset) deixa
+// repetir se cair no meio.
+func (s *Service) DeleteDataset(ctx context.Context, name string, withVersions bool) error {
+	if _, err := s.repo.FindDataset(ctx, name); err != nil {
+		return err
+	}
+	list, err := s.repo.ListVersions(ctx, name)
 	if err != nil {
 		return err
 	}
-	if v != nil {
-		return &ConflictError{fmt.Sprintf("o dataset %q tem versões e não pode ser apagado", name)}
+	if len(list) > 0 && !withVersions {
+		return &ConflictError{fmt.Sprintf("o dataset %q tem %d versão(ões): para apagar junto o histórico, use ?versoes=apagar", name, len(list))}
+	}
+	for _, v := range list {
+		if err := s.repo.DeleteItems(ctx, v.ID); err != nil {
+			return err
+		}
+		if err := s.repo.DeleteVersion(ctx, v.ID); err != nil {
+			return err
+		}
 	}
 	return s.repo.DeleteDataset(ctx, name)
 }

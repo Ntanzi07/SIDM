@@ -154,6 +154,8 @@ type Repo interface {
 	FindVersion(ctx context.Context, dataset string, number int) (*Version, error)
 	// ListVersions: da mais nova para a mais velha.
 	ListVersions(ctx context.Context, dataset string) ([]Version, error)
+	// DeleteVersion: só o documento da versão (os itens: DeleteItems).
+	DeleteVersion(ctx context.Context, id string) error
 
 	InsertItems(ctx context.Context, items []Item) error
 	DeleteItems(ctx context.Context, version string) error
