@@ -18,6 +18,7 @@ import { setTaskColors, useTaskColors } from '../../utils/taskColors'
 import { BoxImportModal } from '../Packages/BoxImportModal'
 import { GridPicker, Menu, SearchField, SearchIcon } from '../../components/Toolbar/Toolbar'
 import { savedColumns, saveColumns, type Columns, type MenuOption } from '../../components/Toolbar/columns'
+import { useIsAdmin } from '../../services/user'
 import '../Packages/Packages.css'
 import './Tasks.css'
 
@@ -413,6 +414,7 @@ type Popup = '' | 'import' | 'download' | 'delete'
 
 function TaskDetail({ name }: { name: string }) {
   const navigate = useNavigate()
+  const admin = useIsAdmin() // apagar é só de admin
   const [task, setTask] = useState<AnnotationTask | null>(null)
   const [error, setError] = useState('')
   const [popup, setPopup] = useState<Popup>('')
@@ -506,7 +508,7 @@ function TaskDetail({ name }: { name: string }) {
             </table>
           )}
           <p className="side-section__hint task-packages__note">Só as imagens verificadas entram no export.</p>
-          <button className="button button--danger button--sm task-delete" onClick={() => setPopup('delete')} type="button">Apagar tarefa</button>
+          {admin && <button className="button button--danger button--sm task-delete" onClick={() => setPopup('delete')} type="button">Apagar tarefa</button>}
         </section>
       </div>
 

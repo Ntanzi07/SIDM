@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { deleteImage, imageFileUrl, listPackageImages, type ImageSummary } from '../../services/api'
+import { useIsAdmin } from '../../services/user'
 
 const PAGE = 25
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -41,6 +42,7 @@ export function PackageImages({ packageName, onRemoved }: { packageName: string;
 }
 
 function ImageFeed({ packageName, status, onRemoved }: { packageName: string; status: Status; onRemoved: () => void }) {
+  const admin = useIsAdmin() // apagar é só de admin
   const navigate = useNavigate()
   const [items, setItems] = useState<ImageSummary[]>([])
   const [total, setTotal] = useState(-1) // -1 = ainda não chegou a primeira página
@@ -128,16 +130,18 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
                 <i className={image.status === 'verified' ? 'status-dot status-dot--verified' : 'status-dot status-dot--pending'} />
                 {image.status === 'verified' ? 'Verificada' : 'Pendente'}
               </span>
-              <button
-                aria-label={`Remover ${image.original_name}`}
-                className="image-feed__remove"
-                disabled={removing !== ''}
-                onClick={() => void remove(image)}
-                title="Remover a imagem"
-                type="button"
-              >
-                ✕
-              </button>
+              {admin && (
+                <button
+                  aria-label={`Remover ${image.original_name}`}
+                  className="image-feed__remove"
+                  disabled={removing !== ''}
+                  onClick={() => void remove(image)}
+                  title="Remover a imagem"
+                  type="button"
+                >
+                  ✕
+                </button>
+              )}
             </li>
           ))}
         </ul>

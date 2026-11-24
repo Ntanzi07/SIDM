@@ -1,0 +1,97 @@
+/* O login: um cartão no meio da tela, sem o menu. */
+.login-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 24px;
+  place-items: center;
+}
+
+.login-card {
+  display: grid;
+  gap: 14px;
+  width: min(380px, 100%);
+  padding: 32px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  animation: rise 520ms var(--ease) both;
+}
+
+.login-card__brand {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.04em;
+}
+
+.login-card h1 {
+  margin: 6px 0 0;
+  font-size: 28px;
+}
+
+.login-card__hint {
+  margin: -6px 0 6px;
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+
+.login-card label {
+  display: grid;
+  gap: 6px;
+}
+
+.login-card label > span {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.login-card label small {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+.login-card .form-error {
+  margin: 0;
+}
+
+.login-card__submit {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.login-card__sent {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+}
+
+.login-card__switch {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-card__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+}
+
+.login-card__link:hover {
+  text-decoration: underline;
+}
+
+.login-card input {
+  min-height: 42px;
+  padding: 0 12px;
+  font-size: 14px;
+}

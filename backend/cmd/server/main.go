@@ -19,6 +19,7 @@ import (
 	"SIDM/internal/images"
 	"SIDM/internal/imports"
 	"SIDM/internal/platform"
+	"SIDM/internal/users"
 	"SIDM/internal/versions"
 )
 
@@ -118,11 +119,38 @@ func main() {
 	ver := versions.New(verRepo, img, bx, ann)
 	exp.UseVersions(ver) // baixar uma versão de um dataset
 
+	// O login: contas e sessões. O primeiro admin vem do .env
+	// (SIDM_ADMIN_USER e SIDM_ADMIN_PASSWORD), só se ainda não há nenhum.
+	usrRepo := users.NewMongoRepo(db)
+	if err := usrRepo.EnsureIndexes(ctx); err != nil {
+		log.Fatalf("falha ao preparar os usuários no Mongo: %v", err)
+	}
+	usr := users.New(usrRepo)
+	ensureAdmin(ctx, usr)
+
 	ping := func(ctx context.Context) error { return client.Ping(ctx, nil) }
-	srv := api.New(ping, cat, img, bx, imp, exp, ann, ver)
+	srv := api.New(ping, cat, img, bx, imp, exp, ann, ver, usr)
 
 	log.Printf("SIDM ouvindo em %s", addr)
-	log.Fatal(http.ListenAndServe(addr, srv.Routes()))
+	log.Fatal(http.ListenAndServe(addr, usr.Protect(srv.Routes())))
+}
+
+// ensureAdmin cria o primeiro admin a partir do .env. Com um admin ativo
+// no banco, não mexe em nada (a senha que ele trocou continua valendo). A
+// senha nunca vai para o log.
+func ensureAdmin(ctx context.Context, usr *users.Service) {
+	user, pass := os.Getenv("SIDM_ADMIN_USER"), os.Getenv("SIDM_ADMIN_PASSWORD")
+	if user == "" || pass == "" {
+		log.Printf("SIDM_ADMIN_USER/SIDM_ADMIN_PASSWORD não definidos: sem eles, se não há admin, ninguém aprova cadastros")
+		return
+	}
+	created, err := usr.EnsureAdmin(ctx, user, pass)
+	if err != nil {
+		log.Fatalf("falha ao criar o admin %q: %v", user, err)
+	}
+	if created {
+		log.Printf("admin %q pronto (troque a senha no primeiro acesso)", user)
+	}
 }
 
 // loadDotEnv carrega o .env para rodar local com `go run`.

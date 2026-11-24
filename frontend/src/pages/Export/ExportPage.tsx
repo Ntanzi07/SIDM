@@ -20,6 +20,7 @@ import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { FileNameTemplate } from './FileNameTemplate'
 import { FolderLevels } from './FolderLevels'
 import { Link } from 'react-router-dom'
+import { useIsAdmin } from '../../services/user'
 import './Export.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -148,6 +149,7 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
 }
 
 export function ExportPage() {
+  const admin = useIsAdmin() // apagar é só de admin
   const [profiles, setProfiles] = useState<ExportProfile[]>([])
   const [packageProfiles, setPackageProfiles] = useState<Record<string, string>>({}) // pacote -> perfil de anotação
   const [tasks, setTasks] = useState<AnnotationTask[]>([])
@@ -643,7 +645,7 @@ export function ExportPage() {
                 Baixar zip
               </button>
               <span className="export-actions__spacer" />
-              {selected && !isBuiltin && (
+              {admin && selected && !isBuiltin && (
                 <button className="button button--danger" disabled={busy !== ''} onClick={() => void remove()} type="button">Apagar perfil</button>
               )}
               <button className="button button--secondary" disabled={busy !== '' || !canSave} onClick={() => void save()} type="button">

@@ -8,6 +8,7 @@ import { DatasetTimeline, NewVersionModal, VersionPanel, type PanelTab } from '.
 import { formatWhen } from '../Versions/format'
 import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
+import { useIsAdmin } from '../../services/user'
 import './Dashboard.css'
 
 // Dashboard: primeiro escolhe o perfil de anotação; depois, à esquerda, de
@@ -80,6 +81,7 @@ function ProfilePicker() {
 // ?dataset=nome&v=3 (sem v: a mais nova).
 function ProfileDashboard({ profile }: { profile: string }) {
   const navigate = useNavigate()
+  const admin = useIsAdmin() // apagar é só de admin
   const [params, setParams] = useSearchParams()
   // ?novo=1: todas as imagens, para montar e salvar um dataset novo
   const creatingDataset = params.get('novo') === '1'
@@ -169,7 +171,7 @@ function ProfileDashboard({ profile }: { profile: string }) {
                     {versions.length > 0 ? `${versions.length} versão(ões) · v${versions[0].number} ${formatWhen(versions[0].created_at)}` : 'sem versões'}
                   </small>
                 </button>
-                <button aria-label={`Apagar o dataset ${dataset.name}`} className="source-delete" onClick={() => setDeleting(dataset.name)} title="Apagar este dataset" type="button">✕</button>
+                {admin && <button aria-label={`Apagar o dataset ${dataset.name}`} className="source-delete" onClick={() => setDeleting(dataset.name)} title="Apagar este dataset" type="button">✕</button>}
                 {open && (
                   <ol className="source-versions">
                     <li>

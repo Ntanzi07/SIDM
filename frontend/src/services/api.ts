@@ -1,5 +1,5 @@
 import type { AnnotationCodes, AnnotationProfile, ImageDetail } from '../types/annotation'
-import { getUser } from './user'
+import { setAccount, type Account } from './user'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
 
@@ -164,15 +164,18 @@ export class RequestError extends Error {
   }
 }
 
+// Quem está agindo vai na sessão (o cookie, mandado sozinho pelo navegador).
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
     headers: {
       ...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-      'X-User': getUser() || 'anonymous',
       ...init?.headers,
     },
   })
+
+  // A sessão venceu (8 horas) ou a conta foi desativada: volta para o login.
+  if (response.status === 401 && !path.startsWith('/auth/')) setAccount(null)
 
   if (!response.ok) {
     const body = await response.json().catch(() => null) as { error?: string; problems?: Problem[] } | null
@@ -287,7 +290,6 @@ export async function reopenImage(sha1: string): Promise<ImageDetail> {
 export function releaseImage(sha1: string): void {
   void fetch(`${API_BASE_URL}/images/${encodeURIComponent(sha1)}/release`, {
     method: 'POST',
-    headers: { 'X-User': getUser() || 'anonymous' },
     keepalive: true,
   }).catch(() => { /* se falhar, a reserva vence sozinha */ })
 }
@@ -1148,4 +1150,49 @@ export async function getVersionDiffCounts(dataset: string, from: number, to: nu
 
 export async function getItemDiff(dataset: string, from: number, to: number, sha1: string): Promise<ItemDiff> {
   return request<ItemDiff>(`/datasets/${encodeURIComponent(dataset)}/diff/${sha1}?${diffParams(from, to)}`)
+}
+
+// ---------- login ----------
+
+export async function getMe(): Promise<Account | null> {
+  try {
+    return await request<Account>('/auth/me')
+  } catch (error: unknown) {
+    if (error instanceof RequestError && error.status === 401) return null
+    throw error
+  }
+}
+
+export async function login(username: string, password: string): Promise<Account> {
+  const account = await request<Account>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+  setAccount(account)
+  return account
+}
+
+export async function register(input: { username: string; name: string; password: string }): Promise<Account> {
+  return request<Account>('/auth/register', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function logout(): Promise<void> {
+  await request<void>('/auth/logout', { method: 'POST' }).catch(() => { /* sai mesmo assim */ })
+  setAccount(null)
+}
+
+export async function changePassword(current: string, next: string): Promise<void> {
+  return request<void>('/auth/password', { method: 'PUT', body: JSON.stringify({ current, new: next }) })
+}
+
+// ---------- contas (admin) ----------
+
+export async function listAccounts(): Promise<Account[]> {
+  const response = await request<PageResponse<Account>>('/users')
+  return response.items
+}
+
+export async function updateAccount(username: string, change: { status?: 'active' | 'disabled'; role?: 'admin' | 'user' }): Promise<Account> {
+  return request<Account>(`/users/${encodeURIComponent(username)}`, { method: 'PATCH', body: JSON.stringify(change) })
+}
+
+export async function resetAccountPassword(username: string, password: string): Promise<void> {
+  return request<void>(`/users/${encodeURIComponent(username)}/password`, { method: 'PUT', body: JSON.stringify({ password }) })
 }
