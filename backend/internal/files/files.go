@@ -125,6 +125,28 @@ func (st *Storage) Store(tmpPath, rel string) error {
 	return nil
 }
 
+// TrashPath: onde uma imagem apagada fica guardada (a lixeira), para poder
+// voltar por uma versão: lixeira/<sha1>.ext.
+func TrashPath(sum, ext string) string {
+	return path.Join("lixeira", sum+ext)
+}
+
+// MoveTo move um arquivo entre dois caminhos relativos, criando a pasta de
+// destino (a lixeira e a volta dela).
+func (st *Storage) MoveTo(fromRel, toRel string) error {
+	dst := st.Abs(toRel)
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		return fmt.Errorf("criar pasta de %s: %w", toRel, err)
+	}
+	return st.Move(fromRel, toRel)
+}
+
+// Exists diz se o arquivo está no disco.
+func (st *Storage) Exists(rel string) bool {
+	_, err := os.Stat(st.Abs(rel))
+	return err == nil
+}
+
 // Move move um arquivo entre dois caminhos relativos (ex: renomear para v2).
 func (st *Storage) Move(fromRel, toRel string) error {
 	if err := os.Rename(st.Abs(fromRel), st.Abs(toRel)); err != nil {

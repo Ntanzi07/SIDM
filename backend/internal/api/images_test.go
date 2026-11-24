@@ -339,6 +339,7 @@ func TestDiffHistory(t *testing.T) {
 	}
 }
 
+// Apagar uma imagem: ela sai do pacote e vai para a lixeira.
 func TestExcluirImagem(t *testing.T) {
 	env := newTestEnv(t)
 	sha := env.seedVerified(t, "verificada") // tem histórico
@@ -352,12 +353,21 @@ func TestExcluirImagem(t *testing.T) {
 		t.Error("o registro deveria ter sumido")
 	}
 	if _, err := os.Stat(file); !os.IsNotExist(err) {
-		t.Error("o arquivo deveria ter sido apagado")
+		t.Error("o arquivo deveria ter saído do pacote")
 	}
+	// vai para a lixeira: o registro e o arquivo (para voltar por uma versão)
+	if tr, ok := env.img.Trash[sha]; !ok || tr.DeletedBy == "" || tr.Package != testPkg {
+		t.Errorf("lixeira: %+v", tr)
+	}
+	if _, err := os.Stat(filepath.Join(env.root, "lixeira", sha+".jpg")); err != nil {
+		t.Errorf("o arquivo deveria estar na lixeira: %v", err)
+	}
+	kept := false
 	for _, h := range env.img.History {
-		if h.ImageID == sha {
-			t.Fatal("o histórico da imagem deveria ter sumido")
-		}
+		kept = kept || h.ImageID == sha
+	}
+	if !kept {
+		t.Error("o histórico fica (a imagem pode voltar)")
 	}
 	if _, ok := env.img.Images[other]; !ok {
 		t.Error("a outra imagem não pode ser afetada")

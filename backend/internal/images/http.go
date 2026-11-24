@@ -164,39 +164,43 @@ func (s *Service) handleImageFile(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /images/{sha1}
-// Apaga a imagem: o registro, o histórico, as caixas e o arquivo. Sem volta.
+// Apaga a imagem do pacote, mas ela vai para a LIXEIRA: o registro inteiro
+// (images_trash) e o arquivo (lixeira/<sha1>.ext). Assim ela volta por uma
+// versão (POST /datasets/{name}/versions/{number}/items/{sha1}/restore). As
+// caixas saem (a versão tem as delas); o histórico fica.
 // Se outra pessoa está anotando, recusa (409).
 func (s *Service) handleDeleteImage(w http.ResponseWriter, r *http.Request) {
 	img, ok := s.imageFromPath(w, r)
 	if !ok {
 		return
 	}
-	if img.ClaimedByOther(platform.UserFrom(r), time.Now().UTC()) {
+	user := platform.UserFrom(r)
+	if img.ClaimedByOther(user, time.Now().UTC()) {
 		platform.WriteError(w, http.StatusConflict, fmt.Sprintf("imagem está sendo anotada por %s", img.ClaimedBy))
 		return
 	}
 
-	// Mesma ordem do pacote: banco primeiro. Se o disco falhar, sobra um
-	// arquivo órfão, mas nunca um registro apontando para o nada.
+	// Primeiro a lixeira, depois o banco, depois o disco: se algo cair no
+	// meio, o pior caso é um arquivo fora do lugar, nunca uma imagem perdida.
 	ctx := r.Context()
+	if err := s.repo.PutTrash(ctx, &Trash{Image: *img, DeletedBy: user, DeletedAt: time.Now().UTC()}); err != nil {
+		platform.ServerError(w, err)
+		return
+	}
 	if err := s.repo.DeleteImage(ctx, img.SHA1); err != nil {
 		platform.ServerError(w, err)
 		return
 	}
 	warnings := []string{}
-	if err := s.repo.DeleteImageHistory(ctx, img.SHA1); err != nil {
-		platform.LogError(err)
-		warnings = append(warnings, "a imagem foi apagada, mas o histórico dela não")
-	}
 	if err := s.imageDeleted(ctx, img.SHA1); err != nil {
 		platform.LogError(err)
 		warnings = append(warnings, "a imagem foi apagada, mas as caixas dela não")
 	}
-	if err := s.files.Remove(img.Path); err != nil {
+	if err := s.files.MoveTo(img.Path, files.TrashPath(img.SHA1, img.Ext)); err != nil {
 		platform.LogError(err)
-		warnings = append(warnings, "a imagem foi apagada do banco, mas o arquivo não: apague "+img.Path+" manualmente")
+		warnings = append(warnings, "a imagem foi apagada, mas o arquivo não foi para a lixeira: ficou em "+img.Path)
 	}
-	platform.WriteJSON(w, http.StatusOK, map[string]any{"sha1": img.SHA1, "deleted": true, "warnings": warnings})
+	platform.WriteJSON(w, http.StatusOK, map[string]any{"sha1": img.SHA1, "deleted": true, "trash": true, "warnings": warnings})
 }
 
 // PUT /images/{sha1}

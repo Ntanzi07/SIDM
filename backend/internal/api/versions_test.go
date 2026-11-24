@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -217,4 +218,128 @@ func TestExportDeVersao(t *testing.T) {
 	if images != 3 || info.Info.Version.Dataset != "noite" || info.Info.Version.Number != 1 || info.Info.Version.ID == "" || len(info.Result.Missing) != 0 {
 		t.Errorf("zip: %d imagens, info %+v, faltando %v", images, info.Info.Version, info.Result.Missing)
 	}
+}
+
+// A volta: uma imagem volta para como estava na versão (campos e caixas);
+// uma imagem apagada sai da lixeira.
+func TestVoltaParaVersao(t *testing.T) {
+	env := newTestEnv(t)
+	env.withCapacete(t)
+	res := env.uploadTo(t, "motos", upFile{"m1.jpg", "moto 1"}, upFile{"m2.jpg", "moto 2"})
+	m1, m2 := res[0].SHA1, res[1].SHA1
+	for _, sha := range []string{m1, m2} {
+		assertStatus(t, env.doJSON("PUT", "/images/"+sha, `{"fields": {"day_time": "night"}, "complete": true}`), http.StatusOK)
+	}
+	env.box.Tasks["capacete"] = boxes.Task{Name: "capacete", Labels: []string{"helmet", "no_helmet"}}
+	env.box.Put(boxes.Set{Task: "capacete", ImageID: m1, Package: "motos", Width: 32, Height: 32,
+		Boxes: []boxes.Box{{Label: "helmet", X: 1, Y: 1, W: 5, H: 5}}})
+	h := map[string]string{"Content-Type": "application/json", "X-User": "nathan"}
+	assertStatus(t, env.do("POST", "/datasets", strings.NewReader(`{"name": "motos", "profile": "capacete-moto"}`), h), http.StatusCreated)
+	assertStatus(t, env.do("POST", "/datasets/motos/versions", strings.NewReader(`{"message": "v1"}`), h), http.StatusCreated)
+
+	// depois da v1: m1 vira de dia e a caixa muda; m2 é apagada
+	assertStatus(t, env.doJSON("PUT", "/images/"+m1, `{"fields": {"day_time": "day"}, "complete": true}`), http.StatusOK)
+	env.box.Put(boxes.Set{Task: "capacete", ImageID: m1, Package: "motos", Width: 32, Height: 32,
+		Boxes: []boxes.Box{{Label: "no_helmet", X: 2, Y: 2, W: 5, H: 5}}})
+	assertStatus(t, env.do("DELETE", "/images/"+m2, nil, h), http.StatusOK)
+
+	restore := func(number, sha string) *httptest.ResponseRecorder {
+		return env.do("POST", "/datasets/motos/versions/"+number+"/items/"+sha+"/restore", nil, h)
+	}
+	// m1 volta: de noite e com a caixa helmet
+	rec := restore("1", m1)
+	assertStatus(t, rec, http.StatusOK)
+	var r versions.RestoreResult
+	decode(t, rec, &r)
+	if r.FromTrash || r.Version != 1 {
+		t.Errorf("m1: %+v", r)
+	}
+	if env.img.Images[m1].Fields["day_time"] != "night" || env.img.Images[m1].Status != "verified" {
+		t.Errorf("m1 depois da volta: %+v", env.img.Images[m1].Fields)
+	}
+	if set := env.box.Sets[boxes.Key("capacete", m1)]; len(set.Boxes) != 1 || set.Boxes[0].Label != "helmet" || set.UpdatedBy == "" {
+		t.Errorf("caixas de m1: %+v", set)
+	}
+	volta := false
+	for _, e := range env.img.History {
+		volta = volta || (e.ImageID == m1 && strings.Contains(e.ChangedBy, "volta para a v1"))
+	}
+	if !volta {
+		t.Error("o histórico deveria dizer que foi a volta")
+	}
+
+	// m2 sai da lixeira, com o arquivo de volta no pacote
+	rec = restore("v1", m2)
+	assertStatus(t, rec, http.StatusOK)
+	decode(t, rec, &r)
+	if !r.FromTrash {
+		t.Errorf("m2: %+v", r)
+	}
+	if _, ok := env.img.Images[m2]; !ok {
+		t.Fatal("m2 deveria ter voltado")
+	}
+	if _, err := os.Stat(env.pkgFile2("motos", m2+".jpg")); err != nil {
+		t.Errorf("o arquivo de m2 deveria estar no pacote: %v", err)
+	}
+	if _, ok := env.img.Trash[m2]; ok {
+		t.Error("m2 deveria ter saído da lixeira")
+	}
+	assertStatus(t, env.do("GET", "/images/"+m2+"/file", nil, nil), http.StatusOK)
+
+	// erros: imagem fora da versão, versão que não existe, o "agora"
+	assertStatus(t, restore("1", "0000000000000000000000000000000000000000"), http.StatusNotFound)
+	assertStatus(t, restore("9", m1), http.StatusNotFound)
+	assertStatus(t, restore("atual", m1), http.StatusBadRequest)
+
+	// apagada antes da lixeira existir: não volta, e diz por quê
+	assertStatus(t, env.do("DELETE", "/images/"+m2, nil, h), http.StatusOK)
+	delete(env.img.Trash, m2)
+	if rec := restore("1", m2); rec.Code != http.StatusBadRequest || !strings.Contains(errorMsg(t, rec), "lixeira") {
+		t.Errorf("sem lixeira: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+// Voltar tudo: as alteradas e as apagadas voltam para a versão; as que
+// entraram depois ficam.
+func TestVoltarTudoParaVersao(t *testing.T) {
+	env := newTestEnv(t)
+	env.withCapacete(t)
+	res := env.uploadTo(t, "motos", upFile{"m1.jpg", "moto 1"}, upFile{"m2.jpg", "moto 2"}, upFile{"m3.jpg", "moto 3"}, upFile{"m4.jpg", "moto 4"})
+	for _, r := range res[:3] {
+		assertStatus(t, env.doJSON("PUT", "/images/"+r.SHA1, `{"fields": {"day_time": "night"}, "complete": true}`), http.StatusOK)
+	}
+	h := map[string]string{"Content-Type": "application/json", "X-User": "nathan"}
+	assertStatus(t, env.do("POST", "/datasets", strings.NewReader(`{"name": "motos", "profile": "capacete-moto"}`), h), http.StatusCreated)
+	assertStatus(t, env.do("POST", "/datasets/motos/versions", strings.NewReader(`{"message": "v1"}`), h), http.StatusCreated)
+
+	// a mudança errada: duas de dia, uma apagada; e uma nova entra
+	for _, r := range res[:2] {
+		assertStatus(t, env.doJSON("PUT", "/images/"+r.SHA1, `{"fields": {"day_time": "day"}, "complete": true}`), http.StatusOK)
+	}
+	assertStatus(t, env.do("DELETE", "/images/"+res[2].SHA1, nil, h), http.StatusOK)
+	assertStatus(t, env.doJSON("PUT", "/images/"+res[3].SHA1, `{"fields": {"day_time": "night"}, "complete": true}`), http.StatusOK)
+
+	rec := env.do("POST", "/datasets/motos/versions/1/restore", nil, h)
+	assertStatus(t, rec, http.StatusOK)
+	var rep versions.RestoreReport
+	decode(t, rec, &rep)
+	if rep.Restored != 3 || rep.FromTrash != 1 || len(rep.Failed) != 0 || rep.Added != 1 {
+		t.Errorf("relatório: %+v", rep)
+	}
+	for _, r := range res[:3] {
+		if env.img.Images[r.SHA1].Fields["day_time"] != "night" {
+			t.Errorf("%s não voltou: %+v", r.SHA1, env.img.Images[r.SHA1].Fields)
+		}
+	}
+	if _, ok := env.img.Images[res[3].SHA1]; !ok {
+		t.Error("a que entrou depois não pode sumir")
+	}
+	// de novo: nada mais para voltar
+	rec = env.do("POST", "/datasets/motos/versions/1/restore", nil, h)
+	decode(t, rec, &rep)
+	if rep.Restored != 0 {
+		t.Errorf("segunda volta: %+v", rep)
+	}
+	assertStatus(t, env.do("POST", "/datasets/motos/versions/atual/restore", nil, h), http.StatusBadRequest)
+	assertStatus(t, env.do("POST", "/datasets/motos/versions/7/restore", nil, h), http.StatusNotFound)
 }

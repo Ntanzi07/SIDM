@@ -10,6 +10,9 @@ import {
   getVersionDiffCounts,
   imageFileUrl,
   listExportProfiles,
+  restoreAll,
+  restoreItem,
+  type RestoreReport,
   previewVersionExport,
   type DiffRef,
   type ExportPreview,
@@ -24,6 +27,7 @@ import { SearchPage } from '../Search/SearchPage'
 import { Timeline, type TimelinePoint } from '../../components/Charts/Timeline'
 import { spanText } from '../../components/Charts/palette'
 import { formatWhen, keyInfo, valueText } from './format'
+import { useIsAdmin } from '../../services/user'
 import './Versions.css'
 
 // As partes de uma versão usadas na tela do dataset e no Dashboard: a linha
@@ -355,6 +359,10 @@ const GROUPS: Array<{ key: Group; label: string; sign: string }> = [
 const DIFF_PAGE = 50
 
 function DiffResult({ dataset, from, to, profile }: { dataset: string; from: number; to: number; profile?: AnnotationProfile }) {
+  const admin = useIsAdmin() // voltar tudo: só admin
+  const [reload, setReload] = useState(0) // depois de voltar tudo, compara de novo
+  const [restoring, setRestoring] = useState(false)
+  const [report, setReport] = useState<RestoreReport | null>(null)
   const [diff, setDiff] = useState<VersionDiff | null>(null)
   const [error, setError] = useState('')
   const [picked, setPicked] = useState<Group | ''>('') // '' = o primeiro grupo com imagens
@@ -369,10 +377,14 @@ function DiffResult({ dataset, from, to, profile }: { dataset: string; from: num
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível comparar.')
       })
     return () => { active = false }
-  }, [dataset, from, to])
+  }, [dataset, from, to, reload])
 
   if (error) return <p className="form-error">{error}</p>
   if (!diff) return <p className="versions-hint">Comparando...</p>
+
+  // voltar tudo: olhando o agora contra uma versão salva, com algo para voltar
+  const undo = diff.changed.length + diff.removed.length
+  const canRestoreAll = admin && to === 0 && from > 0 && undo > 0
 
   const group = picked || GROUPS.find((item) => diff[item.key].length > 0)?.key || 'changed'
   const list: DiffRef[] = diff[group]
@@ -380,6 +392,26 @@ function DiffResult({ dataset, from, to, profile }: { dataset: string; from: num
 
   return (
     <>
+      {canRestoreAll && (
+        <div className="restore-all">
+          <span>
+            Uma mudança errada? <strong>{fmt(undo)}</strong> imagem(ns) diferente(s) da v{from}.
+          </span>
+          <button className="button button--secondary button--sm" onClick={() => setRestoring(true)} type="button">↺ Voltar tudo para a v{from}</button>
+        </div>
+      )}
+      {report && <RestoreReportView report={report} onClose={() => setReport(null)} />}
+      {restoring && (
+        <RestoreAllModal
+          added={diff.added.length}
+          changed={diff.changed.length}
+          dataset={dataset}
+          onClose={() => setRestoring(false)}
+          onDone={(result) => { setRestoring(false); setReport(result); setDiff(null); setReload((n) => n + 1) }}
+          removed={diff.removed.length}
+          version={from}
+        />
+      )}
       <div className="diff-counts">
         {GROUPS.map((item) => (
           <button
@@ -415,7 +447,7 @@ function DiffResult({ dataset, from, to, profile }: { dataset: string; from: num
                 <span className="diff-row__name" title={item.file_name}>{item.original_name || item.file_name || item.sha1}</span>
                 <span className="diff-row__package">{item.package}</span>
               </button>
-              {open === item.sha1 && <ItemDetail dataset={dataset} from={from} profile={profile} sha1={item.sha1} to={to} />}
+              {open === item.sha1 && <ItemDetail dataset={dataset} from={from} group={group} profile={profile} sha1={item.sha1} to={to} />}
             </li>
           ))}
           {list.length > shown && (
@@ -431,10 +463,120 @@ function DiffResult({ dataset, from, to, profile }: { dataset: string; from: num
   )
 }
 
+// Confirmar o "voltar tudo": diz o que muda e o que fica. Com muitas
+// imagens leva um tempo; o servidor termina mesmo se a tela fechar.
+function RestoreAllModal({ dataset, version, changed, removed, added, onClose, onDone }: {
+  dataset: string
+  version: number
+  changed: number
+  removed: number
+  added: number
+  onClose: () => void
+  onDone: (report: RestoreReport) => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [typed, setTyped] = useState('')
+  const word = `v${version}`
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [busy, onClose])
+
+  async function go() {
+    setBusy(true)
+    setError('')
+    try {
+      onDone(await restoreAll(dataset, version))
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error ? requestError.message : 'Não foi possível voltar.')
+      setBusy(false)
+    }
+  }
+
+  return createPortal(
+    <div aria-modal="true" className="modal-backdrop" onClick={() => { if (!busy) onClose() }} role="dialog">
+      <div className="modal-dialog" onClick={(event) => event.stopPropagation()}>
+        <div className="modal-header">
+          <h2>Voltar tudo para a v{version}?</h2>
+          <button aria-label="Fechar" className="modal-close" disabled={busy} onClick={onClose} type="button">✕</button>
+        </div>
+        <div className="modal-body restore-all-modal">
+          <ul>
+            {changed > 0 && <li><strong>{fmt(changed)}</strong> alterada(s) voltam para a anotação da v{version} (campos e caixas).</li>}
+            {removed > 0 && <li><strong>{fmt(removed)}</strong> que saíram voltam (as apagadas saem da lixeira).</li>}
+            {added > 0 && <li><strong>{fmt(added)}</strong> que entraram depois da v{version} ficam como estão.</li>}
+          </ul>
+          <p className="versions-hint">A anotação de hoje dessas imagens é trocada; cada uma guarda no histórico quem voltou. Para desfazer, volte para uma versão salva antes disto.</p>
+          <label htmlFor="restore-all-word">Digite <code>{word}</code> para confirmar</label>
+          <input autoFocus disabled={busy} id="restore-all-word" onChange={(event) => setTyped(event.target.value)} placeholder={word} value={typed} />
+          {busy && <p className="versions-hint">Voltando {fmt(changed + removed)} imagem(ns)... com muitas, leva um tempo. Pode fechar: o servidor termina sozinho.</p>}
+          {error && <p className="form-error">{error}</p>}
+        </div>
+        <div className="modal-actions">
+          <button className="button button--secondary" disabled={busy} onClick={onClose} type="button">Cancelar</button>
+          <button className="button button--danger" disabled={busy || typed.trim().toLowerCase() !== word} onClick={() => void go()} type="button">
+            {busy ? 'Voltando...' : `Voltar ${fmt(changed + removed)} imagem(ns)`}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
+function RestoreReportView({ report, onClose }: { report: RestoreReport; onClose: () => void }) {
+  return (
+    <div className={report.failed.length > 0 ? 'restore-report restore-report--warning' : 'restore-report'} role="status">
+      <div>
+        <strong>{fmt(report.restored)} imagem(ns) voltaram para a v{report.version}</strong>
+        {report.from_trash > 0 && <span> · {fmt(report.from_trash)} saíram da lixeira</span>}
+        {report.failed.length > 0 && <span> · {fmt(report.failed.length)} não voltaram:</span>}
+      </div>
+      {report.failed.length > 0 && (
+        <ul>
+          {report.failed.slice(0, 20).map((item) => <li key={item.sha1}><strong>{item.name || item.sha1}</strong>: {item.error}</li>)}
+          {report.failed.length > 20 && <li>... e mais {fmt(report.failed.length - 20)}</li>}
+        </ul>
+      )}
+      <button aria-label="Fechar" className="restore-report__close" onClick={onClose} type="button">✕</button>
+    </div>
+  )
+}
+
 // O que mudou numa imagem: os campos, os objetos e as caixas por tarefa.
-function ItemDetail({ dataset, from, to, sha1, profile }: { dataset: string; from: number; to: number; sha1: string; profile?: AnnotationProfile }) {
+function ItemDetail({ dataset, from, to, sha1, group, profile }: { dataset: string; from: number; to: number; sha1: string; group: Group; profile?: AnnotationProfile }) {
   const [item, setItem] = useState<ItemDiff | null>(null)
   const [error, setError] = useState('')
+  const [restoring, setRestoring] = useState(false)
+  const [restored, setRestored] = useState('')
+  const [restoreError, setRestoreError] = useState('')
+  const [missing, setMissing] = useState(false) // a imagem não abre (apagada: está na lixeira)
+
+  // A volta vai para a versão que está na comparação: olhando o agora, para
+  // a de antes (from); olhando uma versão, para ela mesma. Só se a imagem
+  // existe nessa versão.
+  const target = to === 0 ? from : to
+  const canRestore = target > 0 && (to === 0 ? group !== 'added' : group !== 'removed')
+
+  async function restore() {
+    if (!window.confirm(`Voltar esta imagem para como estava na v${target}? A anotação de hoje dela é trocada (fica no histórico).`)) return
+    setRestoring(true)
+    setRestoreError('')
+    try {
+      const result = await restoreItem(dataset, target, sha1)
+      setRestored(result.from_trash
+        ? `Voltou para a v${target} e saiu da lixeira (está de novo no pacote ${result.package}).`
+        : `Voltou para a v${target}.`)
+      setMissing(false)
+    } catch (requestError: unknown) {
+      setRestoreError(requestError instanceof Error ? requestError.message : 'Não foi possível voltar.')
+    } finally {
+      setRestoring(false)
+    }
+  }
 
   useEffect(() => {
     let active = true
@@ -453,7 +595,9 @@ function ItemDetail({ dataset, from, to, sha1, profile }: { dataset: string; fro
   const fromLabel = from > 0 ? `v${from}` : 'antes'
   return (
     <div className="diff-detail">
-      <img alt="" className="diff-detail__image" loading="lazy" src={imageFileUrl(item.sha1)} />
+      {missing
+        ? <div className="diff-detail__image diff-detail__image--missing">Apagada (na lixeira)</div>
+        : <img alt="" className="diff-detail__image" key={restored} loading="lazy" onError={() => setMissing(true)} src={imageFileUrl(item.sha1)} />}
       <div className="diff-detail__body">
         {changes.length > 0 && (
           <table className="diff-table">
@@ -489,9 +633,20 @@ function ItemDetail({ dataset, from, to, sha1, profile }: { dataset: string; fro
           </ul>
         )}
         {changes.length === 0 && item.tasks.length === 0 && <p className="versions-hint">Sem diferença na anotação.</p>}
-        <Link className="diff-detail__link" to={`/pacotes/${encodeURIComponent(item.package)}/verificadas?sha1=${item.sha1}`}>
-          Ver a imagem como está hoje →
-        </Link>
+        <div className="diff-detail__actions">
+          {canRestore && !restored && (
+            <button className="button button--secondary button--sm" disabled={restoring} onClick={() => void restore()} type="button">
+              {restoring ? 'Voltando...' : `↺ Voltar para a v${target}`}
+            </button>
+          )}
+          {!missing && (
+            <Link className="diff-detail__link" to={`/pacotes/${encodeURIComponent(item.package)}/verificadas?sha1=${item.sha1}`}>
+              Ver a imagem como está hoje →
+            </Link>
+          )}
+        </div>
+        {restored && <p className="diff-detail__restored" role="status">{restored}</p>}
+        {restoreError && <p className="form-error">{restoreError}</p>}
       </div>
     </div>
   )

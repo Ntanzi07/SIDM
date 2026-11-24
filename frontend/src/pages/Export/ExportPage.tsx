@@ -149,7 +149,7 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
 }
 
 export function ExportPage() {
-  const admin = useIsAdmin() // apagar é só de admin
+  const admin = useIsAdmin() // salvar e apagar perfis: só admin
   const [profiles, setProfiles] = useState<ExportProfile[]>([])
   const [packageProfiles, setPackageProfiles] = useState<Record<string, string>>({}) // pacote -> perfil de anotação
   const [tasks, setTasks] = useState<AnnotationTask[]>([])
@@ -648,9 +648,11 @@ export function ExportPage() {
               {admin && selected && !isBuiltin && (
                 <button className="button button--danger" disabled={busy !== ''} onClick={() => void remove()} type="button">Apagar perfil</button>
               )}
-              <button className="button button--secondary" disabled={busy !== '' || !canSave} onClick={() => void save()} type="button">
-                {busy === 'save' ? 'Salvando...' : selected && !isBuiltin && selected === draft.name.trim() ? 'Salvar alterações' : 'Salvar como novo perfil'}
-              </button>
+              {admin && (
+                <button className="button button--secondary" disabled={busy !== '' || !canSave} onClick={() => void save()} type="button">
+                  {busy === 'save' ? 'Salvando...' : selected && !isBuiltin && selected === draft.name.trim() ? 'Salvar alterações' : 'Salvar como novo perfil'}
+                </button>
+              )}
             </div>
           </div>
 

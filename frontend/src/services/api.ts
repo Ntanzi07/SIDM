@@ -1152,6 +1152,28 @@ export async function getItemDiff(dataset: string, from: number, to: number, sha
   return request<ItemDiff>(`/datasets/${encodeURIComponent(dataset)}/diff/${sha1}?${diffParams(from, to)}`)
 }
 
+// A volta: a imagem volta para como estava na versão (campos e caixas). Se
+// foi apagada, sai da lixeira.
+export type RestoreResult = { sha1: string; version: number; from_trash: boolean; package: string; file_name: string }
+
+export async function restoreItem(dataset: string, version: number, sha1: string): Promise<RestoreResult> {
+  return request<RestoreResult>(`/datasets/${encodeURIComponent(dataset)}/versions/${version}/items/${sha1}/restore`, { method: 'POST' })
+}
+
+// Voltar tudo (admin): as alteradas e as que saíram desde a versão voltam
+// para ela; as que entraram depois ficam.
+export type RestoreReport = {
+  version: number
+  restored: number
+  from_trash: number
+  added: number
+  failed: { sha1: string; name: string; error: string }[]
+}
+
+export async function restoreAll(dataset: string, version: number): Promise<RestoreReport> {
+  return request<RestoreReport>(`/datasets/${encodeURIComponent(dataset)}/versions/${version}/restore`, { method: 'POST' })
+}
+
 // ---------- login ----------
 
 export async function getMe(): Promise<Account | null> {
@@ -1163,13 +1185,14 @@ export async function getMe(): Promise<Account | null> {
   }
 }
 
-export async function login(username: string, password: string): Promise<Account> {
-  const account = await request<Account>('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) })
+// login: o e-mail (ou o nome de usuário).
+export async function login(loginName: string, password: string): Promise<Account> {
+  const account = await request<Account>('/auth/login', { method: 'POST', body: JSON.stringify({ login: loginName, password }) })
   setAccount(account)
   return account
 }
 
-export async function register(input: { username: string; name: string; password: string }): Promise<Account> {
+export async function register(input: { email: string; name: string; password: string }): Promise<Account> {
   return request<Account>('/auth/register', { method: 'POST', body: JSON.stringify(input) })
 }
 

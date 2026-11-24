@@ -37,10 +37,12 @@ const SessionTTL = 8 * time.Hour
 // CookieName: o cookie da sessão.
 const CookieName = "sidm_session"
 
-// User é um documento da coleção users. O _id é o nome de login (o mesmo
-// que aparece no histórico das imagens).
+// User é um documento da coleção users. Entra-se pelo e-mail; o _id é o
+// nome de usuário (o que aparece no histórico das imagens), tirado do
+// e-mail no cadastro (maria.silva@empresa.com → maria.silva).
 type User struct {
 	Username     string     `bson:"_id" json:"username"`
+	Email        string     `bson:"email,omitempty" json:"email,omitempty"` // único; o admin do .env pode não ter
 	Name         string     `bson:"name" json:"name"`
 	PasswordHash string     `bson:"password_hash" json:"-"`
 	Role         string     `bson:"role" json:"role"`
@@ -67,6 +69,7 @@ type Session struct {
 type Repo interface {
 	CreateUser(ctx context.Context, u *User) error // platform.ErrDuplicate
 	FindUser(ctx context.Context, username string) (*User, error)
+	FindUserByEmail(ctx context.Context, email string) (*User, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	ReplaceUser(ctx context.Context, u *User) error
 	CountActiveAdmins(ctx context.Context) (int64, error)

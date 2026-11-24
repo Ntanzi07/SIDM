@@ -38,6 +38,9 @@ type LoginError struct {
 
 func (e *LoginError) Error() string { return e.Msg }
 
+// ErrEmailTaken: já existe uma conta com o e-mail (409).
+var ErrEmailTaken = errors.New("este e-mail já tem uma conta")
+
 // ConflictError: o pedido deixaria o sistema sem admin (409).
 type ConflictError struct{ Msg string }
 
@@ -55,6 +58,38 @@ func checkUsername(u string) error {
 	return nil
 }
 
+// cleanEmail: minúsculo e sem espaços nas pontas.
+func cleanEmail(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+var emailRe = regexp.MustCompile(`^[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}$`)
+
+func checkEmail(e string) error {
+	if len(e) > 254 || !emailRe.MatchString(e) {
+		return &InvalidError{"e-mail inválido (ex.: maria.silva@empresa.com.br)"}
+	}
+	return nil
+}
+
+// usernameFrom: o nome de usuário a partir do e-mail (a parte antes do @,
+// só com os caracteres que valem). Vazio se não sobra o bastante.
+func usernameFrom(email string) string {
+	local, _, _ := strings.Cut(email, "@")
+	var b strings.Builder
+	for _, r := range local {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.', r == '-', r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('.')
+		}
+	}
+	u := strings.Trim(b.String(), "._-")
+	if len(u) > 28 {
+		u = strings.TrimRight(u[:28], "._-")
+	}
+	return u
+}
+
 func checkNewPassword(p string) error {
 	if utf8.RuneCountInString(p) < MinPassword {
 		return &InvalidError{fmt.Sprintf("a senha precisa ter pelo menos %d caracteres", MinPassword)}
@@ -65,24 +100,52 @@ func checkNewPassword(p string) error {
 	return nil
 }
 
-// RegisterInput é o corpo do cadastro.
+// RegisterInput é o corpo do cadastro. Sem username, ele sai do e-mail.
 type RegisterInput struct {
-	Username string `json:"username"`
+	Email    string `json:"email"`
+	Username string `json:"username,omitempty"`
 	Name     string `json:"name"`
 	Password string `json:"password"`
 }
 
-// Register cria uma conta PENDENTE (um admin aprova). platform.ErrDuplicate
-// se o nome já existe.
+// Register cria uma conta PENDENTE (um admin aprova). ErrEmailTaken se o
+// e-mail já tem conta. O nome de usuário vem do e-mail; se já existe, ganha
+// um número (maria.silva-2).
 func (s *Service) Register(ctx context.Context, in RegisterInput) (*User, error) {
-	u, err := s.newUser(in, RoleUser, StatusPending)
-	if err != nil {
+	in.Email = cleanEmail(in.Email)
+	if err := checkEmail(in.Email); err != nil {
 		return nil, err
 	}
-	if err := s.repo.CreateUser(ctx, u); err != nil {
+	if _, err := s.repo.FindUserByEmail(ctx, in.Email); err == nil {
+		return nil, ErrEmailTaken
+	} else if !errors.Is(err, platform.ErrNotFound) {
 		return nil, err
 	}
-	return u, nil
+	base := cleanUsername(in.Username)
+	if base == "" {
+		base = usernameFrom(in.Email)
+	}
+	if len(base) < 2 {
+		base = "usuario"
+	}
+	for i := 1; ; i++ {
+		in.Username = base
+		if i > 1 {
+			in.Username = fmt.Sprintf("%s-%d", base, i)
+		}
+		u, err := s.newUser(in, RoleUser, StatusPending)
+		if err != nil {
+			return nil, err
+		}
+		err = s.repo.CreateUser(ctx, u)
+		if errors.Is(err, platform.ErrDuplicate) && i < 50 {
+			continue // o nome já é de outra pessoa: tenta o próximo
+		}
+		if err != nil {
+			return nil, err
+		}
+		return u, nil
+	}
 }
 
 func (s *Service) newUser(in RegisterInput, role, status string) (*User, error) {
@@ -90,6 +153,12 @@ func (s *Service) newUser(in RegisterInput, role, status string) (*User, error) 
 	username := cleanUsername(in.Username)
 	if err := checkUsername(username); err != nil {
 		return nil, err
+	}
+	email := cleanEmail(in.Email)
+	if email != "" {
+		if err := checkEmail(email); err != nil {
+			return nil, err
+		}
 	}
 	if name == "" {
 		return nil, &InvalidError{"informe o seu nome"}
@@ -104,22 +173,28 @@ func (s *Service) newUser(in RegisterInput, role, status string) (*User, error) 
 	if err != nil {
 		return nil, err
 	}
-	return &User{Username: username, Name: name, PasswordHash: hash, Role: role, Status: status, CreatedAt: s.now()}, nil
+	return &User{Username: username, Email: email, Name: name, PasswordHash: hash, Role: role, Status: status, CreatedAt: s.now()}, nil
 }
 
 // EnsureAdmin: na subida, se não existe nenhum admin ativo, cria (ou
 // promove e ativa) a conta dada. Com um admin já ativo, não faz nada (a
-// senha do .env não sobrescreve a que ele trocou). Devolve se mexeu.
-func (s *Service) EnsureAdmin(ctx context.Context, username, password string) (bool, error) {
+// senha do .env não sobrescreve a que ele trocou). email pode ser vazio
+// (aí ele entra pelo nome de usuário). Devolve se mexeu.
+func (s *Service) EnsureAdmin(ctx context.Context, username, email, password string) (bool, error) {
 	n, err := s.repo.CountActiveAdmins(ctx)
-	if err != nil || n > 0 {
+	if err != nil {
 		return false, err
+	}
+	if n > 0 {
+		// o admin criado antes do login por e-mail: ganha o e-mail do .env
+		// (só se não tem nenhum; a senha não muda)
+		return s.fillEmail(ctx, cleanUsername(username), cleanEmail(email))
 	}
 	username = cleanUsername(username)
 	existing, err := s.repo.FindUser(ctx, username)
 	switch {
 	case errors.Is(err, platform.ErrNotFound):
-		u, err := s.newUser(RegisterInput{Username: username, Name: username, Password: password}, RoleAdmin, StatusActive)
+		u, err := s.newUser(RegisterInput{Username: username, Email: email, Name: username, Password: password}, RoleAdmin, StatusActive)
 		if err != nil {
 			return false, err
 		}
@@ -138,23 +213,56 @@ func (s *Service) EnsureAdmin(ctx context.Context, username, password string) (b
 	}
 	now := s.now()
 	existing.Role, existing.Status, existing.PasswordHash = RoleAdmin, StatusActive, hash
+	if email = cleanEmail(email); email != "" {
+		if err := checkEmail(email); err != nil {
+			return false, err
+		}
+		existing.Email = email
+	}
 	existing.ApprovedBy, existing.ApprovedAt = "sistema", &now
 	return true, s.repo.ReplaceUser(ctx, existing)
 }
 
-// Login confere a senha e abre uma sessão. Devolve o token (vai no cookie).
-func (s *Service) Login(ctx context.Context, username, password string) (string, *User, error) {
-	username = cleanUsername(username)
+func (s *Service) fillEmail(ctx context.Context, username, email string) (bool, error) {
+	if email == "" {
+		return false, nil
+	}
 	u, err := s.repo.FindUser(ctx, username)
 	if errors.Is(err, platform.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil || u.Email != "" {
+		return false, err
+	}
+	if err := checkEmail(email); err != nil {
+		return false, err
+	}
+	if _, err := s.repo.FindUserByEmail(ctx, email); err == nil {
+		return false, ErrEmailTaken
+	}
+	u.Email = email
+	return true, s.repo.ReplaceUser(ctx, u)
+}
+
+// Login confere a senha e abre uma sessão. login é o e-mail (com @) ou o
+// nome de usuário. Devolve o token (vai no cookie).
+func (s *Service) Login(ctx context.Context, login, password string) (string, *User, error) {
+	var u *User
+	var err error
+	if login = strings.TrimSpace(login); strings.Contains(login, "@") {
+		u, err = s.repo.FindUserByEmail(ctx, cleanEmail(login))
+	} else {
+		u, err = s.repo.FindUser(ctx, cleanUsername(login))
+	}
+	if errors.Is(err, platform.ErrNotFound) {
 		checkPassword(dummyHash(), password) // o mesmo tempo de uma conta que existe
-		return "", nil, &LoginError{Msg: "usuário ou senha incorretos"}
+		return "", nil, &LoginError{Msg: "e-mail ou senha incorretos"}
 	}
 	if err != nil {
 		return "", nil, err
 	}
 	if !checkPassword(u.PasswordHash, password) {
-		return "", nil, &LoginError{Msg: "usuário ou senha incorretos"}
+		return "", nil, &LoginError{Msg: "e-mail ou senha incorretos"}
 	}
 	switch u.Status {
 	case StatusPending:

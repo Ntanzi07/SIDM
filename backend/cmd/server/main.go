@@ -120,7 +120,8 @@ func main() {
 	exp.UseVersions(ver) // baixar uma versão de um dataset
 
 	// O login: contas e sessões. O primeiro admin vem do .env
-	// (SIDM_ADMIN_USER e SIDM_ADMIN_PASSWORD), só se ainda não há nenhum.
+	// (SIDM_ADMIN_USER, SIDM_ADMIN_EMAIL e SIDM_ADMIN_PASSWORD), só se ainda
+	// não há nenhum.
 	usrRepo := users.NewMongoRepo(db)
 	if err := usrRepo.EnsureIndexes(ctx); err != nil {
 		log.Fatalf("falha ao preparar os usuários no Mongo: %v", err)
@@ -140,16 +141,17 @@ func main() {
 // senha nunca vai para o log.
 func ensureAdmin(ctx context.Context, usr *users.Service) {
 	user, pass := os.Getenv("SIDM_ADMIN_USER"), os.Getenv("SIDM_ADMIN_PASSWORD")
+	email := os.Getenv("SIDM_ADMIN_EMAIL") // opcional: sem ele, o admin entra pelo nome de usuário
 	if user == "" || pass == "" {
 		log.Printf("SIDM_ADMIN_USER/SIDM_ADMIN_PASSWORD não definidos: sem eles, se não há admin, ninguém aprova cadastros")
 		return
 	}
-	created, err := usr.EnsureAdmin(ctx, user, pass)
+	created, err := usr.EnsureAdmin(ctx, user, email, pass)
 	if err != nil {
 		log.Fatalf("falha ao criar o admin %q: %v", user, err)
 	}
 	if created {
-		log.Printf("admin %q pronto (troque a senha no primeiro acesso)", user)
+		log.Printf("admin %q pronto (troque a senha no primeiro acesso, se acabou de ser criado)", user)
 	}
 }
 

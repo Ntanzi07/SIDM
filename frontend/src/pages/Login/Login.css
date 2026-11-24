@@ -1,82 +1,213 @@
-/* O login: um cartão no meio da tela, sem o menu. */
+/* O login: a marca à esquerda sobre um gradiente com as cores do tema; à
+   direita, a altura toda, um painel de vidro embaçado com o formulário. As
+   luzes (orbs) passam por trás do vidro: é o borrão delas que dá o efeito. */
 .login-page {
+  position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 40%);
   min-height: 100vh;
-  padding: 24px;
-  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 90% at 0% 100%, var(--accent-soft), transparent 60%),
+    linear-gradient(135deg, var(--bg) 0%, var(--surface-2) 100%);
+  isolation: isolate;
 }
 
-.login-card {
+/* ── as luzes do fundo ── */
+.login-page__glow {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
+.login-page__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(70px);
+  opacity: 0.75;
+  animation: orb-drift 18s var(--ease) infinite alternate;
+}
+
+.login-page__orb--1 {
+  top: -12%;
+  left: 38%;
+  width: 46vw;
+  height: 46vw;
+  background: radial-gradient(circle, var(--accent) 0%, transparent 65%);
+}
+
+.login-page__orb--2 {
+  right: -14%;
+  bottom: -20%;
+  width: 52vw;
+  height: 52vw;
+  background: radial-gradient(circle, var(--accent-strong) 0%, transparent 62%);
+  animation-duration: 24s;
+  animation-direction: alternate-reverse;
+}
+
+.login-page__orb--3 {
+  bottom: 8%;
+  left: -10%;
+  width: 34vw;
+  height: 34vw;
+  background: radial-gradient(circle, var(--warning) 0%, transparent 60%);
+  opacity: 0.4;
+  animation-duration: 28s;
+}
+
+[data-theme='light'] .login-page__orb {
+  opacity: 0.45;
+}
+
+[data-theme='light'] .login-page__orb--3 {
+  opacity: 0.3;
+}
+
+@keyframes orb-drift {
+  to {
+    transform: translate3d(-6vw, 5vh, 0) scale(1.08);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-page__orb {
+    animation: none;
+  }
+}
+
+/* ── esquerda: a marca ── */
+.login-hero {
   display: grid;
-  gap: 14px;
-  width: min(380px, 100%);
-  padding: 32px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  background: var(--surface);
-  animation: rise 520ms var(--ease) both;
+  align-content: center;
+  gap: 18px;
+  padding: clamp(32px, 7vw, 96px);
 }
 
-.login-card__brand {
+.login-hero__brand {
   color: var(--text);
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: clamp(48px, 5vw, 76px);
   font-weight: 900;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.05em;
+  line-height: 0.85;
+  animation: rise 700ms var(--ease) both;
 }
 
-.login-card h1 {
-  margin: 6px 0 0;
-  font-size: 28px;
-}
-
-.login-card__hint {
-  margin: -6px 0 6px;
+.login-hero__line {
+  max-width: 420px;
+  margin: 0;
   color: var(--text-2);
-  font-size: 13.5px;
+  font-size: clamp(15px, 1.3vw, 18px);
+  font-weight: 300;
+  line-height: 1.4;
+  animation: rise 700ms var(--ease) 80ms both;
 }
 
-.login-card label {
+.login-hero__foot {
+  margin-top: 24px;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  animation: rise 700ms var(--ease) 160ms both;
+}
+
+/* ── direita: o vidro ── */
+.login-glass {
+  display: grid;
+  min-height: 100vh;
+  padding: 48px clamp(24px, 4vw, 64px);
+  place-items: center;
+  border-left: 1px solid var(--border-strong);
+  background: color-mix(in srgb, var(--surface) 42%, transparent);
+  backdrop-filter: blur(28px) saturate(150%);
+  -webkit-backdrop-filter: blur(28px) saturate(150%);
+  box-shadow: inset 1px 0 0 color-mix(in srgb, var(--text) 6%, transparent);
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+  width: min(360px, 100%);
+  animation: rise 600ms var(--ease) 120ms both;
+}
+
+.login-form__head {
   display: grid;
   gap: 6px;
+  margin-bottom: 8px;
 }
 
-.login-card label > span {
+.login-form h1 {
+  margin: 0;
+  font-size: 34px;
+}
+
+.login-form__head p {
+  margin: 0;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.login-form label {
+  display: grid;
+  gap: 7px;
+}
+
+.login-form label > span {
   color: var(--text);
   font-size: 12.5px;
   font-weight: 600;
 }
 
-.login-card label small {
+.login-form label small {
   color: var(--text-3);
   font-size: 11.5px;
 }
 
-.login-card .form-error {
+.login-form input {
+  min-height: 46px;
+  padding: 0 14px;
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  font-size: 14px;
+}
+
+.login-form input:focus {
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+}
+
+.login-form .form-error {
   margin: 0;
 }
 
-.login-card__submit {
+.login-form__submit {
   width: 100%;
-  margin-top: 4px;
+  min-height: 46px;
+  margin-top: 6px;
 }
 
-.login-card__sent {
+.login-form__sent {
   margin: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--accent);
+  padding: 11px 13px;
+  border: 1px solid var(--accent-border);
   border-radius: var(--radius-sm);
+  background: var(--accent-soft);
   font-size: 13px;
+  line-height: 1.45;
 }
 
-.login-card__switch {
-  margin: 0;
+.login-form__switch {
+  margin: 4px 0 0;
   color: var(--text-2);
   font-size: 13px;
   text-align: center;
 }
 
-.login-card__link {
+.login-form__link {
   padding: 0;
   border: 0;
   background: transparent;
@@ -86,12 +217,32 @@
   font-weight: 600;
 }
 
-.login-card__link:hover {
+.login-form__link:hover {
   text-decoration: underline;
 }
 
-.login-card input {
-  min-height: 42px;
-  padding: 0 12px;
-  font-size: 14px;
+/* tela estreita: a marca em cima, o vidro embaixo */
+@media (max-width: 860px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+
+  .login-hero {
+    gap: 10px;
+    padding: 40px 28px 24px;
+  }
+
+  .login-hero__brand {
+    font-size: 44px;
+  }
+
+  .login-hero__foot {
+    display: none;
+  }
+
+  .login-glass {
+    min-height: auto;
+    border-top: 1px solid var(--border-strong);
+    border-left: 0;
+  }
 }

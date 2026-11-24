@@ -5,7 +5,8 @@ import { useSyncExternalStore } from 'react'
 // undefined = ainda perguntando; null = ninguém logado.
 
 export type Account = {
-  username: string
+  username: string // o nome no histórico das imagens (sai do e-mail no cadastro)
+  email?: string
   name: string
   role: 'admin' | 'user'
   status: 'pending' | 'active' | 'disabled'
@@ -49,4 +50,24 @@ export function useAccount(): Account | null | undefined {
 // Só admin (apagar, Configurar, contas): para esconder o que não pode.
 export function useIsAdmin(): boolean {
   return useAccount()?.role === 'admin'
+}
+
+// Quantas contas esperam aprovação (o selo do admin no menu). Quem muda a
+// lista (a tela de Usuários) avisa por aqui, e o selo acompanha na hora.
+let pending = 0
+const pendingListeners = new Set<() => void>()
+
+export function setPendingCount(count: number): void {
+  if (count === pending) return
+  pending = count
+  pendingListeners.forEach((listener) => listener())
+}
+
+function subscribePending(listener: () => void): () => void {
+  pendingListeners.add(listener)
+  return () => { pendingListeners.delete(listener) }
+}
+
+export function usePendingCount(): number {
+  return useSyncExternalStore(subscribePending, () => pending)
 }

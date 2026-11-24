@@ -10,9 +10,9 @@ Se um pedido conflitar com uma destas regras, **pare e pergunte** em vez de segu
 - **PGP não é usado** no projeto. Não sugira nem adicione.
 - **Login (módulo `users`):** sessão de 8 horas num cookie HttpOnly; no banco só o hash do
   token e a senha em PBKDF2-SHA256. O `users.Protect` descarta o `X-User` do navegador e
-  escreve o da sessão (o resto lê `platform.UserFrom`). **Só admin:** todo `DELETE`, gravar
-  perfis de anotação e de import (Configurar) e `/users`. Regra nova de permissão vai em
-  `adminOnly` (users/http.go), com teste. Nunca logue senha nem token.
+  escreve o da sessão (o resto lê `platform.UserFrom`). O usuário normal só grava o que está em
+  `userWrites` (users/http.go): rota nova que grava nasce só de admin. Mudou a regra? Mude
+  a lista e o `TestRegras`. Nunca logue senha nem token.
 - **Erro interno não vaza:** o cliente recebe "erro interno" (`platform.ServerError`) e o
   detalhe vai para o log.
 - **Menor privilégio:** o backend usa o usuário `sidm_app` (só `readWrite` no banco

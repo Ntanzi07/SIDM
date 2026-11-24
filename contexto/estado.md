@@ -63,6 +63,7 @@ Atualizado em 2026-11-23. Branch de trabalho: `fix/config-ini`.
 - Recortes das letras da placa (anotar no recorte; decidir se o modelo treina na imagem inteira).
 - Mover os testes de cada módulo de `internal/api/` para o próprio módulo.
 - Swagger UI embutido (hoje vem de CDN); graceful shutdown.
+- Lixeira: não tem limpeza (cresce para sempre) nem tela própria; hoje uma imagem só sai dela pela volta de uma versão.
 - O serviço `backend` do `docker-compose.yml` precisa ser reconstruído para ter o código novo.
 - Data do import: falta a prévia (endpoint que lê a data em imagens de exemplo, ✔/✘ no
   editor) e um aviso na anotação quando a data não deu para ler.

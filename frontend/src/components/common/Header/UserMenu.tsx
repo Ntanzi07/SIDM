@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { NavLink, useLocation } from 'react-router-dom'
 import { changePassword, listAccounts, logout } from '../../../services/api'
-import { useAccount } from '../../../services/user'
+import { setPendingCount, useAccount, usePendingCount } from '../../../services/user'
 
 // A conta logada, à direita do menu: o nome, e ao clicar trocar a senha,
 // as contas (admin, com quantas esperam aprovação) e sair.
@@ -12,7 +12,7 @@ export function UserMenu() {
   const { pathname } = useLocation()
   const [open, setOpen] = useState(false)
   const [changing, setChanging] = useState(false)
-  const [pending, setPending] = useState(0)
+  const pending = usePendingCount()
   const ref = useRef<HTMLDivElement>(null)
   const admin = account?.role === 'admin'
 
@@ -21,7 +21,7 @@ export function UserMenu() {
     if (!admin) return
     let alive = true
     listAccounts()
-      .then((list) => { if (alive) setPending(list.filter((item) => item.status === 'pending').length) })
+      .then((list) => { if (alive) setPendingCount(list.filter((item) => item.status === 'pending').length) })
       .catch(() => { /* sem o número, sem o selo */ })
     return () => { alive = false }
   }, [admin, pathname])

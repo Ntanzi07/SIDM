@@ -37,25 +37,62 @@ func public(method, path string) bool {
 	return false
 }
 
-// adminOnly: o que o usuário normal não pode. Apagar qualquer coisa; o
-// Configurar (perfis de anotação e de import); as contas.
-func adminOnly(method, path string) bool {
-	if method == http.MethodDelete {
+// userWrites: o que o usuário normal pode GRAVAR (no formato das rotas do
+// Go). Ler (GET) ele pode tudo, menos as contas. Ele anota, importa (cria
+// pacote, sobe imagens, importa CSV e caixas), apaga imagens, baixa o export
+// e cria datasets e versões. O resto (tarefas e labels, perfis, renomear e
+// apagar pacotes, apagar datasets e versões, contas) é só de admin.
+var userWrites = []string{
+	// anotar
+	"POST /packages/{name}/next",
+	"PUT /images/{sha1}",
+	"PUT /images/{sha1}/boxes/{task}",
+	"POST /images/{sha1}/release",
+	"POST /images/{sha1}/reopen",
+	"POST /equipments",         // cadastrar na anotação
+	"PATCH /equipments/{name}", // reativar na anotação
+	"POST /cameras",
+	"PATCH /cameras/{name}",
+	"POST /annotation-profiles/{name}/check", // só confere, não grava
+	// importar
+	"POST /packages",
+	"POST /images",
+	"POST /images/exists",
+	"POST /packages/{name}/import",
+	"POST /imports/inspect",
+	"POST /tasks/{name}/import",
+	"DELETE /images/{sha1}",
+	// export e versões
+	"POST /exports/preview",
+	"POST /exports/download",
+	"POST /datasets",
+	"POST /datasets/{name}/versions",
+	"POST /datasets/{name}/versions/{number}/items/{sha1}/restore", // a volta
+	// a própria conta
+	"PUT /auth/password",
+}
+
+// userMux casa um pedido com userWrites do mesmo jeito que o servidor casa
+// as rotas (um pacote chamado "images" não confunde nada).
+var userMux = func() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, pattern := range userWrites {
+		mux.HandleFunc(pattern, func(http.ResponseWriter, *http.Request) {})
+	}
+	return mux
+}()
+
+// adminOnly: o que o usuário normal não pode. Toda gravação que não está em
+// userWrites, e as contas.
+func adminOnly(r *http.Request) bool {
+	if r.URL.Path == "/users" || strings.HasPrefix(r.URL.Path, "/users/") {
 		return true
 	}
-	if path == "/users" || strings.HasPrefix(path, "/users/") {
-		return true
-	}
-	if method == http.MethodGet || method == http.MethodHead {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
 		return false
 	}
-	for _, prefix := range []string{"/annotation-profiles", "/import-profiles"} {
-		if path == prefix || strings.HasPrefix(path, prefix+"/") {
-			// conferir um perfil (/annotation-profiles/{nome}/check) não grava
-			return !strings.HasSuffix(path, "/check")
-		}
-	}
-	return false
+	_, pattern := userMux.Handler(r)
+	return pattern == ""
 }
 
 type ctxKey struct{}
@@ -90,7 +127,7 @@ func (s *Service) Protect(next http.Handler) http.Handler {
 		case u == nil:
 			platform.WriteError(w, http.StatusUnauthorized, "faça login para continuar")
 			return
-		case adminOnly(r.Method, r.URL.Path) && !u.IsAdmin():
+		case adminOnly(r) && !u.IsAdmin():
 			platform.WriteError(w, http.StatusForbidden, "só um admin pode fazer isso")
 			return
 		}
@@ -117,6 +154,8 @@ func writeErr(w http.ResponseWriter, err error) {
 		platform.WriteError(w, http.StatusConflict, conflict.Msg)
 	case errors.Is(err, platform.ErrNotFound):
 		platform.WriteError(w, http.StatusNotFound, "usuário não encontrado")
+	case errors.Is(err, ErrEmailTaken):
+		platform.WriteError(w, http.StatusConflict, "este e-mail já tem uma conta: entre com ele (ou peça uma senha nova a um admin)")
 	case errors.Is(err, platform.ErrDuplicate):
 		platform.WriteError(w, http.StatusConflict, "este usuário já existe: escolha outro")
 	default:
@@ -147,27 +186,35 @@ func (s *Service) handleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Service) handleLogin(w http.ResponseWriter, r *http.Request) {
+	// login: o e-mail ou o nome de usuário ("username", o nome antigo do campo, ainda vale)
 	var in struct {
+		Login    string `json:"login"`
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if !s.limiter.allow(cleanUsername(in.Username)) {
+	if in.Login == "" {
+		in.Login = in.Username
+	}
+	key := strings.ToLower(strings.TrimSpace(in.Login))
+	if !s.limiter.allow(key) {
 		platform.WriteError(w, http.StatusTooManyRequests, "muitas tentativas erradas: espere alguns minutos")
 		return
 	}
-	token, u, err := s.Login(r.Context(), in.Username, in.Password)
+	token, u, err := s.Login(r.Context(), in.Login, in.Password)
 	var login *LoginError
 	if errors.As(err, &login) && !login.Forbidden {
-		s.limiter.fail(cleanUsername(in.Username))
+		s.limiter.fail(key)
 	}
 	if err != nil {
 		writeErr(w, err)
 		return
 	}
-	s.limiter.reset(u.Username)
+	s.limiter.reset(key)
+	s.limiter.reset(u.Username) // entrou: zera também o outro jeito de escrever a conta
+	s.limiter.reset(u.Email)
 	http.SetCookie(w, sessionCookie(r, token, int(SessionTTL.Seconds())))
 	platform.WriteJSON(w, http.StatusOK, u)
 }

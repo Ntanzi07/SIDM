@@ -61,6 +61,7 @@ const SORTS: MenuOption[] = [
 const time = (iso?: string) => (iso ? new Date(iso).getTime() || 0 : 0)
 
 function TaskGrid() {
+  const admin = useIsAdmin() // criar tarefa: só admin
   const [tasks, setTasks] = useState<AnnotationTask[] | null>(null)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
@@ -109,7 +110,7 @@ function TaskGrid() {
           <h1>Tarefas</h1>
           <p>Cada tarefa tem as suas labels e as suas caixas (ex.: capacete, letras da placa). A mesma imagem pode estar em várias.</p>
         </div>
-        <button className="button button--primary" onClick={() => setCreating(true)} type="button">+ Nova tarefa</button>
+        {admin && <button className="button button--primary" onClick={() => setCreating(true)} type="button">+ Nova tarefa</button>}
       </div>
       {error && <p className="form-error">{error}</p>}
       {tasks === null && <p className="tasks-hint">Carregando...</p>}
@@ -528,6 +529,7 @@ function TaskDetail({ name }: { name: string }) {
 
 // O nome e a descrição, com o lápis para editar no lugar.
 function TaskTitle({ task, onSave }: { task: AnnotationTask; onSave: (changes: { name: string; description: string }) => Promise<void> }) {
+  const admin = useIsAdmin() // nome e descrição: só admin
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState(task.name)
   const [description, setDescription] = useState(task.description)
@@ -562,9 +564,11 @@ function TaskTitle({ task, onSave }: { task: AnnotationTask; onSave: (changes: {
         <span className="eyebrow">Tarefa</span>
         <div className="task-title__row">
           <h1>{task.name}</h1>
-          <button aria-label="Editar o nome e a descrição" className="task-title__edit" onClick={start} title="Editar o nome e a descrição" type="button">
-            <svg aria-hidden="true" height="16" viewBox="0 0 24 24" width="16"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" /></svg>
-          </button>
+          {admin && (
+            <button aria-label="Editar o nome e a descrição" className="task-title__edit" onClick={start} title="Editar o nome e a descrição" type="button">
+              <svg aria-hidden="true" height="16" viewBox="0 0 24 24" width="16"><path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4Z" fill="none" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.8" /></svg>
+            </button>
+          )}
         </div>
         <p>{task.description || <span className="tasks-hint">Sem descrição</span>}</p>
       </div>
@@ -590,6 +594,7 @@ function TaskTitle({ task, onSave }: { task: AnnotationTask; onSave: (changes: {
 // As labels: a cor de cada uma (clicar na bolinha), quantas caixas tem,
 // tirar e acrescentar. Mudanças ficam num rascunho até salvar.
 function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: { labels: string[]; colors: Record<string, string> }) => Promise<void> }) {
+  const admin = useIsAdmin() // mudar labels e cores: só admin (o usuário vê)
   const [labels, setLabels] = useState(task.labels)
   const [colors, setColors] = useState<Record<string, string>>(task.colors ?? {})
   const [adding, setAdding] = useState('')
@@ -630,7 +635,7 @@ function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: 
     <section className="side-section task-labels">
       <div className="side-section__head">
         <h2>Labels</h2>
-        <span>{fmt(labels.length)} · clique na cor para trocar</span>
+        <span>{fmt(labels.length)}{admin ? ' · clique na cor para trocar' : ''}</span>
       </div>
       {labels.length === 0 && <p className="side-section__hint">Nenhuma label. Acrescente abaixo, ou elas entram sozinhas no import.</p>}
       <ul className="label-rows">
@@ -640,13 +645,17 @@ function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: 
           const boxes = counts[label] ?? 0
           return (
             <li className="label-row" key={label}>
-              <label className="label-swatch" style={{ background: color }} title="Trocar a cor">
-                <input onChange={(event) => setColors({ ...colors, [label]: event.target.value })} type="color" value={toHex(color)} />
-              </label>
+              {admin ? (
+                <label className="label-swatch" style={{ background: color }} title="Trocar a cor">
+                  <input onChange={(event) => setColors({ ...colors, [label]: event.target.value })} type="color" value={toHex(color)} />
+                </label>
+              ) : (
+                <span className="label-swatch label-swatch--static" style={{ background: color }} />
+              )}
               <span className="label-row__name">{label}</span>
               <span className="label-row__bar"><span style={{ width: pct(boxes, totalBoxes), background: color }} /></span>
               <span className="label-row__count">{fmt(boxes)} <small>{pct(boxes, totalBoxes)}</small></span>
-              <span className="label-row__tools">
+              {admin && <span className="label-row__tools">
                 {custom && (
                   <button
                     onClick={() => { const next = { ...colors }; delete next[label]; setColors(next) }}
@@ -664,7 +673,7 @@ function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: 
                 >
                   ✕
                 </button>
-              </span>
+              </span>}
             </li>
           )
         })}
@@ -674,12 +683,12 @@ function LabelsCard({ task, onSave }: { task: AnnotationTask; onSave: (changes: 
           Têm caixas mas não estão na lista: {orphans.join(', ')}. As caixas continuam; no export, escolha se entram.
         </p>
       )}
-      <form className="label-add" onSubmit={add}>
+      {admin && <form className="label-add" onSubmit={add}>
         <input onChange={(event) => setAdding(event.target.value)} placeholder="Nova label (ou várias, separadas por vírgula)" value={adding} />
         <button className="button button--secondary button--sm" disabled={!adding.trim()} type="submit">Acrescentar</button>
-      </form>
+      </form>}
       {error && <p className="form-error">{error}</p>}
-      {dirty && (
+      {admin && dirty && (
         <div className="label-save">
           <span>Alterações não salvas</span>
           <button className="button button--secondary button--sm" disabled={busy} onClick={() => { setLabels(task.labels); setColors(task.colors ?? {}) }} type="button">Desfazer</button>

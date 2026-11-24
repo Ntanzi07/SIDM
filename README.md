@@ -12,8 +12,9 @@ um **CSV** exportado de outro sistema, ou o **INI que o equipamento grava dentro
 do próprio JPEG**.
 
 > **Login:** cada pessoa tem uma conta (cadastro em `/login`, aprovado por um admin).
-> O primeiro admin vem do `.env` (`SIDM_ADMIN_USER` e `SIDM_ADMIN_PASSWORD`). Pela API,
-> entre com `POST /auth/login` e use o cookie `sidm_session`; o `X-User` mandado pelo
+> Entra-se pelo e-mail. O primeiro admin vem do `.env` (`SIDM_ADMIN_USER`,
+> `SIDM_ADMIN_EMAIL` e `SIDM_ADMIN_PASSWORD`). Pela API, entre com `POST /auth/login`
+> (`{"login": "<e-mail>", "password": "..."}`) e use o cookie `sidm_session`; o `X-User` mandado pelo
 > cliente é ignorado (o servidor usa o da sessão).
 > Rode apenas na rede interna.
 

@@ -18,7 +18,7 @@ const fmt = (n: number) => n.toLocaleString('pt-BR')
 // imports, e à direita as imagens em rolagem infinita.
 export function PackageDetailPage() {
   const navigate = useNavigate()
-  const admin = useIsAdmin() // apagar é só de admin
+  const admin = useIsAdmin() // apagar o pacote e trocar o perfil: só admin
   const { id } = useParams()
   const [selectedPackage, setSelectedPackage] = useState<PackageSummary | undefined>()
   const [upload, setUpload] = useState<UploadProgress | null>(null)
@@ -159,7 +159,7 @@ export function PackageDetailPage() {
           <h1>{selectedPackage.name}</h1>
           <p>
             criado por {selectedPackage.created_by} · perfil de anotação{' '}
-            {selectedPackage.verified === 0 && annotationProfiles.length > 1 ? (
+            {admin && selectedPackage.verified === 0 && annotationProfiles.length > 1 ? (
               <select
                 aria-label="Perfil de anotação"
                 className="detail-profile-select"

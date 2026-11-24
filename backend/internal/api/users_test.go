@@ -47,16 +47,16 @@ func (c *client) do(method, path, body string, headers ...string) *httptest.Resp
 
 func (c *client) login(user, pass string) *httptest.ResponseRecorder {
 	c.t.Helper()
-	return c.do("POST", "/auth/login", `{"username": "`+user+`", "password": "`+pass+`"}`)
+	return c.do("POST", "/auth/login", `{"login": "`+user+`", "password": "`+pass+`"}`)
 }
 
 func TestLoginEPermissoes(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
-	if created, err := env.usrSvc.EnsureAdmin(ctx, "admin", "senha-do-admin"); err != nil || !created {
+	if created, err := env.usrSvc.EnsureAdmin(ctx, "admin", "admin@empresa.com", "senha-do-admin"); err != nil || !created {
 		t.Fatalf("admin: %v %v", created, err)
 	}
-	if created, _ := env.usrSvc.EnsureAdmin(ctx, "outro", "outra-senha-1"); created {
+	if created, _ := env.usrSvc.EnsureAdmin(ctx, "outro", "", "outra-senha-1"); created {
 		t.Error("com um admin ativo, o .env não cria outro")
 	}
 	handler := env.usrSvc.Protect(env.srv.Routes())
@@ -71,11 +71,13 @@ func TestLoginEPermissoes(t *testing.T) {
 	assertStatus(t, anon.do("GET", "/auth/me", ""), http.StatusUnauthorized)
 
 	// cadastro: fica pendente
-	assertStatus(t, anon.do("POST", "/auth/register", `{"username": "Maria ", "name": "Maria Silva", "password": "senha-da-maria"}`), http.StatusCreated)
-	assertStatus(t, anon.do("POST", "/auth/register", `{"username": "maria", "name": "Outra", "password": "senha-da-maria"}`), http.StatusConflict)
-	assertStatus(t, anon.do("POST", "/auth/register", `{"username": "x", "name": "X", "password": "senha-longa"}`), http.StatusBadRequest)
-	assertStatus(t, anon.do("POST", "/auth/register", `{"username": "joao", "name": "João", "password": "curta"}`), http.StatusBadRequest)
-	if rec := maria.login("maria", "senha-da-maria"); rec.Code != http.StatusForbidden || !strings.Contains(errorMsg(t, rec), "aprovada") {
+	assertStatus(t, anon.do("POST", "/auth/register", `{"email": "Maria@Empresa.com ", "name": "Maria Silva", "password": "senha-da-maria"}`), http.StatusCreated)
+	if rec := anon.do("POST", "/auth/register", `{"email": "maria@empresa.com", "name": "Outra", "password": "senha-da-maria"}`); rec.Code != http.StatusConflict || !strings.Contains(errorMsg(t, rec), "e-mail") {
+		t.Errorf("e-mail repetido: %d %s", rec.Code, rec.Body.String())
+	}
+	assertStatus(t, anon.do("POST", "/auth/register", `{"email": "sem-arroba", "name": "X", "password": "senha-longa"}`), http.StatusBadRequest)
+	assertStatus(t, anon.do("POST", "/auth/register", `{"email": "joao@empresa.com", "name": "João", "password": "curta"}`), http.StatusBadRequest)
+	if rec := maria.login("maria@empresa.com", "senha-da-maria"); rec.Code != http.StatusForbidden || !strings.Contains(errorMsg(t, rec), "aprovada") {
 		t.Errorf("pendente entrando: %d %s", rec.Code, rec.Body.String())
 	}
 	if env.usr.Users["maria"].PasswordHash == "" || strings.Contains(env.usr.Users["maria"].PasswordHash, "senha-da-maria") {
@@ -84,7 +86,7 @@ func TestLoginEPermissoes(t *testing.T) {
 
 	// admin entra e aprova
 	assertStatus(t, admin.login("admin", "errada-errada"), http.StatusUnauthorized)
-	assertStatus(t, admin.login("ADMIN", "senha-do-admin"), http.StatusOK)
+	assertStatus(t, admin.login("Admin@Empresa.com", "senha-do-admin"), http.StatusOK)
 	if admin.cookie == nil || !admin.cookie.HttpOnly || admin.cookie.SameSite != http.SameSiteLaxMode {
 		t.Fatalf("cookie: %+v", admin.cookie)
 	}
@@ -104,10 +106,10 @@ func TestLoginEPermissoes(t *testing.T) {
 	}
 
 	// maria entra: é ela que fica no histórico, mesmo mandando outro X-User
-	assertStatus(t, maria.login("maria", "senha-da-maria"), http.StatusOK)
+	assertStatus(t, maria.login("maria@empresa.com", "senha-da-maria"), http.StatusOK)
 	rec = maria.do("GET", "/auth/me", "")
 	decode(t, rec, &u)
-	if u.Username != "maria" || u.Role != users.RoleUser {
+	if u.Username != "maria" || u.Email != "maria@empresa.com" || u.Role != users.RoleUser {
 		t.Errorf("me: %+v", u)
 	}
 	assertStatus(t, maria.do("POST", "/datasets", `{"name": "teste", "profile": "veiculos"}`, "X-User", "admin"), http.StatusCreated)
@@ -123,7 +125,11 @@ func TestLoginEPermissoes(t *testing.T) {
 	assertStatus(t, maria.do("PATCH", "/users/maria", `{"role": "admin"}`), http.StatusForbidden)
 	assertStatus(t, maria.do("POST", "/annotation-profiles", `{}`), http.StatusForbidden)
 	assertStatus(t, maria.do("PUT", "/import-profiles/x", `{}`), http.StatusForbidden)
-	assertStatus(t, maria.do("GET", "/annotation-profiles", ""), http.StatusOK) // ler pode
+	assertStatus(t, maria.do("GET", "/annotation-profiles", ""), http.StatusOK)                    // ler pode
+	assertStatus(t, maria.do("PUT", "/tasks/capacete", `{"name": "outra"}`), http.StatusForbidden) // tarefa e labels: admin
+	assertStatus(t, maria.do("POST", "/tasks", `{"name": "nova"}`), http.StatusForbidden)
+	assertStatus(t, maria.do("PATCH", "/packages/x", `{"name": "y"}`), http.StatusForbidden)
+	assertStatus(t, maria.do("DELETE", "/images/0000000000000000000000000000000000000000", ""), http.StatusNotFound) // apagar imagem pode (não existe: 404)
 	assertStatus(t, admin.do("DELETE", "/datasets/teste", ""), http.StatusNoContent)
 
 	// trocar a senha: a atual tem que conferir; as outras sessões caem

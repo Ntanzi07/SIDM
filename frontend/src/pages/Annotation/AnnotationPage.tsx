@@ -9,7 +9,6 @@ import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import { fieldLabel, listObjectTypes } from '../../utils/annotationForm'
 import { FieldInput } from './AnnotationFields'
-import { useIsAdmin } from '../../services/user'
 import './Annotation.css'
 
 function formatSize(bytes: number) {
@@ -19,7 +18,6 @@ function formatSize(bytes: number) {
 
 export function AnnotationPage() {
   const navigate = useNavigate()
-  const admin = useIsAdmin() // apagar é só de admin
   const { id } = useParams()
   const packageName = decodeURIComponent(id ?? '')
   const [searchParams] = useSearchParams()
@@ -135,16 +133,14 @@ export function AnnotationPage() {
                         )}
                       </span>
                     </div>
-                    {admin && (
-                      <button
-                        className="button button--danger button--sm"
-                        disabled={annotator.saving}
-                        onClick={() => setShowDeleteModal(true)}
-                        type="button"
-                      >
-                        Excluir imagem
-                      </button>
-                    )}
+                    <button
+                      className="button button--danger button--sm"
+                      disabled={annotator.saving}
+                      onClick={() => setShowDeleteModal(true)}
+                      type="button"
+                    >
+                      Excluir imagem
+                    </button>
                   </div>
                   <div className="annotation-preview">
                     <ZoomView resetKey={image.sha1}>

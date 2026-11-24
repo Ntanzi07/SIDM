@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
@@ -20,9 +21,17 @@ func NewMongoRepo(db *mongo.Database) *MongoRepo { return &MongoRepo{db: db} }
 func (m *MongoRepo) users() *mongo.Collection    { return m.db.Collection("users") }
 func (m *MongoRepo) sessions() *mongo.Collection { return m.db.Collection("sessions") }
 
-// EnsureIndexes: as sessões somem sozinhas depois de expirar (TTL) e são
+// EnsureIndexes: e-mail único (só nas contas que têm: o admin do .env pode
+// não ter); as sessões somem sozinhas depois de expirar (TTL) e são
 // buscadas por pessoa (troca de senha). Idempotente.
 func (m *MongoRepo) EnsureIndexes(ctx context.Context) error {
+	if _, err := m.users().Indexes().CreateOne(ctx, mongo.IndexModel{
+		Keys: bson.D{{Key: "email", Value: 1}},
+		Options: options.Index().SetUnique(true).SetName("email_unico").
+			SetPartialFilterExpression(bson.D{{Key: "email", Value: bson.D{{Key: "$type", Value: "string"}}}}),
+	}); err != nil {
+		return fmt.Errorf("índice de users: %w", err)
+	}
 	if _, err := m.sessions().Indexes().CreateMany(ctx, []mongo.IndexModel{
 		{Keys: bson.D{{Key: "expires_at", Value: 1}}, Options: options.Index().SetExpireAfterSeconds(0)},
 		{Keys: bson.D{{Key: "username", Value: 1}}},
@@ -35,6 +44,9 @@ func (m *MongoRepo) EnsureIndexes(ctx context.Context) error {
 func (m *MongoRepo) CreateUser(ctx context.Context, u *User) error {
 	_, err := m.users().InsertOne(ctx, u)
 	if mongo.IsDuplicateKeyError(err) {
+		if strings.Contains(err.Error(), "email_unico") {
+			return ErrEmailTaken
+		}
 		return platform.ErrDuplicate
 	}
 	if err != nil {
@@ -51,6 +63,18 @@ func (m *MongoRepo) FindUser(ctx context.Context, username string) (*User, error
 	}
 	if err != nil {
 		return nil, fmt.Errorf("buscar usuário %s: %w", username, err)
+	}
+	return &u, nil
+}
+
+func (m *MongoRepo) FindUserByEmail(ctx context.Context, email string) (*User, error) {
+	var u User
+	err := m.users().FindOne(ctx, bson.D{{Key: "email", Value: email}}).Decode(&u)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return nil, platform.ErrNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("buscar usuário pelo e-mail: %w", err)
 	}
 	return &u, nil
 }

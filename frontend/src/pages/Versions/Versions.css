@@ -801,3 +801,117 @@ p.diff-detail {
   border-radius: 8px;
   font-size: 13px;
 }
+
+/* a volta de uma imagem para a versão */
+.diff-detail__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.diff-detail__actions .diff-detail__link {
+  margin-top: 0;
+}
+
+.diff-detail__restored {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  background: var(--success-soft);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.diff-detail__image--missing {
+  display: grid;
+  place-items: center;
+  min-height: 120px;
+  border: 1px dashed var(--border-strong);
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+/* voltar tudo para a versão */
+.restore-all {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.restore-all strong {
+  color: var(--text);
+}
+
+.restore-all-modal {
+  display: grid;
+  gap: 10px;
+}
+
+.restore-all-modal ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13.5px;
+}
+
+.restore-all-modal p {
+  margin: 0;
+}
+
+.restore-all-modal label {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.restore-all-modal input {
+  min-height: 40px;
+  padding: 0 12px;
+}
+
+.restore-report {
+  position: relative;
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 12px 40px 12px 14px;
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  background: var(--success-soft);
+  font-size: 13px;
+}
+
+.restore-report--warning {
+  border-color: var(--warning-border);
+  background: var(--warning-soft);
+}
+
+.restore-report ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.restore-report__close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}

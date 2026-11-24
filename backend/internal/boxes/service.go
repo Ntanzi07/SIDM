@@ -270,6 +270,66 @@ func (s *Service) DeleteImage(ctx context.Context, sha1 string) error {
 	return s.repo.DeleteImageSets(ctx, sha1)
 }
 
+// RestoreSets volta as caixas de uma imagem nas tarefas dadas para frozen
+// (tarefa → caixas; uma tarefa fora do mapa = a imagem não estava anotada
+// nela, e as caixas de hoje saem). As outras tarefas não mudam; uma tarefa
+// que não existe mais é pulada. Quem voltou fica em updated_by.
+func (s *Service) RestoreSets(ctx context.Context, sha1, pkg string, tasks []string, frozen map[string]Set, user string) error {
+	current, err := s.repo.FindImageSets(ctx, sha1)
+	if err != nil {
+		return err
+	}
+	byTask := map[string]Set{}
+	for _, set := range current {
+		byTask[set.Task] = set
+	}
+	now := s.now()
+	removed := false
+	for _, task := range tasks {
+		if _, err := s.repo.FindTask(ctx, task); errors.Is(err, platform.ErrNotFound) {
+			continue
+		} else if err != nil {
+			return err
+		}
+		want, ok := frozen[task]
+		if !ok {
+			if _, had := byTask[task]; had {
+				delete(byTask, task)
+				removed = true
+			}
+			continue
+		}
+		set := byTask[task] // o que veio do CVAT (fonte, quem importou) continua
+		if set.ImportedAt.IsZero() {
+			set.ImportedBy, set.ImportedAt = user, now
+		}
+		set.ID = nil
+		set.Task, set.ImageID, set.Package = task, sha1, pkg
+		set.Width, set.Height, set.Boxes = want.Width, want.Height, want.Boxes
+		if set.Boxes == nil {
+			set.Boxes = []Box{}
+		}
+		set.UpdatedBy, set.UpdatedAt = user, &now
+		byTask[task] = set
+	}
+	// O replace grava por cima, tarefa a tarefa; só quando uma tarefa tem
+	// que sair é que apaga tudo e grava de novo.
+	if removed {
+		if err := s.repo.DeleteImageSets(ctx, sha1); err != nil {
+			return err
+		}
+	}
+	keep := make([]Set, 0, len(byTask))
+	for _, set := range byTask {
+		set.ID = nil
+		keep = append(keep, set)
+	}
+	if len(keep) == 0 {
+		return nil
+	}
+	return s.repo.ReplaceSets(ctx, keep)
+}
+
 // PackageCounts: por tarefa, as imagens do pacote anotadas nela.
 func (s *Service) PackageCounts(ctx context.Context, pkg string) ([]PackageCount, error) {
 	return s.repo.PackageCounts(ctx, pkg)

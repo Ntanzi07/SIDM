@@ -3,7 +3,7 @@ import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { listAccounts, resetAccountPassword, updateAccount } from '../../services/api'
 import { Toast, type ToastNotice } from '../../components/Toast/Toast'
-import { useAccount, type Account } from '../../services/user'
+import { setPendingCount, useAccount, type Account } from '../../services/user'
 import { formatWhen } from '../Versions/format'
 import './Users.css'
 
@@ -16,6 +16,11 @@ export function UsersPage() {
   const [busy, setBusy] = useState('')
   const [notice, setNotice] = useState<ToastNotice | null>(null)
   const [resetting, setResetting] = useState<Account | null>(null)
+
+  // o selo do menu acompanha a lista (aprovar ou recusar tira da conta)
+  useEffect(() => {
+    if (accounts) setPendingCount(accounts.filter((item) => item.status === 'pending').length)
+  }, [accounts])
 
   useEffect(() => {
     listAccounts()
@@ -74,7 +79,7 @@ export function UsersPage() {
                   <li className="users-row" key={account.username}>
                     <div className="users-row__who">
                       <strong>{account.name}{self && <span className="users-row__you"> (você)</span>}</strong>
-                      <span>{account.username}</span>
+                      <span>{account.email ? `${account.email} · ` : ''}{account.username}</span>
                     </div>
                     <div className="users-row__when">
                       {account.status === 'pending'

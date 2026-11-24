@@ -655,3 +655,13 @@
     flex-direction: column;
   }
 }
+
+/* para quem não é admin: a cor só aparece, não troca */
+.label-swatch--static {
+  display: inline-block;
+  cursor: default;
+}
+
+.label-swatch--static:hover {
+  transform: none;
+}

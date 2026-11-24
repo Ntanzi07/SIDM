@@ -25,6 +25,11 @@ func (m *Memory) CreateUser(ctx context.Context, u *User) error {
 	if _, ok := m.Users[u.Username]; ok {
 		return platform.ErrDuplicate
 	}
+	for _, other := range m.Users {
+		if u.Email != "" && other.Email == u.Email {
+			return ErrEmailTaken
+		}
+	}
 	m.Users[u.Username] = *u
 	return nil
 }
@@ -37,6 +42,17 @@ func (m *Memory) FindUser(ctx context.Context, username string) (*User, error) {
 		return nil, platform.ErrNotFound
 	}
 	return &u, nil
+}
+
+func (m *Memory) FindUserByEmail(ctx context.Context, email string) (*User, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, u := range m.Users {
+		if u.Email != "" && u.Email == email {
+			return &u, nil
+		}
+	}
+	return nil, platform.ErrNotFound
 }
 
 func (m *Memory) ListUsers(ctx context.Context) ([]User, error) {
