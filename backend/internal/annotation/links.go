@@ -42,6 +42,22 @@ func (p *Profile) validateLinks() error {
 					ps.add(lp+".fields."+key, "%v", err)
 				}
 			}
+			used := map[string]string{}
+			for _, attr := range sortedKeys(l.Attributes) {
+				key := l.Attributes[attr]
+				ap := lp + ".attributes." + attr
+				switch _, ok := t.Field(key); {
+				case attr == "" || len(attr) > 64:
+					ps.add(lp+".attributes", "o nome do atributo da caixa (ex.: color), até 64 caracteres")
+				case !ok:
+					ps.add(ap, "o tipo %q não tem o campo %q", t.Key, key)
+				case used[key] != "":
+					ps.add(ap, "o campo %q já vem do atributo %q", key, used[key])
+				case l.Fields[key] != nil:
+					ps.add(ap, "o campo %q já é dito pela label: não precisa vir de um atributo", key)
+				}
+				used[key] = attr
+			}
 		}
 	}
 	if len(ps) > 0 {

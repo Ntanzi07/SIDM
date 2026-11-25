@@ -30,6 +30,10 @@ func (f fakeImages) Verified(ctx context.Context, ids []string) (map[string]bool
 	return f.verified, nil
 }
 
+func (f fakeImages) LinkBoxes(context.Context, string, string, []annotation.SeenBox, string) (annotation.LinkResult, error) {
+	return annotation.LinkResult{}, nil
+}
+
 // SearchIDs: as imagens de verified, todas (o filtro é testado na API).
 func (f fakeImages) SearchIDs(ctx context.Context, q url.Values) ([]string, error) {
 	ids := []string{}

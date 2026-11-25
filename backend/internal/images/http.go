@@ -47,6 +47,12 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "POST", Path: "/images/{sha1}/reopen", Handler: s.handleReopen},
 		{Method: "POST", Path: "/images/{sha1}/release", Handler: s.handleRelease},
 		{Method: "POST", Path: "/packages/{name}/next", Handler: s.handleNext},
+		{Method: "POST", Path: "/packages/{name}/zip-uploads", Handler: s.handleStartZip},
+		{Method: "GET", Path: "/packages/{name}/zip-uploads", Handler: s.handleListZips},
+		{Method: "GET", Path: "/zip-uploads/{id}", Handler: s.handleGetZip},
+		{Method: "PUT", Path: "/zip-uploads/{id}/chunk", Handler: s.handleZipChunk},
+		{Method: "POST", Path: "/zip-uploads/{id}/finish", Handler: s.handleFinishZip},
+		{Method: "DELETE", Path: "/zip-uploads/{id}", Handler: s.handleCancelZip},
 	}
 }
 

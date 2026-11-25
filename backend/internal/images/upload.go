@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -67,24 +66,9 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var profile *importer.Profile
-	if name := r.URL.Query().Get("profile"); name != "" {
-		p, err := s.profiles.FindProfile(r.Context(), name)
-		if errors.Is(err, platform.ErrNotFound) {
-			platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
-			return
-		}
-		if err != nil {
-			platform.ServerError(w, err)
-			return
-		}
-		if p.Reader.Type != importer.ReaderJPEGINI {
-			platform.WriteError(w, http.StatusBadRequest, fmt.Sprintf(
-				"o perfil %q é do tipo %q: no upload só vale perfil %q (CSV é com POST /packages/%s/import)",
-				p.Name, p.Reader.Type, importer.ReaderJPEGINI, pkg))
-			return
-		}
-		profile = p
+	profile, ok := s.iniProfileFromRequest(w, r, pkg, r.URL.Query().Get("profile"))
+	if !ok {
+		return
 	}
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxUploadBytes)
@@ -109,20 +93,45 @@ func (s *Service) handleUpload(w http.ResponseWriter, r *http.Request) {
 			part.Close()
 			continue
 		}
-		results = append(results, s.ingestOne(r.Context(), pkg, annot, profile, part))
+		results = append(results, s.ingestOne(r.Context(), pkg, annot, profile, part.FileName(), part))
 		part.Close()
 	}
 
 	platform.WriteJSON(w, http.StatusOK, results)
 }
 
-func (s *Service) ingestOne(ctx context.Context, pkg string, annot *annotation.Profile, profile *importer.Profile, part *multipart.Part) UploadResult {
-	name := filepath.Base(part.FileName()) // nunca confie no caminho que vem do cliente
+// ingestOne grava UM arquivo (do upload ou de dentro de um zip).
+// iniProfileFromRequest busca o perfil de INI do upload (vazio = nenhum).
+// Se der errado, já escreve a resposta e devolve ok=false.
+func (s *Service) iniProfileFromRequest(w http.ResponseWriter, r *http.Request, pkg, name string) (*importer.Profile, bool) {
+	if name == "" {
+		return nil, true
+	}
+	p, err := s.profiles.FindProfile(r.Context(), name)
+	if errors.Is(err, platform.ErrNotFound) {
+		platform.WriteError(w, http.StatusNotFound, fmt.Sprintf("perfil %q não existe", name))
+		return nil, false
+	}
+	if err != nil {
+		platform.ServerError(w, err)
+		return nil, false
+	}
+	if p.Reader.Type != importer.ReaderJPEGINI {
+		platform.WriteError(w, http.StatusBadRequest, fmt.Sprintf(
+			"o perfil %q é do tipo %q: no upload só vale perfil %q (CSV é com POST /packages/%s/import)",
+			p.Name, p.Reader.Type, importer.ReaderJPEGINI, pkg))
+		return nil, false
+	}
+	return p, true
+}
+
+func (s *Service) ingestOne(ctx context.Context, pkg string, annot *annotation.Profile, profile *importer.Profile, fileName string, body io.Reader) UploadResult {
+	name := filepath.Base(filepath.FromSlash(strings.ReplaceAll(fileName, "\\", "/"))) // nunca confie no caminho que vem do cliente
 	res := UploadResult{File: name}
 
 	ext := strings.ToLower(filepath.Ext(name))
 
-	tmp, sum, size, err := s.files.Receive(part)
+	tmp, sum, size, err := s.files.Receive(body)
 	if err != nil {
 		log.Printf("upload %s: %v", name, err)
 		res.Status, res.Error = "error", "falha ao gravar o arquivo"

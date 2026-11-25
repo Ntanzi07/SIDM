@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createPackage, imageFiles, importPackageCsv, listAnnotationProfiles, listImportProfiles, listIniProfiles, uploadImages, type ImportProfile, type ImportReport, type UploadProgress } from '../../services/api'
+import { createPackage, imageFiles, importPackageCsv, listAnnotationProfiles, listImportProfiles, listIniProfiles, sendZip, uploadImages, type ImportProfile, type ImportReport, type UploadProgress, type ZipUpload } from '../../services/api'
 import { useFolderReading } from '../../hooks/useFolderReading'
 import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
 import { UploadStatus } from './UploadStatus'
+import { FolderOrZip } from './FolderOrZip'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import { useToastState } from '../../hooks/useToast'
 import './Packages.css'
@@ -14,6 +15,9 @@ export function CreatePackagePage() {
   const navigate = useNavigate()
   const [name, setName] = useState('')
   const [folder, setFolder] = useState<FileList | null>(null)
+  // ou um .zip, para pastas grandes (o navegador trava listando a pasta)
+  const [zipFile, setZipFile] = useState<File | null>(null)
+  const [zipSent, setZipSent] = useState<ZipUpload | null>(null)
   const [annotationProfiles, setAnnotationProfiles] = useState<AnnotationProfile[]>([])
   const [annotationProfile, setAnnotationProfile] = useState('veiculos')
   const [profiles, setProfiles] = useState<ImportProfile[]>([])
@@ -46,7 +50,43 @@ export function CreatePackagePage() {
   function handleFolderChange(event: ChangeEvent<HTMLInputElement>) {
     doneReadingFolder()
     setFolder(event.target.files)
+    setZipFile(null)
     setError('')
+  }
+
+  function handleZipChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0] ?? null
+    event.target.value = ''
+    if (file && !file.name.toLowerCase().endsWith('.zip')) {
+      setError('Escolha um arquivo .zip.')
+      return
+    }
+    setZipFile(file)
+    if (file) {
+      setFolder(null)
+      setProfileName('') // o CSV vai depois, no pacote, quando as imagens estiverem gravadas
+    }
+    setError('')
+  }
+
+  // O zip: cria o pacote, manda em partes e abre o pacote (a gravação das
+  // imagens segue no servidor, e o progresso aparece lá).
+  async function submitZip(file: File) {
+    setSaving('creating')
+    setError('')
+    try {
+      const createdName = createdPackageName || await createPackage(name.trim(), annotationProfile)
+      setCreatedPackageName(createdName)
+      setSaving('uploading')
+      await sendZip(createdName, file, iniProfile || undefined, setZipSent)
+      navigate(`/pacotes/${encodeURIComponent(createdName)}`)
+    } catch (requestError: unknown) {
+      setError(requestError instanceof Error
+        ? `${requestError.message} Clique de novo para continuar o envio de onde parou.`
+        : 'Não foi possível enviar o zip.')
+    } finally {
+      setSaving('')
+    }
   }
 
   function handleCsvChange(event: ChangeEvent<HTMLInputElement>) {
@@ -57,6 +97,10 @@ export function CreatePackagePage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (name.trim() && zipFile) {
+      void submitZip(zipFile)
+      return
+    }
     if (!name.trim() || !folder || folder.length === 0) {
       setError('Informe um nome e selecione a pasta de imagens para continuar.')
       return
@@ -161,8 +205,15 @@ export function CreatePackagePage() {
             </small>
           </div>
           <div className="form-field">
-            <label htmlFor="package-folder">Pasta das imagens</label>
-            <label className={readingFolder ? 'folder-picker folder-picker--reading' : 'folder-picker'} htmlFor="package-folder">
+            <label>Imagens (pasta ou .zip)</label>
+            <FolderOrZip
+              className={readingFolder ? 'folder-picker folder-picker--reading' : 'folder-picker'}
+              disabled={saving !== ''}
+              folderRef={folderInputRef}
+              onFolderChange={handleFolderChange}
+              onFolderClick={startReadingFolder}
+              onZipChange={handleZipChange}
+            >
               <span className="folder-picker__icon">↥</span>
               <span>
                 {readingFolder ? (
@@ -170,22 +221,19 @@ export function CreatePackagePage() {
                     <strong>Lendo a pasta...</strong>
                     <small>Pastas grandes levam alguns segundos. Se o navegador perguntar, confirme o envio dos arquivos.</small>
                   </>
+                ) : zipFile ? (
+                  <>
+                    <strong>{zipFile.name}</strong>
+                    <small>Zip de {(zipFile.size / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} MB · vai em partes</small>
+                  </>
                 ) : (
                   <>
-                    <strong>{folder?.[0]?.webkitRelativePath.split('/')[0] ?? 'Selecione uma pasta'}</strong>
-                    <small>{folder ? `${folder.length} arquivo(s) selecionado(s)` : 'Escolha a pasta que contém as imagens'}</small>
+                    <strong>{folder?.[0]?.webkitRelativePath.split('/')[0] ?? 'Selecione uma pasta ou um .zip'}</strong>
+                    <small>{folder ? `${folder.length} arquivo(s) selecionado(s)` : 'Para pastas muito grandes, use um .zip: vai em partes e continua de onde parou'}</small>
                   </>
                 )}
               </span>
-              <input
-                id="package-folder"
-                onChange={handleFolderChange}
-                onClick={startReadingFolder}
-                ref={folderInputRef}
-                type="file"
-                {...{ webkitdirectory: 'true' }}
-              />
-            </label>
+            </FolderOrZip>
           </div>
         </div>
         <div className="form-row">
@@ -213,7 +261,7 @@ export function CreatePackagePage() {
             <label htmlFor="import-profile">Importar anotações do CSV (opcional)</label>
             <select
               id="import-profile"
-              disabled={saving !== ''}
+              disabled={saving !== '' || Boolean(zipFile)}
               onChange={(event) => {
                 setProfileName(event.target.value)
                 setError('')
@@ -221,7 +269,7 @@ export function CreatePackagePage() {
               }}
               value={profileName}
             >
-              <option value="">Não importar CSV</option>
+              <option value="">{zipFile ? 'Com zip: importe o CSV no pacote, depois de gravar' : 'Não importar CSV'}</option>
               {forPackage(profiles, annotationProfile).map((profile) => (
                 <option key={profile.name} value={profile.name}>{optionLabel(profile, annotationProfile)}</option>
               ))}
@@ -243,6 +291,15 @@ export function CreatePackagePage() {
           </>
         )}
         {upload && <UploadStatus progress={upload} />}
+        {zipSent && zipSent.status === 'receiving' && (
+          <div className="upload-status">
+            <div className="upload-status__bar"><span style={{ width: `${Math.round((zipSent.received / zipSent.size) * 100)}%` }} /></div>
+            <p className="form-hint">
+              Enviando o zip: {Math.round((zipSent.received / zipSent.size) * 100)}% ({(zipSent.received / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} de {(zipSent.size / 1024 / 1024).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} MB).
+              Não feche esta aba; no fim, o pacote abre e as imagens são gravadas no servidor.
+            </p>
+          </div>
+        )}
         {importReport && (
           <div className="import-report">
             <h2>Ensaio da importação</h2>

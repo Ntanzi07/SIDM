@@ -2,30 +2,37 @@ import type { BoxSet } from '../../services/api'
 import type { FormObject, ObjectBox, ObjectType } from '../../types/annotation'
 import type { BoxRef } from '../../utils/boxes'
 import { candidates, findLinked, toObjectBox } from '../../utils/boxLinks'
-import { fieldLabel, optionLabel } from '../../utils/annotationForm'
+import { boxAttributeNotes, displayValue, fieldLabel, optionLabel } from '../../utils/annotationForm'
 
 type Props = {
   type: ObjectType
   object: FormObject
   sets: BoxSet[]
   taken: Set<string> // as caixas que outros objetos já apontam
-  onLink: (box: ObjectBox | undefined) => void
+  onLink: (box: ObjectBox | undefined, attributes?: Record<string, unknown>) => void
   onShow: (ref: BoxRef) => void
 }
 
+const shown = (value: unknown) => (Array.isArray(value) ? value.join(', ') : String(value))
+
 // "Caixa" de um objeto (ex.: o Veículo 1 é a caixa 1. motorcycle). Escolher
-// a caixa a mostra na imagem e preenche o que a label dela diz.
+// a caixa a mostra na imagem e preenche o que a label e os atributos dela
+// dizem. Os atributos da caixa aparecem aqui: o objeto e a caixa são um só.
 export function BoxLink({ type, object, sets, taken, onLink, onShow }: Props) {
   const options = candidates(type, sets)
   const linked = object.box ? findLinked(sets, object.box) : null
   const value = linked ? `${linked.task}#${linked.index}` : object.box ? 'lost' : ''
   const implied = object.box ? type.box_labels?.find((label) => label.label === object.box?.label)?.fields ?? {} : {}
+  const box = linked ? sets.find((s) => s.task === linked.task)?.boxes[linked.index] : undefined
+  const notes = boxAttributeNotes(type, object, box?.attributes)
+  const others = notes.filter((note) => !note.field)
+  const differs = notes.filter((note) => note.differs)
 
   function choose(key: string) {
-    if (key === '' ) return onLink(undefined)
+    if (key === '') return onLink(undefined)
     const found = options.find((option) => option.key === key)
     if (!found) return
-    onLink(toObjectBox(found.ref.task, found.box))
+    onLink(toObjectBox(found.ref.task, found.box), found.box.attributes)
     onShow(found.ref)
   }
 
@@ -56,6 +63,16 @@ export function BoxLink({ type, object, sets, taken, onLink, onShow }: Props) {
           }).join(', ')}
         </small>
       )}
+      {others.length > 0 && (
+        <small>
+          Atributos da caixa (CVAT): {others.map((note) => `${note.attr} = ${shown(note.value)}`).join(', ')}
+        </small>
+      )}
+      {differs.map((note) => (
+        <small className="box-link__differs" key={note.attr}>
+          {fieldLabel(note.field!)}: no CVAT a caixa está "{displayValue(note.field!, note.value)}" (atributo {note.attr}). Vale o daqui; o CVAT não muda.
+        </small>
+      ))}
     </div>
   )
 }

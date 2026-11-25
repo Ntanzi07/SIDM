@@ -25,6 +25,7 @@ type Service struct {
 	annots    Annotations
 	listeners []Listener
 	now       func() time.Time
+	zips      zipState // os envios de zip gravando agora
 }
 
 // New monta o módulo. catalog e profiles podem ser nil nos testes que não
@@ -43,11 +44,13 @@ func (s *Service) ProfileOf(ctx context.Context, pkg string) (*annotation.Profil
 	return s.profileNamed(ctx, p.Profile)
 }
 
+// O padrão também passa pelo módulo de perfis: as caixas que representam
+// cada tipo (box_labels) de um padrão ficam no banco.
 func (s *Service) profileNamed(ctx context.Context, name string) (*annotation.Profile, error) {
-	if b, ok := annotation.Builtin(name); ok || name == "" {
-		if !ok {
-			b, _ = annotation.Builtin(annotation.DefaultProfile)
-		}
+	if name == "" {
+		name = annotation.DefaultProfile
+	}
+	if b, ok := annotation.Builtin(name); ok && s.annots == nil {
 		return &b, nil
 	}
 	if s.annots == nil {

@@ -3,11 +3,12 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ZoomView } from '../../components/ZoomView/ZoomView'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
-import { boxPending, type BoxRef } from '../../utils/boxes'
+import { boxPending, colorOf, type BoxRef } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { getAnnotationProfile, getImage, getPackage, listPackageImages, reopenImage } from '../../services/api'
 import type { AnnotationProfile, ImageDetail } from '../../types/annotation'
 import { displayValue, fieldLabel } from '../../utils/annotationForm'
+import { linkedKeys } from '../../utils/boxLinks'
 import { useToastState } from '../../hooks/useToast'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Viewer.css'
@@ -44,6 +45,14 @@ export function ImageViewerPage() {
   const [picked, setPicked] = useState<{ sha1: string; box: BoxRef } | null>(null)
   const selectedBox = picked && picked.sha1 === image?.sha1 ? picked.box : null
   const selectBox = (box: BoxRef | null) => setPicked(box && image ? { sha1: image.sha1, box } : null)
+  // as caixas que são um objeto (índice do objeto → "tarefa#caixa"), e o nome dele
+  const links = linkedKeys(image?.objects ?? [], boxSets)
+  const linkedNames = new Map([...links].map(([index, key]) => {
+    const object = image!.objects[index]
+    const type = profile?.objects.find((t) => t.key === object.type)
+    const n = image!.objects.slice(0, index + 1).filter((o) => o.type === object.type).length
+    return [key, `${type ? fieldLabel(type) : object.type} ${n}`]
+  }))
 
   // O perfil do pacote: os nomes dos campos e das opções.
   useEffect(() => {
@@ -170,16 +179,26 @@ export function ImageViewerPage() {
             </div>
 
             {(profile?.objects ?? []).filter((type) => !type.box).map((type) => {
-              const objects = image.objects.filter((object) => object.type === type.key)
+              const objects = image.objects.flatMap((object, index) => (object.type === type.key ? [{ object, index }] : []))
               return (
                 <div key={type.key}>
                   <h3>{fieldLabel(type)}</h3>
-                  {objects.length ? objects.map((object, i) => {
+                  {objects.length ? objects.map(({ object, index }, i) => {
                     const [first, ...rest] = type.fields
+                    const key = links.get(index)
+                    const [task, box] = key ? key.split('#') : []
+                    const label = key ? boxSets.find((s) => s.task === task)?.boxes[Number(box)]?.label : undefined
                     return (
-                      <div className="viewer-vehicle" key={i}>
+                      // ligado: a cor da caixa na borda, como nos cards das caixas
+                      <div className={key ? 'viewer-vehicle viewer-vehicle--boxed' : 'viewer-vehicle'} key={i} style={key && label ? { borderLeftColor: colorOf(label, task) } : undefined}>
                         <strong>{first ? `${displayValue(first, object.fields[first.key]).replace('Não informado', `${fieldLabel(first)} não informado(a)`)}` : `${fieldLabel(type)} ${i + 1}`}</strong>
                         <span>{rest.map((field) => displayValue(field, object.fields[field.key])).join(' · ')}</span>
+                        {key && (
+                          <button className="viewer-vehicle__box" onClick={() => selectBox({ task, index: Number(box) })} type="button">
+                            Caixa {Number(box) + 1}. {label} ({task}) · ver na imagem
+                          </button>
+                        )}
+                        {object.box && !key && <small className="viewer-vehicle__lost">Caixa {object.box.label} não achada (a tarefa foi importada de novo?)</small>}
                       </div>
                     )
                   }) : <p className="viewer-empty">Nenhum(a).</p>}
@@ -188,7 +207,7 @@ export function ImageViewerPage() {
             })}
 
             {boxSets.some((set) => set.boxes.length > 0) && (
-              <BoxAttributes onSelect={selectBox} profile={profile} readOnly selected={selectedBox} sets={boxSets} />
+              <BoxAttributes linked={linkedNames} onSelect={selectBox} profile={profile} readOnly selected={selectedBox} sets={boxSets} />
             )}
 
             {image.file_name && (

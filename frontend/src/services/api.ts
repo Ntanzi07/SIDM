@@ -367,6 +367,111 @@ export function imageFiles(files: FileList | File[]): File[] {
   })
 }
 
+// ---------- envio de .zip em partes ----------
+// Para pastas grandes: o navegador trava só de listar dezenas de milhares
+// de arquivos. O zip vai em partes (file.slice: o arquivo não é lido
+// inteiro), e escolher o mesmo zip de novo continua de onde parou.
+
+export type ZipUpload = {
+  id: string
+  package: string
+  file_name: string
+  size: number
+  received: number
+  profile?: string
+  status: 'receiving' | 'processing' | 'done' | 'failed'
+  chunk_size: number
+  total: number
+  processed: number
+  created: number
+  duplicates: number
+  decrypted: number
+  with_ini: number
+  prefilled: number
+  skipped: number
+  errors: string[]
+  error_count: number
+  error?: string
+  running: boolean
+  created_by: string
+  created_at: string
+  updated_at: string
+}
+
+export async function listZipUploads(packageName: string): Promise<ZipUpload[]> {
+  const response = await request<{ items: ZipUpload[] }>(`/packages/${encodeURIComponent(packageName)}/zip-uploads`)
+  return response.items
+}
+
+export async function getZipUpload(id: string): Promise<ZipUpload> {
+  return request<ZipUpload>(`/zip-uploads/${id}`)
+}
+
+export async function finishZipUpload(id: string): Promise<ZipUpload> {
+  return request<ZipUpload>(`/zip-uploads/${id}/finish`, { method: 'POST' })
+}
+
+export async function cancelZipUpload(id: string): Promise<void> {
+  await request<unknown>(`/zip-uploads/${id}`, { method: 'DELETE' })
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
+// Manda o zip (ou o que falta dele) e começa a gravação no servidor.
+// Uma parte que falha (rede) é tentada de novo, esperando cada vez mais;
+// depois de 8 tentativas desiste (escolher o mesmo zip continua dali).
+export async function sendZip(
+  packageName: string,
+  file: File,
+  iniProfile: string | undefined,
+  onProgress: (upload: ZipUpload) => void,
+): Promise<ZipUpload> {
+  let upload = await request<ZipUpload>(`/packages/${encodeURIComponent(packageName)}/zip-uploads`, {
+    method: 'POST',
+    body: JSON.stringify({ file_name: file.name, size: file.size, profile: iniProfile ?? '' }),
+  })
+  onProgress(upload)
+  let failures = 0
+  while (upload.status === 'receiving' && upload.received < upload.size) {
+    const part = file.slice(upload.received, upload.received + upload.chunk_size)
+    try {
+      upload = await request<ZipUpload>(`/zip-uploads/${upload.id}/chunk?offset=${upload.received}`, {
+        method: 'PUT',
+        body: part,
+        headers: { 'Content-Type': 'application/octet-stream' },
+      })
+      failures = 0
+      onProgress(upload)
+    } catch (error: unknown) {
+      if (error instanceof RequestError && error.status === 409) {
+        upload = await getZipUpload(upload.id) // ele diz de onde continuar
+        continue
+      }
+      if (error instanceof RequestError && error.status >= 400 && error.status < 500) throw error
+      failures++
+      if (failures > 8) throw new Error('A conexão caiu várias vezes. Escolha o mesmo zip de novo para continuar de onde parou.', { cause: error })
+      await wait(Math.min(30_000, 1000 * 2 ** failures))
+      upload = await getZipUpload(upload.id).catch(() => upload)
+    }
+  }
+  if (upload.status === 'receiving' || (upload.status === 'processing' && !upload.running)) {
+    upload = await finishZipUpload(upload.id)
+  }
+  onProgress(upload)
+  return upload
+}
+
+// Acompanha a gravação até terminar (ou parar: servidor reiniciou).
+export async function watchZip(id: string, onProgress: (upload: ZipUpload) => void, isActive: () => boolean): Promise<ZipUpload> {
+  for (;;) {
+    const upload = await getZipUpload(id)
+    onProgress(upload)
+    if (upload.status !== 'processing' || !upload.running || !isActive()) return upload
+    await wait(1500)
+  }
+}
+
+
 // iniProfile: perfil de INI aplicado em cada imagem que sobe (preenche o
 // rascunho com o INI embutido no JPEG). Sem ele, o INI é guardado do mesmo
 // jeito, e o perfil pode ser aplicado depois (applyIniProfile).
@@ -616,6 +721,36 @@ export type BoxSet = {
 // A versão das caixas para a edição: a última edição ou, sem edição, o import.
 export const boxSetVersion = (set: BoxSet) => set.updated_at ?? set.imported_at
 
+// A ligação das caixas aos objetos (motorcycle → um veículo), no import e
+// no "Ligar caixas" do pacote.
+export type LinkResult = {
+  linked: number // ligadas a um objeto que já existia
+  created: number // objetos novos
+  moved: number // ligações que já existiam e a caixa mexeu
+  loose: number // ficaram soltas (ligar na anotação)
+  images: number
+  busy: number // imagens puladas: alguém estava anotando
+}
+
+export function describeLinks(links: LinkResult | undefined): string {
+  if (!links) return ''
+  const n = (v: number) => v.toLocaleString('pt-BR')
+  const done = [
+    links.created > 0 && `${n(links.created)} objeto(s) criado(s) das caixas`,
+    links.linked > 0 && `${n(links.linked)} caixa(s) ligada(s) a objetos que já existiam`,
+    links.moved > 0 && `${n(links.moved)} ligação(ões) atualizada(s)`,
+  ].filter(Boolean)
+  const parts = []
+  if (done.length) parts.push(`${done.join(', ')} (${n(links.images)} imagem(ns)).`)
+  if (links.loose > 0) parts.push(`${n(links.loose)} caixa(s) ficaram sem objeto (mais de um par possível, imagem verificada ou máximo do tipo): ligue na anotação.`)
+  if (links.busy > 0) parts.push(`${n(links.busy)} imagem(ns) em anotação ficaram de fora: use "Ligar caixas" no pacote depois.`)
+  return parts.join(' ')
+}
+
+export async function linkPackageBoxes(name: string): Promise<LinkResult> {
+  return request<LinkResult>(`/packages/${encodeURIComponent(name)}/boxes/link`, { method: 'POST' })
+}
+
 export type BoxImportReport = {
   dry_run: boolean
   task: string
@@ -643,6 +778,7 @@ export type BoxImportReport = {
   missing_required: number
   untyped_labels: string[]
   edited_replaced: number
+  links?: LinkResult // depois de gravar
 }
 
 // Por tarefa, quantas imagens do pacote estão anotadas nela.

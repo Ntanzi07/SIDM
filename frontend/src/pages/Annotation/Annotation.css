@@ -445,46 +445,20 @@
   font-size: 12px;
 }
 
-/* caixas que ainda não são de nenhum objeto */
-.box-link-loose {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
-  padding: 10px 12px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-sm);
+.box-link small.box-link__differs {
+  color: var(--warning);
 }
 
-.box-link-loose > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  color: var(--text-3);
-  font-size: 12.5px;
-}
-
-.box-link-loose__name {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 600;
-}
-
-.box-link-loose__name:hover {
-  text-decoration: underline;
-}
-
-.box-link-loose .button {
-  margin-left: auto;
-}
 
 /* campo que a caixa ligada já diz */
 .annotation-field select:disabled,
 .annotation-field input:disabled {
   opacity: 0.75;
   cursor: not-allowed;
+}
+
+/* objeto ligado a uma caixa: a cor da caixa na borda */
+.vehicle-row--boxed {
+  padding-left: 12px;
+  border-left: 4px solid;
 }

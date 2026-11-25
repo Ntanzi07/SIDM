@@ -1496,3 +1496,104 @@
     flex-direction: column;
   }
 }
+
+/* envio de .zip em partes */
+.zip-uploads {
+  display: grid;
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.zip-upload {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm, 8px);
+}
+
+.zip-upload--failed {
+  border-color: var(--danger);
+}
+
+.zip-upload__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.zip-upload__head small {
+  color: var(--text-3);
+}
+
+.zip-upload__actions {
+  display: flex;
+  gap: 8px;
+}
+
+.zip-upload__actions:empty {
+  display: none;
+}
+
+.zip-upload .form-hint {
+  margin: 0;
+}
+
+/* pasta ou zip: um botão, duas opções */
+.folder-or-zip {
+  position: relative;
+}
+
+button.folder-picker {
+  width: 100%;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+}
+
+.folder-or-zip__menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 280px;
+  padding: 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm, 8px);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.25);
+}
+
+.form-field .folder-or-zip__menu {
+  left: 0;
+  right: auto;
+}
+
+.folder-or-zip__menu button {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.folder-or-zip__menu button:hover,
+.folder-or-zip__menu button:focus-visible {
+  background: var(--surface-2);
+}
+
+.folder-or-zip__menu strong {
+  font-size: 13px;
+}
+
+.folder-or-zip__menu small {
+  color: var(--text-3);
+  font-size: 11.5px;
+}

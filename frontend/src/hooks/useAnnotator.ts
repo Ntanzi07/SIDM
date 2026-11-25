@@ -281,20 +281,20 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   }, [])
 
   // box: já nasce ligado a uma caixa (ex.: "+ veículo da caixa motorcycle").
-  const addObject = useCallback((type: string, box?: ObjectBox) => {
+  const addObject = useCallback((type: string, box?: ObjectBox, attributes?: Record<string, unknown>) => {
     const objectType = listObjectTypes(profile).find((t) => t.key === type)
     if (!objectType) return
-    setForm((currentForm) => ({ ...currentForm, objects: [...currentForm.objects, newObject(objectType, box)] }))
+    setForm((currentForm) => ({ ...currentForm, objects: [...currentForm.objects, newObject(objectType, box, attributes)] }))
   }, [profile])
 
   // Liga (ou desliga, com undefined) a caixa de um objeto.
-  const linkBox = useCallback((index: number, box: ObjectBox | undefined) => {
+  const linkBox = useCallback((index: number, box: ObjectBox | undefined, attributes?: Record<string, unknown>) => {
     setForm((currentForm) => ({
       ...currentForm,
       objects: currentForm.objects.map((object, i) => {
         if (i !== index) return object
         const type = listObjectTypes(profile).find((t) => t.key === object.type)
-        return type ? withBox(type, object, box) : object
+        return type ? withBox(type, object, box, attributes) : object
       }),
     }))
   }, [profile])

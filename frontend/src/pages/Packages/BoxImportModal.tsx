@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
-import { importTaskBoxes, listTasks, type BoxImportReport } from '../../services/api'
+import { describeLinks, importTaskBoxes, listTasks, type BoxImportReport } from '../../services/api'
 import { BoxImportSummary } from '../Tasks/BoxImportReport'
 import { useToastState } from '../../hooks/useToast'
 
@@ -69,7 +69,7 @@ export function BoxImportModal({ defaultTask, fixedTask = false, onClose, onAppl
     try {
       const result = await importTaskBoxes(task, file, dryRun, negatives)
       if (dryRun) setReport(result)
-      else onApplied(`${fmt(result.applied_boxes)} caixa(s) gravada(s) em ${fmt(result.applied)} imagem(ns) na tarefa ${task}.`)
+      else onApplied(`${fmt(result.applied_boxes)} caixa(s) gravada(s) em ${fmt(result.applied)} imagem(ns) na tarefa ${task}. ${describeLinks(result.links)}`.trim())
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível importar as caixas.')
     } finally {

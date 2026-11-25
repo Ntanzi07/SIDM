@@ -103,7 +103,11 @@ type ObjectType struct {
 type BoxLabel struct {
 	Label  string         `json:"label" bson:"label"`
 	Fields map[string]any `json:"fields,omitempty" bson:"fields,omitempty"`
-	From   string         `json:"from,omitempty" bson:"-"` // herdada (só na resposta)
+	// Attributes: atributo da caixa (do CVAT) → campo do objeto que é a
+	// mesma coisa (color → color). Ao ligar, o campo vazio vem do atributo;
+	// depois vale o campo (o CVAT não é reescrito).
+	Attributes map[string]string `json:"attributes,omitempty" bson:"attributes,omitempty"`
+	From       string            `json:"from,omitempty" bson:"-"` // herdada (só na resposta)
 }
 
 // Profile é um perfil de anotação.

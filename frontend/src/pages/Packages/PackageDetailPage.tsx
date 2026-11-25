@@ -1,5 +1,5 @@
 import { useNavigate, useParams } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { deletePackage, getPackage, imageFiles, listAnnotationProfiles, listImportProfiles, listIniProfiles, setPackageProfile, uploadImages, type ImportProfile, type PackageSummary, type UploadProgress } from '../../services/api'
 import type { AnnotationProfile } from '../../types/annotation'
 import type { ChangeEvent, FormEvent } from 'react'
@@ -8,6 +8,9 @@ import { UploadStatus } from './UploadStatus'
 import { BoxesSection } from './BoxesSection'
 import { ImportModal, type ImportSource } from './ImportModal'
 import { PackageImages } from './PackageImages'
+import { ZipList } from './ZipUploads'
+import { FolderOrZip } from './FolderOrZip'
+import { useZipUploads } from '../../hooks/useZipUploads'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import { useToastState } from '../../hooks/useToast'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
@@ -96,6 +99,12 @@ export function PackageDetailPage() {
       .finally(() => setSaving(false))
   }
 
+  // imagens novas de um zip: o resumo e a lista recarregam
+  const zips = useZipUploads(packageName, uploadIniProfile || undefined, useCallback(() => {
+    getPackage(packageName).then(setSelectedPackage).catch(() => { /* fica o anterior */ })
+    setImagesKey((key) => key + 1)
+  }, [packageName]))
+
   function handleImported() {
     setImporting(null)
     void refreshSummary()
@@ -149,7 +158,7 @@ export function PackageDetailPage() {
   }
 
   const pkg = encodeURIComponent(selectedPackage.name)
-  const uploadLabel = saving ? 'Enviando...' : readingFolder ? 'Lendo a pasta...' : 'Adicionar imagens'
+  const uploadLabel = saving ? 'Enviando...' : readingFolder ? 'Lendo a pasta...' : 'Adicionar pasta de imagens ou zip'
 
   return (
     <section className="package-page">
@@ -235,21 +244,20 @@ export function PackageDetailPage() {
                   ))}
                 </select>
               )}
-              <label className={readingFolder ? 'button button--primary button--sm upload-images-button upload-images-button--reading' : 'button button--primary button--sm upload-images-button'}>
-                {uploadLabel}
-                <input
-                  disabled={saving}
-                  multiple
-                  onChange={handleAddImages}
-                  onClick={startReadingFolder}
-                  ref={folderInputRef}
-                  type="file"
-                  {...{ webkitdirectory: 'true' }}
-                />
-              </label>
+              <FolderOrZip
+                className={readingFolder || zips.sending ? 'button button--primary button--sm upload-images-button upload-images-button--reading' : 'button button--primary button--sm upload-images-button'}
+                disabled={saving || Boolean(zips.sending)}
+                folderRef={folderInputRef}
+                onFolderChange={handleAddImages}
+                onFolderClick={startReadingFolder}
+                onZipChange={(event) => void zips.choose(event)}
+              >
+                {zips.sending ? 'Enviando zip...' : uploadLabel}
+              </FolderOrZip>
             </div>
           </div>
           {upload && <UploadStatus progress={upload} />}
+          <ZipList zips={zips} />
           <PackageImages key={imagesKey} onRemoved={() => void refreshSummary()} packageName={selectedPackage.name} />
         </div>
       </div>

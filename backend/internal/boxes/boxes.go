@@ -169,6 +169,9 @@ type Images interface {
 	SearchIDs(ctx context.Context, q url.Values) ([]string, error)
 	// Verified: quais destes sha1 estão verificados.
 	Verified(ctx context.Context, ids []string) (map[string]bool, error)
+	// LinkBoxes liga as caixas de uma tarefa aos objetos da imagem (a caixa
+	// motorcycle é um veículo): ver annotation.Profile.LinkBoxes.
+	LinkBoxes(ctx context.Context, sha1, task string, boxes []annotation.SeenBox, user string) (annotation.LinkResult, error)
 }
 
 // Profiles: o perfil de anotação do pacote (o *images.Service). Os

@@ -3,13 +3,13 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
 import { ZoomView } from '../../components/ZoomView/ZoomView'
-import { boxPending, type BoxRef } from '../../utils/boxes'
+import { boxPending, type BoxRef, colorOf } from '../../utils/boxes'
 import { describeBoxSets, useImageBoxes } from '../../hooks/useImageBoxes'
 import { useAnnotator } from '../../hooks/useAnnotator'
 import { fieldLabel, listObjectTypes, impliedKeys } from '../../utils/annotationForm'
 import { FieldInput } from './AnnotationFields'
 import { BoxLink } from './BoxLink'
-import { candidates, linkedKeys, toObjectBox } from '../../utils/boxLinks'
+import { linkedKeys, toObjectBox } from '../../utils/boxLinks'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
 import './Annotation.css'
 
@@ -43,6 +43,26 @@ export function AnnotationPage() {
   const links = linkedKeys(form.objects, boxSets)
   const takenBy = (index: number) => new Set([...links].filter(([i]) => i !== index).map(([, key]) => key))
   const showBox = (ref: BoxRef) => { setShowBoxes(true); selectBox(ref) }
+  // o nome do objeto de cada caixa ligada (caixa → "Veículo 1")
+  const objectName = (index: number) => {
+    const object = form.objects[index]
+    const type = objectTypes.find((t) => t.key === object.type)
+    const number = form.objects.slice(0, index + 1).filter((o) => o.type === object.type).length
+    return `${type ? fieldLabel(type) : object.type} ${number}`
+  }
+  const linkedNames = new Map([...links].map(([index, key]) => [key, objectName(index)]))
+  // caixa solta que pode virar um objeto da lista (motorcycle → "+ Veículo desta caixa")
+  const actionFor = (ref: BoxRef) => {
+    const box = boxSets.find((set) => set.task === ref.task)?.boxes[ref.index]
+    const type = box && objectTypes.find((t) => t.box_labels?.some((label) => label.label === box.label))
+    if (!box || !type) return null
+    const full = (type.max ?? 0) > 0 && countOf(type.key) >= (type.max ?? 0)
+    return {
+      label: `+ ${fieldLabel(type)} desta caixa`,
+      disabled: full,
+      run: () => { annotator.addObject(type.key, toObjectBox(ref.task, box), box.attributes); showBox(ref) },
+    }
+  }
   // Os problemas que não são de um campo só (ex.: "pelo menos 1 veículo").
   const generalProblems = annotator.problems.filter((problem) => problem.path === 'objects' || problem.path.endsWith('.type'))
 
@@ -203,7 +223,8 @@ export function AnnotationPage() {
                   if (!type) return null
                   const number = form.objects.slice(0, index + 1).filter((o) => o.type === object.type).length
                   return (
-                    <div className="vehicle-row" key={index}>
+                    // ligado a uma caixa: a cor dela na borda, como nos cards das caixas
+                    <div className={links.has(index) ? 'vehicle-row vehicle-row--boxed' : 'vehicle-row'} key={index} style={links.has(index) && object.box ? { borderLeftColor: colorOf(object.box.label, object.box.task) } : undefined}>
                       <div className="vehicle-row-header">
                         <h3>{fieldLabel(type)} {number}</h3>
                         <button
@@ -217,7 +238,7 @@ export function AnnotationPage() {
                       {(type.box_labels?.length ?? 0) > 0 && (
                         <BoxLink
                           object={object}
-                          onLink={(box) => annotator.linkBox(index, box)}
+                          onLink={(box, attributes) => annotator.linkBox(index, box, attributes)}
                           onShow={showBox}
                           sets={boxSets}
                           taken={takenBy(index)}
@@ -244,29 +265,8 @@ export function AnnotationPage() {
 
                 {objectTypes.map((type) => {
                   const full = (type.max ?? 0) > 0 && countOf(type.key) >= (type.max ?? 0)
-                  // as caixas deste tipo que ainda não são de nenhum objeto
-                  const used = new Set(links.values())
-                  const loose = candidates(type, boxSets).filter((option) => !used.has(option.key))
                   return (
                     <div className="annotation-object-type" key={type.key}>
-                      {loose.length > 0 && (
-                        <div className="box-link-loose">
-                          {loose.map((option) => (
-                            <div key={option.key}>
-                              <button className="box-link-loose__name" onClick={() => showBox(option.ref)} type="button">{option.name}</button>
-                              <span>ainda não é nenhum objeto da lista</span>
-                              <button
-                                className="button button--secondary button--sm"
-                                disabled={full}
-                                onClick={() => { annotator.addObject(type.key, toObjectBox(option.ref.task, option.box)); showBox(option.ref) }}
-                                type="button"
-                              >
-                                + {fieldLabel(type)} desta caixa
-                              </button>
-                            </div>
-                          ))}
-                        </div>
-                      )}
                       {countOf(type.key) === 0 && (
                         <p className="annotation-hint">
                           Nenhum(a) {fieldLabel(type).toLowerCase()} nesta imagem.
@@ -293,7 +293,7 @@ export function AnnotationPage() {
                 )}
 
                 {boxSets.some((set) => set.boxes.length > 0) && (
-                  <BoxAttributes onSaved={reloadBoxes} onSelect={selectBox} profile={profile} selected={selectedBox} sets={boxSets} />
+                  <BoxAttributes actionFor={actionFor} linked={linkedNames} onSaved={reloadBoxes} onSelect={(ref) => (ref ? showBox(ref) : selectBox(null))} profile={profile} selected={selectedBox} sets={boxSets} />
                 )}
 
                 {generalProblems.length > 0 && (

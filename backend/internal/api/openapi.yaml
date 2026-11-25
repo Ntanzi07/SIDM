@@ -600,6 +600,26 @@ paths:
                         boxes: { type: integer }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /packages/{name}/boxes/link:
+    post:
+      tags: [caixas]
+      summary: Ligar de novo as caixas do pacote aos objetos
+      description: |
+        O mesmo que o import das caixas já faz em cada imagem (ver `links` no
+        relatório do import): a caixa de uma label que representa um tipo
+        (`box_labels` do perfil) vira um objeto, ou se liga ao único objeto do
+        tipo sem caixa. Numa imagem verificada só liga, sem mudar valor nenhum.
+        Útil para caixas importadas antes, ou depois de mudar o perfil.
+      parameters:
+        - $ref: "#/components/parameters/PackageName"
+      responses:
+        "200":
+          description: O que foi feito, somado.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LinkResult" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /tasks:
     get:
       tags: [caixas]
@@ -1058,6 +1078,115 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/AnnotationValues" }
         "400": { $ref: "#/components/responses/Problems" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /packages/{name}/zip-uploads:
+    parameters:
+      - $ref: "#/components/parameters/PackageName"
+    post:
+      tags: [imagens]
+      summary: Começar (ou retomar) o envio de um .zip em partes
+      description: |
+        Para pastas grandes: a tela manda o zip em partes (`PUT /zip-uploads/{id}/chunk`)
+        e, quando chega tudo, `POST /zip-uploads/{id}/finish` grava as imagens em
+        segundo plano. Se já existe um envio que não terminou do mesmo arquivo
+        (pacote, nome e tamanho), ele é devolvido, com `received` dizendo de onde
+        continuar.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_name, size]
+              properties:
+                file_name: { type: string, example: fotos.zip }
+                size: { type: integer, description: Tamanho do zip em bytes. }
+                profile: { type: string, description: "Perfil de INI (jpeg-ini), como no upload." }
+      responses:
+        "200":
+          description: O envio (novo ou o que não terminou).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZipUpload" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    get:
+      tags: [imagens]
+      summary: Os envios de zip do pacote (o mais novo primeiro)
+      responses:
+        "200":
+          description: Os envios.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ZipUpload" } }
+
+  /zip-uploads/{id}:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    get:
+      tags: [imagens]
+      summary: Um envio de zip (o progresso)
+      responses:
+        "200":
+          description: O envio.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZipUpload" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [imagens]
+      summary: Cancelar o envio (apaga o zip; as imagens já gravadas ficam)
+      responses:
+        "200": { description: Apagado. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /zip-uploads/{id}/chunk:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+      - { name: offset, in: query, required: true, schema: { type: integer }, description: "Onde a parte começa (o `received` do envio)." }
+    put:
+      tags: [imagens]
+      summary: Mandar uma parte do zip (até 64 MB, o corpo cru)
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: O envio, com o novo `received`.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZipUpload" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: A parte não começa onde o envio parou; `upload.received` diz onde.
+
+  /zip-uploads/{id}/finish:
+    parameters:
+      - { name: id, in: path, required: true, schema: { type: string } }
+    post:
+      tags: [imagens]
+      summary: Gravar as imagens do zip (em segundo plano)
+      description: |
+        Abre o zip e grava cada imagem como no upload (criptografia, INI, repetidas
+        puladas). Segue mesmo se o navegador fechar; acompanhe com `GET
+        /zip-uploads/{id}`. No fim, o zip é apagado. Se o servidor reiniciar no
+        meio (`running` false com status `processing`), chamar de novo continua
+        de onde parou.
+      responses:
+        "202":
+          description: Começou (ou já estava rodando).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZipUpload" }
+        "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
 
   /packages/{name}/next:
@@ -2476,6 +2605,14 @@ components:
                   properties:
                     label: { type: string, example: motorcycle }
                     fields: { type: object, additionalProperties: true, example: { type: motorcycle } }
+                    attributes:
+                      type: object
+                      additionalProperties: { type: string }
+                      example: { color: color }
+                      description: |
+                        Atributo da caixa (do CVAT) → campo do objeto que é a mesma coisa.
+                        Ao ligar a caixa, a tela preenche o campo vazio com o atributo;
+                        depois vale o campo do SIDM (a caixa não é reescrita).
                     from: { type: string, readOnly: true }
               from: { type: string, readOnly: true, description: "Herdado: o perfil de onde o tipo veio." }
         created_by: { type: string, readOnly: true }
@@ -2740,6 +2877,7 @@ components:
     BoxImportReport:
       type: object
       properties:
+        links: { $ref: "#/components/schemas/LinkResult" }
         dry_run: { type: boolean }
         task: { type: string }
         file: { type: string }
@@ -2797,6 +2935,47 @@ components:
           description: Labels sem tipo com caixa no perfil do pacote (atributos crus).
         edited_replaced: { type: integer, description: Imagens com atributos editados no SIDM que serão sobrescritas. }
 
+    ZipUpload:
+      type: object
+      properties:
+        id: { type: string }
+        package: { type: string }
+        file_name: { type: string }
+        size: { type: integer }
+        received: { type: integer, description: Bytes que já chegaram. }
+        profile: { type: string }
+        status: { type: string, enum: [receiving, processing, done, failed] }
+        chunk_size: { type: integer, description: O tamanho de parte que a tela usa. }
+        total: { type: integer, description: Imagens no zip. }
+        processed: { type: integer }
+        created: { type: integer }
+        duplicates: { type: integer }
+        decrypted: { type: integer }
+        with_ini: { type: integer }
+        prefilled: { type: integer }
+        skipped: { type: integer, description: Arquivos que não são imagem. }
+        errors: { type: array, items: { type: string }, description: Até 100. }
+        error_count: { type: integer }
+        error: { type: string, description: Por que falhou (status failed). }
+        running: { type: boolean, description: "Gravando agora; processing sem running = chame finish para continuar." }
+        created_by: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LinkResult:
+      type: object
+      description: |
+        A ligação das caixas aos objetos. Regras: a ligação que já existe acha a
+        caixa de novo (mesma label, IoU >= 0,5); um par só (uma caixa e um
+        objeto do tipo sem caixa) se liga; sem nenhum objeto do tipo (nem ligado
+        a outra tarefa), cada caixa vira um objeto (só em imagem não
+        verificada); o resto fica solto para ligar na tela.
+      properties:
+        linked: { type: integer, description: Caixas ligadas a um objeto que já existia. }
+        created: { type: integer, description: Objetos novos, um por caixa. }
+        moved: { type: integer, description: Ligações que já existiam e a caixa mexeu (reimport). }
+        loose: { type: integer, description: "Caixas que podiam ser um objeto e ficaram soltas (ambíguo, verificada, máximo do tipo)." }
+        images: { type: integer, description: Imagens que mudaram. }
+        busy: { type: integer, description: Imagens puladas porque alguém está anotando. }
     TaskBody:
       type: object
       required: [name]

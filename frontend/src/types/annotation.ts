@@ -33,6 +33,8 @@ export type ProfileField = {
 export type BoxLabel = {
   label: string
   fields?: Record<string, unknown>
+  // atributo da caixa (do CVAT) → campo do objeto que é a mesma coisa (color → color)
+  attributes?: Record<string, string>
   from?: string // herdada
 }
 

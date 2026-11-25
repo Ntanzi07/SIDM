@@ -61,7 +61,12 @@ var userWrites = []string{
 	"POST /packages/{name}/import",
 	"POST /imports/inspect",
 	"POST /tasks/{name}/import",
+	"POST /packages/{name}/boxes/link", // o que o import das caixas já faz
 	"DELETE /images/{sha1}",
+	"POST /packages/{name}/zip-uploads", // o zip em partes
+	"PUT /zip-uploads/{id}/chunk",
+	"POST /zip-uploads/{id}/finish",
+	"DELETE /zip-uploads/{id}", // cancelar o próprio envio
 	// export e versões
 	"POST /exports/preview",
 	"POST /exports/download",

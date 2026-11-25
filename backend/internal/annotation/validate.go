@@ -44,7 +44,15 @@ func (p *Profile) Normalize() {
 		}
 		normFields(o.Fields)
 		for j := range o.BoxLabels {
-			o.BoxLabels[j].Label = strings.TrimSpace(o.BoxLabels[j].Label)
+			l := &o.BoxLabels[j]
+			l.Label = strings.TrimSpace(l.Label)
+			if len(l.Attributes) > 0 {
+				clean := make(map[string]string, len(l.Attributes))
+				for attr, field := range l.Attributes {
+					clean[strings.TrimSpace(attr)] = strings.TrimSpace(field)
+				}
+				l.Attributes = clean
+			}
 		}
 	}
 }

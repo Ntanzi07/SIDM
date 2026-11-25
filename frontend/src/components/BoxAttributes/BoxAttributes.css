@@ -93,3 +93,54 @@
   justify-content: flex-end;
   margin-top: 8px;
 }
+
+/* cada caixa é um objeto da imagem */
+.box-objects {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0;
+}
+
+.box-object {
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-left: 4px solid;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface);
+}
+
+.box-object--on {
+  background: var(--accent-soft);
+}
+
+.box-object__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.box-object__head .button {
+  margin-left: auto;
+}
+
+.box-object__name,
+.box-object__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.box-object__link {
+  font-size: 12px;
+  text-decoration: underline;
+}
+
+.box-object .box-attributes__values {
+  margin: 4px 0 0;
+}

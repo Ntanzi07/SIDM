@@ -51,7 +51,7 @@ export function candidates(type: ObjectType, sets: BoxSet[]): Candidate[] {
 }
 
 // Qual caixa cada objeto do formulário aponta (índice do objeto → chave da caixa).
-export function linkedKeys(objects: FormObject[], sets: BoxSet[]): Map<number, string> {
+export function linkedKeys(objects: Array<Pick<FormObject, 'box'>>, sets: BoxSet[]): Map<number, string> {
   const out = new Map<number, string>()
   objects.forEach((object, i) => {
     if (!object.box) return

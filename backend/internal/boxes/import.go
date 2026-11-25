@@ -51,6 +51,10 @@ type ImportReport struct {
 	UntypedLabels         []string `json:"untyped_labels"`          // labels sem tipo com caixa no perfil: atributos crus
 	EditedReplaced        int      `json:"edited_replaced"`         // imagens com atributos editados no SIDM que serão sobrescritas
 
+	// Links: as caixas ligadas aos objetos (motorcycle → um veículo), depois
+	// de gravar (vazio no ensaio).
+	Links annotation.LinkResult `json:"links"`
+
 	matched []importMatch `json:"-"`
 }
 
@@ -341,7 +345,61 @@ func (s *Service) Import(ctx context.Context, taskName, fileName string, data []
 		return nil, err
 	}
 	rep.Applied = len(sets)
+	// As caixas já estão gravadas: um erro aqui não desfaz o import (dá para
+	// ligar de novo pelo pacote).
+	for _, set := range sets {
+		rep.Links.Add(s.link(ctx, set, user))
+	}
 	return rep, nil
+}
+
+// link liga as caixas de um Set aos objetos da imagem; erro só no log.
+func (s *Service) link(ctx context.Context, set Set, user string) annotation.LinkResult {
+	seen := make([]annotation.SeenBox, len(set.Boxes))
+	for i, b := range set.Boxes {
+		seen[i] = annotation.SeenBox{Label: b.Label, X: b.X, Y: b.Y, W: b.W, H: b.H, Attributes: b.Attributes}
+	}
+	res, err := s.images.LinkBoxes(ctx, set.ImageID, set.Task, seen, user)
+	if err != nil {
+		platform.LogError(fmt.Errorf("ligar as caixas de %s (%s): %w", set.ImageID, set.Task, err))
+	}
+	return res
+}
+
+// LinkPackage liga de novo as caixas de todas as tarefas das imagens do
+// pacote (para o que foi importado antes da ligação automática, ou depois
+// de mudar as caixas que representam um tipo no perfil).
+func (s *Service) LinkPackage(ctx context.Context, pkg, user string) (annotation.LinkResult, error) {
+	var total annotation.LinkResult
+	counts, err := s.repo.PackageCounts(ctx, pkg)
+	if err != nil || len(counts) == 0 {
+		return total, err
+	}
+	const page = 500
+	for skip := int64(0); ; skip += page {
+		imgs, _, err := s.images.InPackage(ctx, pkg, page, skip)
+		if err != nil {
+			return total, err
+		}
+		ids := make([]string, len(imgs))
+		for i, img := range imgs {
+			ids[i] = img.SHA1
+		}
+		for _, c := range counts {
+			sets, err := s.repo.FindSets(ctx, c.Task, ids)
+			if err != nil {
+				return total, err
+			}
+			for _, id := range ids {
+				if set, ok := sets[id]; ok {
+					total.Add(s.link(ctx, set, user))
+				}
+			}
+		}
+		if len(imgs) < page {
+			return total, nil
+		}
+	}
 }
 
 // BadFileError: o arquivo não é um COCO 1.0 que dê para ler (vira 400).

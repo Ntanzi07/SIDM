@@ -1,11 +1,13 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"strings"
 	"testing"
 
+	"SIDM/internal/annotation"
 	"SIDM/internal/images"
 	"SIDM/internal/importer"
 	"SIDM/internal/platform"
@@ -246,6 +248,69 @@ func TestPerfilDeImportAntigoViraObjects(t *testing.T) {
 // Herança: um pacote de "moto" (que estende veiculos) anota os campos dos
 // dois, o veículo liga com a caixa motorcycle, e a pesquisa de veiculos
 // conta o pacote de moto.
+func TestImportDeCaixasLigaAosObjetos(t *testing.T) {
+	env := newTestEnv(t)
+	assertStatus(t, env.doJSON("POST", "/annotation-profiles", `{"name": "carros", "extends": "veiculos",
+		"objects": [{"key": "vehicle", "fields": [], "box_labels": [{"label": "carro", "fields": {"type": "car"}, "attributes": {"caractere": "plate"}}]}]}`), http.StatusCreated)
+	assertStatus(t, env.doJSON("POST", "/packages", `{"name": "rua", "profile": "carros"}`), http.StatusCreated)
+	res := env.uploadTo(t, "rua", upFile{"a.jpg", realJPEG(t, 64, 48, 11)}, upFile{"b.jpg", realJPEG(t, 64, 48, 12)})
+	a, b := res[0].SHA1, res[1].SHA1
+	// b já tem um veículo (sem caixa): liga a ele em vez de criar
+	assertStatus(t, env.doJSON("PUT", "/images/"+b, `{"fields": {}, "objects": [{"type": "vehicle", "fields": {"plate": "ABC1234"}}]}`), http.StatusOK)
+	assertStatus(t, env.doJSON("POST", "/tasks", `{"name": "rua","labels":["placa","carro"]}`), http.StatusCreated)
+
+	coco := cocoJSON(cocoImg{a + ".jpg", 64, 48, [][4]float64{{1, 1, 10, 5}, {5, 5, 30, 30}}}, cocoImg{b + ".jpg", 64, 48, [][4]float64{{1, 1, 10, 5}, {6, 6, 30, 30}}})
+	rec := env.postFiles(t, "/tasks/rua/import?dry_run=false", upFile{"rua.json", coco})
+	assertStatus(t, rec, http.StatusOK)
+	var rep struct{ Links annotation.LinkResult }
+	decode(t, rec, &rep)
+	if rep.Links.Created != 1 || rep.Links.Linked != 1 || rep.Links.Images != 2 || rep.Links.Loose != 0 {
+		t.Errorf("ligação no import: %+v", rep.Links)
+	}
+	img := env.image(t, a)
+	if len(img.Objects) != 1 || img.Objects[0].Fields["type"] != "car" || img.Objects[0].Box == nil || img.Objects[0].Box.X != 5 {
+		t.Errorf("objeto criado: %+v", img.Objects)
+	}
+	img = env.image(t, b)
+	if len(img.Objects) != 1 || img.Objects[0].Fields["plate"] != "ABC1234" || img.Objects[0].Fields["type"] != "car" || img.Objects[0].Box == nil {
+		t.Errorf("objeto ligado: %+v", img.Objects)
+	}
+
+	// de novo pelo pacote: nada muda (já estão ligados)
+	rec = env.doJSON("POST", "/packages/rua/boxes/link", "")
+	assertStatus(t, rec, http.StatusOK)
+	var again annotation.LinkResult
+	decode(t, rec, &again)
+	if again.Changed() || again.Images != 0 {
+		t.Errorf("ligar de novo: %+v", again)
+	}
+}
+
+// No padrão (veiculos), as caixas ficam no banco: o import e a anotação
+// têm que ver elas.
+func TestImportLigaNoPadrao(t *testing.T) {
+	env := newTestEnv(t)
+	p := annotation.Vehicles()
+	p.Objects[0].BoxLabels = []annotation.BoxLabel{{Label: "carro", Fields: map[string]any{"type": "car"}}}
+	body, _ := json.Marshal(p)
+	assertStatus(t, env.doJSON("PUT", "/annotation-profiles/veiculos", string(body)), http.StatusOK)
+	assertStatus(t, env.doJSON("POST", "/packages", `{"name": "rua"}`), http.StatusCreated)
+	sha := env.uploadTo(t, "rua", upFile{"a.jpg", realJPEG(t, 64, 48, 21)})[0].SHA1
+	assertStatus(t, env.doJSON("POST", "/tasks", `{"name": "rua","labels":["placa","carro"]}`), http.StatusCreated)
+	coco := cocoJSON(cocoImg{sha + ".jpg", 64, 48, [][4]float64{{1, 1, 10, 5}, {5, 5, 30, 30}}})
+	rec := env.postFiles(t, "/tasks/rua/import?dry_run=false", upFile{"rua.json", coco})
+	assertStatus(t, rec, http.StatusOK)
+	var rep struct{ Links annotation.LinkResult }
+	decode(t, rec, &rep)
+	if rep.Links.Created != 1 {
+		t.Fatalf("padrão: %+v", rep.Links)
+	}
+	// a anotação com a caixa passa no perfil do pacote
+	img := env.image(t, sha)
+	out, _ := json.Marshal(map[string]any{"fields": map[string]any{}, "objects": img.Objects})
+	assertStatus(t, env.doJSON("PUT", "/images/"+sha, string(out)), http.StatusOK)
+}
+
 func TestPerfilQueEstendeEhLigaCaixa(t *testing.T) {
 	env := newTestEnv(t)
 	assertStatus(t, env.doJSON("POST", "/annotation-profiles", `{"name": "moto", "extends": "veiculos",
@@ -291,4 +356,13 @@ func TestPerfilQueEstendeEhLigaCaixa(t *testing.T) {
 	// veiculos não se apaga? (é padrão) — o pai salvo com filho não se apaga
 	assertStatus(t, env.doJSON("POST", "/annotation-profiles", `{"name": "moto-noite", "extends": "moto", "fields": []}`), http.StatusCreated)
 	assertStatus(t, env.do("DELETE", "/annotation-profiles/moto", nil, nil), http.StatusBadRequest)
+}
+
+func (e *testEnv) image(t *testing.T, sha string) images.Image {
+	t.Helper()
+	rec := e.do("GET", "/images/"+sha, nil, nil)
+	assertStatus(t, rec, http.StatusOK)
+	var img images.Image
+	decode(t, rec, &img)
+	return img
 }

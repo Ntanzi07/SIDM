@@ -12,16 +12,23 @@ import './BoxAttributes.css'
 // das caixas em que foi digitado: depois de um reimport ou de salvar, some.
 type Draft = { version: string; values: Record<number, FormValues> }
 
-// Os atributos das caixas do CVAT, por tarefa. A caixa selecionada (na imagem
-// ou na lista) mostra os campos do tipo de objeto do perfil; label sem tipo
-// mostra os atributos como vieram, só leitura. readOnly: só mostra.
-export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = false, onSaved }: {
+// Uma ação na caixa: virar um objeto da lista (ex.: "+ Veículo desta caixa").
+export type BoxAction = { label: string; disabled?: boolean; run: () => void }
+
+// As caixas do CVAT como objetos da imagem, por tarefa. Cada caixa é um card:
+// clicar mostra na imagem; label com tipo de caixa no perfil mostra os campos
+// (na selecionada); sem tipo, os atributos como vieram (ou nada). As caixas
+// já ligadas a um objeto da lista (linked) aparecem nele, e aqui só o nome.
+// readOnly: só mostra.
+export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = false, onSaved, linked, actionFor }: {
   sets: BoxSet[]
   profile: AnnotationProfile | null
   selected: BoxRef | null
   onSelect: (box: BoxRef | null) => void
   readOnly?: boolean
   onSaved?: () => void
+  linked?: Map<string, string> // "tarefa#índice" → o objeto (ex.: "Veículo 1")
+  actionFor?: (ref: BoxRef) => BoxAction | null
 }) {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [problems, setProblems] = useState<Record<string, Problem[]>>({})
@@ -83,85 +90,96 @@ export function BoxAttributes({ sets, profile, selected, onSelect, readOnly = fa
     }
   }
 
+  const free = withBoxes.reduce((n, set) => n + set.boxes.filter((_, i) => !linked?.has(`${set.task}#${i}`)).length, 0)
+
   return (
     <div className="box-attributes">
-      <h3>Caixas</h3>
-      {!selected && <p className="box-attributes__hint">Clique numa caixa (na imagem ou aqui) para ver os atributos.</p>}
+      <h3>{linked ? 'Outros objetos da imagem (caixas)' : 'Caixas'}</h3>
+      {linked && free === 0 && <p className="box-attributes__hint">Todas as caixas já são objetos da lista acima.</p>}
       {withBoxes.map((set) => {
         const dirty = Object.keys(draftOf(set)).length > 0
         const pick = selected?.task === set.task ? selected.index : -1
-        const box = pick >= 0 ? set.boxes[pick] : undefined
-        const type = box ? boxType(profile, box.label) : undefined
-        const problemAt = (key: string) => problems[set.task]?.find((p) => p.path === `boxes[${pick}].attributes.${key}`)?.msg
+        const problemAt = (index: number, key: string) => problems[set.task]?.find((p) => p.path === `boxes[${index}].attributes.${key}`)?.msg
+        const joined = set.boxes.flatMap((b, index) => {
+          const name = linked?.get(`${set.task}#${index}`)
+          return name ? [{ index, label: b.label, name }] : []
+        })
         return (
           <div className="box-attributes__task" key={set.task}>
             <div className="box-attributes__heading">
               <strong>{set.task}</strong>
               {set.updated_by && <small>atributos editados por {set.updated_by}</small>}
             </div>
-            <div className="box-attributes__list">
+            <div className="box-objects">
               {set.boxes.map((b, index) => {
+                if (linked?.has(`${set.task}#${index}`)) return null
                 const ref = { task: set.task, index }
+                const type = boxType(profile, b.label)
+                const on = index === pick
+                const attrs = Object.entries(b.attributes ?? {})
+                const action = actionFor?.(ref) ?? null
                 return (
-                  <button
-                    className={index === pick ? 'box-attributes__chip box-attributes__chip--on' : 'box-attributes__chip'}
-                    key={index}
-                    onClick={() => onSelect(index === pick ? null : ref)}
-                    style={{ borderColor: colorOf(b.label, set.task) }}
-                    title={pending(ref) ? 'atributo obrigatório faltando' : undefined}
-                    type="button"
-                  >
-                    {index + 1}. {b.label}{pending(ref) && <span className="box-attributes__pending">!</span>}
-                  </button>
+                  <div className={on ? 'box-object box-object--on' : 'box-object'} key={index} style={{ borderLeftColor: colorOf(b.label, set.task) }}>
+                    <div className="box-object__head">
+                      <button className="box-object__name" onClick={() => onSelect(on ? null : ref)} title="Ver na imagem" type="button">
+                        {index + 1}. {b.label}{pending(ref) && <span className="box-attributes__pending" title="atributo obrigatório faltando">!</span>}
+                      </button>
+                      {action && (
+                        <button className="button button--secondary button--sm" disabled={action.disabled} onClick={action.run} type="button">{action.label}</button>
+                      )}
+                    </div>
+                    {type && !readOnly && on && (
+                      <div className="box-attributes__fields">
+                        {type.fields.length === 0 && <p className="box-attributes__hint">O tipo {fieldLabel(type)} não tem campos.</p>}
+                        {type.fields.map((field) => (
+                          <FieldInput
+                            error={problemAt(index, field.key)}
+                            field={field}
+                            key={field.key}
+                            onChange={(value) => change(set, index, type, field.key, value)}
+                            value={valuesOf(set, index, type)[field.key] ?? ''}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    {type && (readOnly || !on) && type.fields.length > 0 && (
+                      <dl className="box-attributes__values">
+                        {type.fields.map((field) => (
+                          <div key={field.key}>
+                            <dt>{fieldLabel(field)}</dt>
+                            <dd>{displayValue(field, (readOnly ? undefined : draftOf(set)[index]?.[field.key]) ?? b.attributes?.[field.key])}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    )}
+                    {!type && attrs.length > 0 && (
+                      <dl className="box-attributes__values">
+                        {attrs.map(([key, value]) => (
+                          <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(', ') : String(value)}</dd></div>
+                        ))}
+                      </dl>
+                    )}
+                  </div>
                 )
               })}
             </div>
-
-            {box && type && !readOnly && (
-              <div className="box-attributes__fields">
-                {type.fields.length === 0 && <p className="box-attributes__hint">O tipo {fieldLabel(type)} não tem campos.</p>}
-                {type.fields.map((field) => (
-                  <FieldInput
-                    error={problemAt(field.key)}
-                    field={field}
-                    key={field.key}
-                    onChange={(value) => change(set, pick, type, field.key, value)}
-                    value={valuesOf(set, pick, type)[field.key] ?? ''}
-                  />
+            {joined.length > 0 && (
+              <p className="box-attributes__hint">
+                Já são objetos da lista:{' '}
+                {joined.map((j, k) => (
+                  <span key={j.index}>
+                    {k > 0 && ', '}
+                    <button className="box-object__link" onClick={() => onSelect({ task: set.task, index: j.index })} type="button">{j.index + 1}. {j.label}</button> ({j.name})
+                  </span>
                 ))}
-              </div>
-            )}
-            {box && type && readOnly && (
-              <dl className="box-attributes__values">
-                {type.fields.map((field) => (
-                  <div key={field.key}>
-                    <dt>{fieldLabel(field)}</dt>
-                    <dd>{displayValue(field, box.attributes?.[field.key])}</dd>
-                  </div>
-                ))}
-              </dl>
-            )}
-            {box && !type && (
-              <>
-                <p className="box-attributes__hint">
-                  A label "{box.label}" não é um tipo de objeto com caixa do perfil: os atributos ficam como vieram no import.
-                </p>
-                <dl className="box-attributes__values">
-                  {Object.entries(box.attributes ?? {}).map(([key, value]) => (
-                    <div key={key}><dt>{key}</dt><dd>{Array.isArray(value) ? value.join(', ') : String(value)}</dd></div>
-                  ))}
-                  {Object.keys(box.attributes ?? {}).length === 0 && <div><dt>Atributos</dt><dd>nenhum</dd></div>}
-                </dl>
-              </>
+              </p>
             )}
 
             {!readOnly && dirty && (
               <div className="box-attributes__actions">
-                {dirty && (
-                  <button className="button button--primary button--sm" disabled={saving !== ''} onClick={() => void save(set)} type="button">
-                    {saving === set.task ? 'Salvando...' : 'Salvar atributos'}
-                  </button>
-                )}
+                <button className="button button--primary button--sm" disabled={saving !== ''} onClick={() => void save(set)} type="button">
+                  {saving === set.task ? 'Salvando...' : 'Salvar atributos'}
+                </button>
               </div>
             )}
           </div>

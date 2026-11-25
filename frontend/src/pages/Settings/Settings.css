@@ -722,3 +722,18 @@
 .ap-box-label {
   align-items: flex-end;
 }
+
+.ap-box-label-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ap-box-attrs {
+  display: grid;
+  gap: 6px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-strong);
+}

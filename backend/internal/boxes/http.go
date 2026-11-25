@@ -43,6 +43,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "GET", Path: "/images/{sha1}/boxes", Handler: s.handleImageBoxes},
 		{Method: "PUT", Path: "/images/{sha1}/boxes/{task}", Handler: s.handleUpdateAttributes},
 		{Method: "GET", Path: "/packages/{name}/boxes", Handler: s.handlePackageBoxes},
+		{Method: "POST", Path: "/packages/{name}/boxes/link", Handler: s.handleLinkPackage},
 		{Method: "GET", Path: "/boxes/stats", Handler: s.handleLabelStats},
 		{Method: "GET", Path: "/boxes/packages", Handler: s.handlePackageTasks},
 		{Method: "GET", Path: "/packages/{name}/cvat.zip", Handler: s.handleCVATZip},
@@ -270,6 +271,21 @@ const maxAttributesBytes = 1 << 20
 
 // GET /packages/{name}/boxes
 // Por tarefa, quantas imagens do pacote estão anotadas nela.
+// POST /packages/{name}/boxes/link: liga de novo as caixas do pacote aos
+// objetos (o que o import já faz sozinho).
+func (s *Service) handleLinkPackage(w http.ResponseWriter, r *http.Request) {
+	pkg, ok := s.packages.PackageByName(w, r, r.PathValue("name"))
+	if !ok {
+		return
+	}
+	res, err := s.LinkPackage(r.Context(), pkg.Name, platform.UserFrom(r))
+	if err != nil {
+		platform.ServerError(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, res)
+}
+
 func (s *Service) handlePackageBoxes(w http.ResponseWriter, r *http.Request) {
 	pkg, ok := s.packages.PackageByName(w, r, r.PathValue("name"))
 	if !ok {

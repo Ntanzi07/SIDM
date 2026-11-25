@@ -70,23 +70,49 @@ function valuesFrom(fields: ProfileField[], stored: Record<string, unknown> | un
 // Os tipos de objeto anotados aqui (os com caixa vêm do CVAT).
 export const listObjectTypes = (profile: AnnotationProfile) => profile.objects.filter((type) => !type.box)
 
-export function newObject(type: ObjectType, box?: ObjectBox): FormObject {
+// box: já nasce ligado a uma caixa; attributes: os atributos dela (do CVAT).
+export function newObject(type: ObjectType, box?: ObjectBox, attributes?: Record<string, unknown>): FormObject {
   const object: FormObject = { type: type.key, values: valuesFrom(type.fields, undefined, true) }
-  return box ? withBox(type, object, box) : object
+  // objeto novo: o atributo da caixa vale mais que o valor inicial do campo
+  return box ? withBox(type, object, box, attributes, true) : object
 }
+
+const isEmpty = (value: FormValue | undefined) => value === undefined || value === '' || (Array.isArray(value) && value.length === 0)
 
 // Liga (ou desliga, com box undefined) a caixa de um objeto. O que a label
 // da caixa diz vale para o objeto (motorcycle → tipo moto): troca o valor,
-// porque a caixa manda (o backend recusaria um valor diferente).
-export function withBox(type: ObjectType, object: FormObject, box: ObjectBox | undefined): FormObject {
+// porque a caixa manda (o backend recusaria um valor diferente). Os
+// atributos que são um campo (color → Cor) preenchem o campo vazio (ou
+// todos, com overwrite); depois vale o campo.
+export function withBox(type: ObjectType, object: FormObject, box: ObjectBox | undefined, attributes?: Record<string, unknown>, overwrite = false): FormObject {
   if (!box) return { type: object.type, values: object.values }
-  const implied = type.box_labels?.find((label) => label.label === box.label)?.fields ?? {}
+  const label = type.box_labels?.find((l) => l.label === box.label)
   const values = { ...object.values }
-  for (const [key, value] of Object.entries(implied)) {
+  for (const [attr, key] of Object.entries(label?.attributes ?? {})) {
+    const field = type.fields.find((f) => f.key === key)
+    const value = attributes?.[attr]
+    if (field && value !== undefined && value !== null && value !== '' && (overwrite || isEmpty(values[key]))) {
+      values[key] = toFormValue(field, value)
+    }
+  }
+  for (const [key, value] of Object.entries(label?.fields ?? {})) {
     const field = type.fields.find((f) => f.key === key)
     if (field) values[key] = toFormValue(field, value)
   }
   return { type: object.type, values, box }
+}
+
+// Os atributos da caixa ligada, para mostrar no objeto: os que são um campo
+// (com o aviso se o campo ficou diferente) e os outros, só para ver.
+export type BoxAttributeNote = { attr: string; value: unknown; field?: ProfileField; differs: boolean }
+export function boxAttributeNotes(type: ObjectType, object: FormObject, attributes: Record<string, unknown> | undefined): BoxAttributeNote[] {
+  if (!object.box || !attributes) return []
+  const mapped = type.box_labels?.find((l) => l.label === object.box?.label)?.attributes ?? {}
+  return Object.entries(attributes).map(([attr, value]) => {
+    const field = type.fields.find((f) => f.key === mapped[attr])
+    const differs = Boolean(field) && value !== null && value !== '' && JSON.stringify(toFormValue(field!, value)) !== JSON.stringify(object.values[field!.key] ?? '')
+    return { attr, value, field, differs }
+  })
 }
 
 // Os campos que a caixa ligada já diz (a tela trava esses).

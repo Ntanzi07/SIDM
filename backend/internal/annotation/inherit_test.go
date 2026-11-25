@@ -161,3 +161,26 @@ func TestLigacaoCaixa(t *testing.T) {
 		t.Errorf("tipo com caixa e labels: %v", err)
 	}
 }
+
+func TestAtributosDaCaixa(t *testing.T) {
+	p := moto()
+	p.Objects[0].BoxLabels[0].Attributes = map[string]string{" color ": "color"}
+	p.Normalize()
+	r := withLabels(Vehicles(), p.Objects)
+	if err := r.validateLinks(); err != nil {
+		t.Fatalf("mapa válido recusado: %v", err)
+	}
+	if r.Objects[0].BoxLabels[0].Attributes["color"] != "color" {
+		t.Errorf("nome do atributo não foi limpo: %+v", r.Objects[0].BoxLabels[0].Attributes)
+	}
+	for name, attrs := range map[string]map[string]string{
+		"campo que não existe":  {"cor": "nao_tem"},
+		"campo repetido":        {"cor": "color", "colour": "color"},
+		"campo que a label diz": {"kind": "type"},
+	} {
+		r.Objects[0].BoxLabels[0].Attributes = attrs
+		if err := r.validateLinks(); err == nil {
+			t.Errorf("%s: devia recusar", name)
+		}
+	}
+}
