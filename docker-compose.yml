@@ -40,6 +40,16 @@ services:
       SIDM_ADMIN_USER: ${SIDM_ADMIN_USER:-}
       SIDM_ADMIN_EMAIL: ${SIDM_ADMIN_EMAIL:-}
       SIDM_ADMIN_PASSWORD: ${SIDM_ADMIN_PASSWORD:-}
+      # Processar: o detector de placas (container lpr-class, do .deb
+      # splice-lpr), publicado no host na porta 54321. Não usa o LPR_ADDR do
+      # .env: aquele é o do go run (127.0.0.1), que dentro do container é o
+      # próprio container.
+      LPR_ADDR: ${LPR_DOCKER_ADDR:-host.docker.internal:54321}
+      # o contador de eixos (container axlecounter.software, rede do host, porta 54323)
+      AXLE_ADDR: ${AXLE_DOCKER_ADDR:-host.docker.internal:54323}
+    extra_hosts:
+      # no Linux o host.docker.internal não existe sozinho: aponta para o host
+      - "host.docker.internal:host-gateway"
     ports:
       - "${BACKEND_PORT:-8080}:8080"
     volumes:
@@ -53,17 +63,24 @@ services:
       - backend
       - frontend
 
-  # frontend:
-  #   build: ./frontend
-  #   container_name: sidm-frontend
-  #   restart: unless-stopped
-  #   ports:
-  #     - "3000:80"
-  #   depends_on:
-  #     backend:
-  #       condition: service_healthy
-  #   networks:
-  #     - frontend
+  # o site compilado num nginx; /api vai para o backend pela rede frontend
+  frontend:
+    build: ./frontend
+    container_name: sidm-frontend
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-3000}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      # 127.0.0.1, não localhost: no Alpine o localhost vai para o IPv6 (::1), e o nginx escuta só em IPv4
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - frontend
 
 networks:
   backend:   # mongo <-> backend

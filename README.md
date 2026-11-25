@@ -66,7 +66,7 @@ do próprio JPEG**.
 ```
 SIDM/
 ├── .env / .env.example     portas, senhas do Mongo, pasta das imagens (.env fora do git)
-├── docker-compose.yml      mongo + backend, healthchecks, redes separadas
+├── docker-compose.yml      mongo + backend + frontend (nginx), healthchecks, redes separadas
 ├── mongo/init/
 │   ├── 00-users.js         cria o usuário sidm_app (readWrite só no banco sidm)
 │   └── 01-init.js          collections e índices
@@ -91,6 +91,10 @@ SIDM/
         ├── export/         datasets de treino: perfis, divisão, pastas, nomes, COCO/YOLO/VOC e só imagens (sem banco, sem HTTP)
         ├── exports/        MÓDULO: perfis de export salvos, preview e download do zip
         ├── annotation/     MÓDULO: perfis de anotação (campos da imagem e tipos de objeto)
+        ├── modelrpc/       conexão net/rpc comum aos servidores dos modelos de IA (prazo, reconectar)
+        ├── lpr/            cliente do detector de placas (lpr-class), sem banco e sem HTTP
+        ├── axle/           cliente do contador de eixos (axlecounter.software), sem banco e sem HTTP
+        ├── processing/     MÓDULO: página Processar (pré-anotação por modelos de IA)
         └── api/            junta as rotas dos módulos: /health, /docs + openapi.yaml
 ```
 
@@ -620,6 +624,78 @@ renomeá-la depois.
 
 ---
 
+## Processar (pré-anotação por modelos de IA)
+
+Na página **Processar**, um modelo de IA passa pelas imagens e grava as caixas
+que achou numa **tarefa**. Depois, uma pessoa só corrige, no CVAT (o `cvat.zip` e
+o import do COCO, como em qualquer tarefa) ou na tela de anotação. O primeiro
+modelo é o **LPR**, o detector de placas da Splice; o segundo é o contador de
+**Eixos** (mais abaixo). O LPR acha:
+- os veículos: `bus`, `car`, `motorcycle` e `truck`;
+- as placas: `plate`, com o atributo `text`, montado com os caracteres dela;
+- cada caractere: `0`-`9` e `A`-`Z`, com o atributo `score`.
+
+**Como usar:** escolha o modelo, os **pacotes** (um, vários ou todos), quais
+imagens entram (**só pendentes**, **só verificadas** ou **todas**), a tarefa
+(padrão `pre-lpr`; ela é criada se não existir) e o score mínimo dos caracteres.
+O processamento roda em segundo plano, com o progresso na tela. Ele pode ser
+cancelado, e o histórico mostra o relatório de cada processamento. A página é
+**só de admin**: para o usuário normal, ela nem aparece no menu, e a API
+(`/processing/...`) responde 403, até para ler.
+
+**O que nunca muda:**
+- o arquivo da imagem;
+- os campos e o status da imagem (o modelo só grava caixas);
+- as caixas que vieram do CVAT ou foram editadas no SIDM. A imagem é **pulada**
+  e aparece no relatório.
+
+Rodar de novo é seguro: só as caixas do próprio modelo são regravadas.
+
+### O detector LPR (container `lpr-class`)
+
+O LPR roda **fora** do SIDM, no container `lpr-class`, que o `.deb` `splice-lpr`
+instala. Ele usa a imagem `visao_computacional` e as pastas de `/usr/local/splice`
+e escuta na porta **54321**. O SIDM fala com ele por `net/rpc` (o método
+`LprRPC.GetObjects`), e o endereço vem do `LPR_ADDR`:
+
+| Onde o backend roda | `LPR_ADDR` |
+|---|---|
+| Docker (`docker compose`) | `LPR_DOCKER_ADDR`, padrão `host.docker.internal:54321`: o `lpr-class` publicado no host (o compose liga o `host-gateway`). O `LPR_ADDR` do `.env` **não** vale aqui: `127.0.0.1` dentro do container é o próprio container |
+| `go run` | `LPR_ADDR=127.0.0.1:54321` no `.env` (vazio = o LPR fica desligado) |
+
+Para conferir:
+- `docker ps` deve listar o `lpr-class`;
+- o log do backend deve dizer `modelo LPR em ...`;
+- na página Processar, o LPR deve aparecer como **disponível**.
+
+Se aparecer "indisponível", o detalhe está no log do backend. Os motivos comuns são:
+- o container parado;
+- a porta 54321 não publicada;
+- um firewall bloqueando o Docker de chegar ao host.
+
+### O contador de eixos (container `axlecounter.software`)
+
+O modelo **Eixos** (um RF-DETR) acha cada eixo do veículo (`axle`) e a classe do
+veículo (`class_a` a `class_h`), cada caixa com o atributo `score`. As caixas vão
+para a tarefa `pre-eixos`. Ele roda fora do SIDM, no container
+`axlecounter.software`, que o `.deb` de mesmo nome instala, na rede do host, porta
+**54323**. O método usado é `AxleRPC.GetAxlesFull`.
+
+| Onde o backend roda | variável |
+|---|---|
+| Docker | `AXLE_DOCKER_ADDR`, padrão `host.docker.internal:54323` |
+| `go run` | `AXLE_ADDR=127.0.0.1:54323` no `.env` (vazio = desligado) |
+
+Os nomes das classes e o corte de score ficam no servidor
+(`/app/config/server.json` e `axle_runtime.json`, dentro do container). Por isso o
+score mínimo padrão na página é 0, e dá para ser mais exigente nela. Se o servidor
+estiver com `active: false`, cada imagem dá erro ("desligado"), em vez de ser
+gravada como "sem nenhum eixo".
+
+Os dois modelos atendem **uma imagem por vez**, então só roda um processamento por
+modelo de cada vez. Se o servidor do SIDM reiniciar no meio, o processamento fica como
+**interrompido**; é só rodar de novo.
+
 ## Perfis de anotação
 
 Um perfil diz **o que se anota** em cada imagem:
@@ -893,7 +969,11 @@ e a porta exposta vem do `BACKEND_PORT`.
 ```powershell
 docker compose up -d --build
 ```
-O backend fica em `http://localhost:<BACKEND_PORT>`.
+O sistema fica em `http://localhost:<FRONTEND_PORT>` (3000 por padrão) e o backend em
+`http://localhost:<BACKEND_PORT>`. O frontend é o site compilado num nginx, que repassa
+`/api` para o backend, como o proxy do `npm run dev`. Os containers voltam sozinhos
+(`restart: unless-stopped`). Depois de mudar o código, reconstrua o que mudou:
+`docker compose up -d --build frontend` (ou `backend`).
 
 ### 4. Teste rápido
 ```powershell

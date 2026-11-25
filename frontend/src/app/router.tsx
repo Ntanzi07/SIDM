@@ -8,6 +8,7 @@ import { AnnotationPage } from '../pages/Annotation/AnnotationPage'
 import { SettingsPage } from '../pages/Settings/SettingsPage'
 import { ImageViewerPage } from '../pages/Viewer/ImageViewerPage'
 import { TasksPage } from '../pages/Tasks/TasksPage'
+import { ProcessPage } from '../pages/Process/ProcessPage'
 import { DashboardPage } from '../pages/Dashboard/DashboardPage'
 import { DatasetPage } from '../pages/Versions/DatasetPage'
 import { LoginPage } from '../pages/Login/LoginPage'
@@ -24,9 +25,10 @@ export function Router() {
           <Route path="/" element={<PackagesPage />} />
           <Route path="/pacotes" element={<PackagesPage />} />
           <Route path="/pacotes/criar" element={<CreatePackagePage />} />
-          {/* só admin: o Configurar e as contas */}
+          {/* só admin: o Configurar, as contas e o Processar */}
           <Route element={<RequireAdmin />}>
             <Route path="/configurar" element={<SettingsPage />} />
+            <Route path="/processar" element={<ProcessPage />} />
             <Route path="/usuarios" element={<UsersPage />} />
           </Route>
           <Route path="/pacotes/:id" element={<PackageDetailPage />} />

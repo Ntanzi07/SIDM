@@ -1,4 +1,5 @@
 import type { AnnotationCodes, AnnotationProfile, ImageDetail } from '../types/annotation'
+import type { ProcessingModel, ProcessingRun, ProcessingRunInput } from '../types/processing'
 import { setAccount, type Account } from './user'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? '/api'
@@ -1354,4 +1355,27 @@ export async function updateAccount(username: string, change: { status?: 'active
 
 export async function resetAccountPassword(username: string, password: string): Promise<void> {
   return request<void>(`/users/${encodeURIComponent(username)}/password`, { method: 'PUT', body: JSON.stringify({ password }) })
+}
+
+// ---------- processar (pré-anotação por modelos de IA) ----------
+
+export async function listProcessingModels(): Promise<ProcessingModel[]> {
+  return request<ProcessingModel[]>('/processing/models')
+}
+
+export async function listProcessingRuns(limit = 50): Promise<ProcessingRun[]> {
+  return request<ProcessingRun[]>(`/processing/runs?limit=${limit}`)
+}
+
+export async function getProcessingRun(id: string): Promise<ProcessingRun> {
+  return request<ProcessingRun>(`/processing/runs/${encodeURIComponent(id)}`)
+}
+
+// Só admin. 409: já há um processamento rodando no modelo; 503: o modelo não responde.
+export async function startProcessingRun(input: ProcessingRunInput): Promise<ProcessingRun> {
+  return request<ProcessingRun>('/processing/runs', { method: 'POST', body: JSON.stringify(input) })
+}
+
+export async function cancelProcessingRun(id: string): Promise<ProcessingRun> {
+  return request<ProcessingRun>(`/processing/runs/${encodeURIComponent(id)}/cancel`, { method: 'POST' })
 }

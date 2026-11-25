@@ -15,11 +15,15 @@ mexem nelas pelo `Service` dele.
 | `imports` | módulo | perfis de import, raio-x de arquivo, import de CSV/INI nos rascunhos | `import_profiles` |
 | `exports` | módulo | perfis de export salvos, preview e download do zip | `export_profiles` |
 | `versions` | módulo | datasets (pesquisas salvas) e versões congeladas deles, com o resumo para o dashboard | `datasets`, `versions`, `version_items` |
+| `processing` | módulo | a página Processar: modelos de IA (adaptadores `Model`: LPR e eixos) passam pelas imagens dos pacotes escolhidos e gravam caixas numa tarefa pelo `boxes` (`PutModelSets`, que pula o que veio do CVAT ou foi editado); um processamento por modelo, em segundo plano | `processing_runs` |
 | `users` | módulo | login: contas (admin/usuário, cadastro pendente até aprovar), sessões de 8 h, o middleware `Protect` (401/403) | `users`, `sessions` |
 | `filename` | biblioteca pura | nome v2 (formatar e ler), tabelas de códigos, sanitização | — |
 | `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import para os campos de um perfil de anotação (`annotation.Values`) | — |
 | `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC e só imagens (com `anotacoes.csv`) | — |
 | `files` | biblioteca | disco: receber com hash, guardar, mover, apagar | — |
+| `modelrpc` | biblioteca | conexão `net/rpc` (gob) comum aos servidores dos modelos de IA: prazo por chamada, reconectar, `Ping` | — |
+| `lpr` | biblioteca | cliente do detector de placas `lpr-class` (`LprRPC.GetObjects`); os tipos copiam os do servidor, com os mesmos nomes de campo | — |
+| `axle` | biblioteca | cliente do contador de eixos `axlecounter.software` (`AxleRPC.GetAxlesFull`); resposta zerada = servidor desligado (`ErrInactive`) | — |
 | `crypt` | biblioteca | abrir imagens criptografadas dos equipamentos | — |
 | `platform` | comum | erros (`ErrNotFound`, `ErrDuplicate`), `Route`, `Page[T]`, `WriteJSON`, `UserFrom`, conexão Mongo, `mongotest` | — |
 | `api` | junção | junta as rotas dos módulos, `/health`, `/docs` | — |
@@ -59,7 +63,8 @@ Erros de regra viram tipos (`InvalidError{Msg}` → 400). `platform.ErrNotFound`
 
 Ordem: conexão → `annotation` → migrações das imagens (`Migrate`, `EnsureIndexes`) →
 `images` → `catalog` → migração dos arquivos (`MigrateFiles`) → `boxes` → `imports` →
-`exports` → `api.New(ping, módulos...)`. O `images` nasce antes do `imports` e busca o
+`exports` → `versions` → `users` → `processing` (os modelos pelo ambiente: `LPR_ADDR`, `AXLE_ADDR`;
+`MarkInterrupted` na subida) → `api.New(ping, módulos...)`. O `images` nasce antes do `imports` e busca o
 perfil de INI do upload por `imports.Profiles{Repo}` (os padrão do código primeiro, depois o banco). Um módulo novo é criado ali e entra como mais um
 argumento do `api.New`.
 
@@ -77,7 +82,7 @@ argumento do `api.New`.
 | `utils/boxes.ts` | caixas do CVAT: cor por label, tipo de objeto com caixa de uma label, pendência de atributo obrigatório |
 | `utils/importProfiles.ts` | ordem e rótulo dos perfis de import nas telas de pacote (os do perfil do pacote primeiro; o `splice-ini` vem escolhido) |
 | `utils/repeatFields.ts` | os valores da última imagem salva por pacote (campos com `repeat`), no `localStorage` |
-| `pages/<Tela>/` | uma pasta por tela, com o `.tsx` e o `.css` |
+| `pages/<Tela>/` | uma pasta por tela, com o `.tsx` e o `.css` (`pages/Process`: a página Processar) |
 | `components/` | o que é usado por mais de uma tela (`ImageWithBoxes`: as caixas por cima da imagem; `BoxAttributes`: ver e editar os atributos das caixas) |
 
 O proxy do Vite manda `/api` para `http://localhost:8080`.
