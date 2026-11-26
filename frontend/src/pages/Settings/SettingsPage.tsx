@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
-  createCamera,
-  createEquipment,
   createImportProfile,
-  deleteCamera,
-  deleteEquipment,
   deleteImportProfile,
   imageFiles,
   inspectCsv,
@@ -16,10 +12,6 @@ import {
   listEquipments,
   listInactiveCameras,
   listInactiveEquipments,
-  reactivateCamera,
-  reactivateEquipment,
-  renameCamera,
-  renameEquipment,
   renameImportProfile,
   updateImportProfile,
   type CsvInspection,
@@ -29,6 +21,10 @@ import {
 } from '../../services/api'
 import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { AnnotationProfilesSection } from './AnnotationProfilesSection'
+import { ImportProfileList } from './ImportProfileList'
+import { RegistrySection } from './RegistrySection'
+import { SettingRow, SettingsGroup, SettingsHeader } from './SettingsUI'
+import './ImportEditor.css'
 import { SettingsIcon, type SettingsIconName } from './SettingsIcons'
 import { ColumnPicker } from './ColumnPicker'
 import { useToastState } from '../../hooks/useToast'
@@ -71,7 +67,7 @@ type ObjectSetting = { mode: ObjectRules['mode']; max?: number; key?: string }
 // outros usam o layout do Go: a data de referência 2006-01-02 15:04:05
 // escrita do jeito que aparece no arquivo.
 const DATE_PRESETS = [
-  ['', 'Automático (recomendado)'],
+  ['', 'Automático'],
   ['02/01/2006 15:04:05', 'DD/MM/AAAA HH:MM:SS'],
   ['02/01/2006 15:04', 'DD/MM/AAAA HH:MM'],
   ['02/01/2006', 'DD/MM/AAAA'],
@@ -188,8 +184,6 @@ function advancedLabel(rule: FieldRule | undefined): string {
   return parts.join(', ')
 }
 
-type EditingRegistry = { type: 'equipment' | 'camera'; name: string; newName: string } | null
-
 export function SettingsPage() {
   const [equipments, setEquipments] = useState<string[]>([])
   const [cameras, setCameras] = useState<string[]>([])
@@ -210,8 +204,6 @@ export function SettingsPage() {
   // Formato de cada campo de data mapeado ("captured_at" ou "<tipo>.<campo>").
   const [dateSettings, setDateSettings] = useState<Record<string, DateSetting>>({})
   const [availableColumns, setAvailableColumns] = useState<string[]>([])
-  const [equipmentName, setEquipmentName] = useState('')
-  const [cameraName, setCameraName] = useState('')
   const [profileName, setProfileName] = useState('')
   const [profileDescription, setProfileDescription] = useState('')
   const [profileFile, setProfileFile] = useState<File | null>(null)
@@ -226,7 +218,7 @@ export function SettingsPage() {
   const [objectSettings, setObjectSettings] = useState<Record<string, ObjectSetting>>({})
   const [, setError] = useToastState('error')
   const [, setMessage] = useToastState('success')
-  const [saving, setSaving] = useState<'equipment' | 'camera' | 'inspect' | 'profile' | 'registry' | ''>('')
+  const [saving, setSaving] = useState<'inspect' | 'profile' | ''>('')
   const admin = useIsAdmin()
   const [searchParams, setSearchParams] = useSearchParams()
   const fromUrl = (Object.keys(TAB_SLUGS) as Tab[]).find((tab) => TAB_SLUGS[tab] === searchParams.get('aba'))
@@ -236,9 +228,11 @@ export function SettingsPage() {
   // Quantidade e nome do editor dos perfis de anotação, para o menu.
   const [annotationSummary, setAnnotationSummary] = useState({ count: 0, editorLabel: 'Criar novo perfil' })
 
-  // Inline edit/rename state for equipment and camera
-  const [editingRegistry, setEditingRegistry] = useState<EditingRegistry>(null)
   const [loaded, setLoaded] = useState(!admin) // a primeira carga (usuário normal: nada a carregar)
+  // O editor de import como abriu, para saber se mudou (e perguntar antes de
+  // descartar). null = tirar a foto depois da próxima renderização, quando os
+  // set* de abrir (editar, duplicar, novo) já valeram.
+  const [importSnapshot, setImportSnapshot] = useState<string | null>(null)
 
   function loadCodes() {
     return Promise.all([listEquipments(), listCameras(), listInactiveEquipments(), listInactiveCameras()])
@@ -301,108 +295,6 @@ export function SettingsPage() {
     setDateSettings({})
   }
 
-  async function submit(type: 'equipment' | 'camera') {
-    const name = (type === 'equipment' ? equipmentName : cameraName).trim()
-    if (!name) {
-      setError(`Informe o nome do ${type === 'equipment' ? 'equipamento' : 'câmera'}.`)
-      return
-    }
-
-    setSaving(type)
-    setError('')
-    setMessage('')
-    try {
-      if (type === 'equipment') {
-        await createEquipment(name)
-        setEquipmentName('')
-      } else {
-        await createCamera(name)
-        setCameraName('')
-      }
-      setMessage(`${type === 'equipment' ? 'Equipamento' : 'Câmera'} cadastrado com sucesso.`)
-      loadCodes()
-    } catch (requestError: unknown) {
-      setError(requestError instanceof Error ? requestError.message : 'Não foi possível concluir o cadastro.')
-    } finally {
-      setSaving('')
-    }
-  }
-
-  function startRenameRegistry(type: 'equipment' | 'camera', name: string) {
-    setEditingRegistry({ type, name, newName: name })
-    setError('')
-    setMessage('')
-  }
-
-  async function confirmRenameRegistry() {
-    if (!editingRegistry) return
-    const newName = editingRegistry.newName.trim()
-    if (!newName || newName === editingRegistry.name) {
-      setEditingRegistry(null)
-      return
-    }
-    setSaving('registry')
-    setError('')
-    setMessage('')
-    try {
-      if (editingRegistry.type === 'equipment') {
-        await renameEquipment(editingRegistry.name, newName)
-      } else {
-        await renameCamera(editingRegistry.name, newName)
-      }
-      setMessage(`Renomeado de "${editingRegistry.name}" para "${newName}" com sucesso.`)
-      setEditingRegistry(null)
-      loadCodes()
-    } catch (requestError: unknown) {
-      setError(requestError instanceof Error ? requestError.message : 'Não foi possível renomear.')
-    } finally {
-      setSaving('')
-    }
-  }
-
-  async function handleDeleteRegistry(type: 'equipment' | 'camera', name: string) {
-    const label = type === 'equipment' ? 'equipamento' : 'câmera'
-    if (!(await confirmDialog({
-      title: `Apagar ${label}?`,
-      message: `"${name}" sai da lista. Se estiver em uso por imagens, fica desativado (dá para reativar depois).`,
-      confirmLabel: 'Apagar',
-      tone: 'danger',
-    }))) return
-    setSaving('registry')
-    setError('')
-    setMessage('')
-    try {
-      const result = type === 'equipment'
-        ? await deleteEquipment(name)
-        : await deleteCamera(name)
-      if (result.deactivated) {
-        setMessage(`${type === 'equipment' ? 'Equipamento' : 'Câmera'} "${name}" desativado (usado por ${result.images} imagem(ns)).`)
-      } else {
-        setMessage(`${type === 'equipment' ? 'Equipamento' : 'Câmera'} "${name}" apagado com sucesso.`)
-      }
-      loadCodes()
-    } catch (requestError: unknown) {
-      setError(requestError instanceof Error ? requestError.message : 'Não foi possível apagar.')
-    } finally {
-      setSaving('')
-    }
-  }
-
-  async function handleReactivateRegistry(type: 'equipment' | 'camera', name: string) {
-    setSaving('registry')
-    setError('')
-    setMessage('')
-    try {
-      await (type === 'equipment' ? reactivateEquipment(name) : reactivateCamera(name))
-      setMessage(`${type === 'equipment' ? 'Equipamento' : 'Câmera'} "${name}" reativado.`)
-      loadCodes()
-    } catch (requestError: unknown) {
-      setError(requestError instanceof Error ? requestError.message : 'Não foi possível reativar.')
-    } finally {
-      setSaving('')
-    }
-  }
-
   async function inspectProfileFile() {
     const isIni = profileType === 'jpeg-ini'
     if (isIni ? profileImages.length === 0 : !profileFile) {
@@ -422,9 +314,7 @@ export function SettingsPage() {
       if (!isIni && (!matchColumn || !result.columns.includes(matchColumn))) {
         setMatchColumn(result.columns[0] ?? '')
       }
-      setMessage(isIni
-        ? `${result.rows} imagem(ns) com INI, ${result.columns.length} chave(s). Configure o perfil abaixo.`
-        : `${result.rows} linha(s) analisada(s). Configure o perfil abaixo.`)
+      // o resultado aparece embaixo do arquivo (sem balão repetindo)
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível analisar o CSV.')
     } finally {
@@ -433,6 +323,7 @@ export function SettingsPage() {
   }
 
   function handleEditProfile(profile: ImportProfile) {
+    setImportSnapshot(null) // a foto é tirada depois que tudo abaixo valer
     setViewOnly(false)
     setEditingProfile(profile.name)
     setEditingOriginal(profile)
@@ -465,7 +356,6 @@ export function SettingsPage() {
     setProfileFile(null)
     setInspection(null)
     setError('')
-    setMessage(`Editando perfil "${profile.name}". Ajuste as configurações e salve.`)
     setActiveTab('profile_editor')
   }
 
@@ -473,7 +363,6 @@ export function SettingsPage() {
   function handleViewProfile(profile: ImportProfile) {
     handleEditProfile(profile)
     setViewOnly(true)
-    setMessage(`"${profile.name}" é um perfil padrão do SIDM: só leitura. Para mudar, use Duplicar.`)
   }
 
   // Duplicar: o formulário de um perfil NOVO, já preenchido com a cópia.
@@ -483,10 +372,10 @@ export function SettingsPage() {
     setViewOnly(false)
     setEditingProfile(null)
     setProfileName(`${profile.name}-copia`)
-    setMessage(`Cópia de "${profile.name}". Troque o nome, ajuste e crie o perfil.`)
   }
 
   function handleCancelEdit() {
+    setImportSnapshot(null)
     setEditingProfile(null)
     setEditingOriginal(null)
     setViewOnly(false)
@@ -600,46 +489,72 @@ export function SettingsPage() {
     }
   }
 
-  // Um campo de destino: de qual coluna vem, escolhida numa busca entre as
-  // colunas/chaves lidas (não dá para inventar uma). No modo de colunas
-  // numeradas, o nome é digitado (com {n}).
+  // O valor de exemplo de uma coluna (a primeira linha do CSV ou a primeira
+  // imagem lida): mostra ao lado da ligação o que vai entrar no campo.
+  function sampleOf(column: string): string {
+    const row = inspection?.sample[0]
+    if (!row || !column) return ''
+    return row[column.replace('{n}', '1')] ?? ''
+  }
+
+  // Uma ligação "campo ← coluna": de qual coluna vem, escolhida numa busca
+  // entre as colunas/chaves lidas (não dá para inventar uma). No modo de
+  // colunas numeradas, o nome é digitado (com {n}). Data e hora mapeada
+  // abre embaixo o formato.
   function renderTarget(field: ProfileField, path: string, value: string, onChange: (column: string) => void, original: FieldRule | undefined, typed: boolean) {
+    const sample = sampleOf(value)
+    const id = `im-${path.replace(/[^a-z0-9]+/gi, '-')}`
     return (
-      <label className="form-field" key={path}>
-        <span>{fieldLabel(field)}{field.required ? ' *' : ''}</span>
-        {typed ? (
-          <input list="profile-columns" onChange={(event) => onChange(event.target.value.trim())} placeholder="Não mapear" value={value} />
-        ) : (
-          <ColumnPicker columns={availableColumns} onChange={onChange} value={value} />
-        )}
-        {TYPE_HINTS[field.type] && <small className="profile-name-hint">{TYPE_HINTS[field.type]}</small>}
-        {advancedLabel(original) && <small className="profile-name-hint">Mantido ao salvar: {advancedLabel(original)}</small>}
-      </label>
+      <li className={value ? 'im-row im-row--linked' : 'im-row'} key={path}>
+        <div className="im-row__field">
+          <label htmlFor={id}>{fieldLabel(field)}{field.required && <span className="im-req" title="Obrigatório para verificar"> *</span>}</label>
+          {TYPE_HINTS[field.type] && <small>{TYPE_HINTS[field.type]}</small>}
+        </div>
+        <span aria-hidden="true" className="im-row__arrow">←</span>
+        <div className="im-row__source">
+          {typed ? (
+            <input className="pe-mono" id={id} list="profile-columns" onChange={(event) => onChange(event.target.value.trim())} placeholder="Placa{n}" value={value} />
+          ) : (
+            <ColumnPicker columns={availableColumns} id={id} onChange={onChange} value={value} />
+          )}
+          {/* o valor de exemplo só quando há um exemplo analisado */}
+          {value && inspection && (
+            <small className={sample ? 'im-sample' : 'im-sample im-sample--none'}>
+              {sample ? <>Exemplo: <code>{sample}</code></> : 'Vazio no exemplo'}
+            </small>
+          )}
+          {advancedLabel(original) && <small className="im-kept">Mantido ao salvar: {advancedLabel(original)}</small>}
+        </div>
+        {field.type === 'datetime' && value && renderDate(path, value)}
+      </li>
     )
   }
 
   // O formato de um campo de data e hora mapeado.
-  function renderDate(field: ProfileField, path: string, column: string) {
+  function renderDate(path: string, column: string) {
     const date = dateSetting(path)
+    const word = profileType === 'csv' ? 'coluna' : 'chave'
+    const id = `im-date-${path.replace(/[^a-z0-9]+/gi, '-')}`
     return (
-      <div className="profile-form-grid" key={`date-${path}`}>
-        <label className="form-field">
-          <span>{fieldLabel(field)}: hora em outra {profileType === 'csv' ? 'coluna' : 'chave'} (opcional)</span>
-          <select onChange={(event) => changeDate(path, { timeColumn: event.target.value })} value={date.timeColumn}>
+      <div className="im-date" key={`date-${path}`}>
+        <div className="pe-field">
+          <label htmlFor={`${id}-time`}>Hora em outra {word}</label>
+          <select id={`${id}-time`} onChange={(event) => changeDate(path, { timeColumn: event.target.value })} value={date.timeColumn}>
             <option value="">A data já tem a hora</option>
             {availableColumns.filter((c) => c !== column).map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-        </label>
-        <label className="form-field">
-          <span>{fieldLabel(field)}: milissegundo em outra {profileType === 'csv' ? 'coluna' : 'chave'} (opcional)</span>
-          <select onChange={(event) => changeDate(path, { msColumn: event.target.value })} value={date.msColumn}>
+        </div>
+        <div className="pe-field">
+          <label htmlFor={`${id}-ms`}>Milissegundo em outra {word}</label>
+          <select id={`${id}-ms`} onChange={(event) => changeDate(path, { msColumn: event.target.value })} value={date.msColumn}>
             <option value="">Sem milissegundo separado</option>
             {availableColumns.filter((c) => c !== column && c !== date.timeColumn).map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
-        </label>
-        <label className="form-field">
-          <span>{fieldLabel(field)}: formato</span>
+        </div>
+        <div className="pe-field">
+          <label htmlFor={`${id}-fmt`}>Formato</label>
           <select
+            id={`${id}-fmt`}
             onChange={(event) => (event.target.value === 'custom'
               ? changeDate(path, { custom: true })
               : changeDate(path, { custom: false, format: event.target.value }))}
@@ -649,126 +564,31 @@ export function SettingsPage() {
             <option value="custom">Outro formato…</option>
           </select>
           {date.custom && (
-            <input onChange={(event) => changeDate(path, { format: event.target.value })} placeholder="2006-01-02 15:04:05" value={date.format} />
+            <input aria-label="Formato da data" className="pe-mono" onChange={(event) => changeDate(path, { format: event.target.value })} placeholder="02/01/2006 15:04:05" value={date.format} />
           )}
-          <small className="profile-name-hint">
-            {date.custom
-              ? 'Escreva a data de referência 2006-01-02 15:04:05 no formato do arquivo (não uma data do seu arquivo). Ex.: 02/01/2006 15:04:05.000'
-              : date.format ? `Layout: ${date.format}` : 'Dia antes do mês (DD/MM/AAAA) ou ano-mês-dia; hora com ou sem segundos.'}
-            {inspection?.sample[0]?.[column] && ` · Exemplo: ${[
-              inspection.sample[0][column],
-              date.timeColumn ? inspection.sample[0][date.timeColumn] : '',
-              date.msColumn ? inspection.sample[0][date.msColumn] : '',
-            ].filter(Boolean).join(' ')}`}
-          </small>
-        </label>
-        <label className="form-field">
-          <span>{fieldLabel(field)}: fuso horário</span>
-          <input onChange={(event) => changeDate(path, { timezone: event.target.value })} value={date.timezone} />
-        </label>
+        </div>
+        <div className="pe-field">
+          <label htmlFor={`${id}-tz`}>Fuso horário</label>
+          <input id={`${id}-tz`} onChange={(event) => changeDate(path, { timezone: event.target.value })} value={date.timezone} />
+        </div>
+        <small className="pe-muted im-date__help">
+          {date.custom
+            ? 'Escreva a data de referência 2006-01-02 15:04:05 no formato do arquivo (não uma data do seu arquivo), ex.: 02/01/2006 15:04:05.000.'
+            : date.format ? `Layout: ${date.format}.` : 'Automático: dia antes do mês (DD/MM/AAAA) ou ano-mês-dia; hora com ou sem segundos.'}
+          {sampleOf(column) && <> Exemplo lido: <code>{[sampleOf(column), date.timeColumn ? sampleOf(date.timeColumn) : '', date.msColumn ? sampleOf(date.msColumn) : ''].filter(Boolean).join(' ')}</code></>}
+        </small>
       </div>
     )
   }
 
-  function renderRegistryList(type: 'equipment' | 'camera', items: string[]) {
-    const label = type === 'equipment' ? 'equipamento' : 'câmera'
-    if (items.length === 0) {
-      return <p className="profile-empty-hint">Nenhum {label} cadastrado até o momento.</p>
-    }
-    return (
-      <ul className="settings-list settings-list--actions">
-        {items.map((item) => {
-          const isEditing = editingRegistry?.type === type && editingRegistry.name === item
-          return (
-            <li key={item} className="settings-list__item">
-              {isEditing ? (
-                <div className="settings-list__rename">
-                  <input
-                    autoFocus
-                    className="settings-list__rename-input"
-                    onChange={(e) => setEditingRegistry((prev) => prev ? { ...prev, newName: e.target.value } : null)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') { e.preventDefault(); void confirmRenameRegistry() }
-                      if (e.key === 'Escape') setEditingRegistry(null)
-                    }}
-                    value={editingRegistry.newName}
-                  />
-                  <button
-                    className="button button--primary button--sm"
-                    disabled={saving === 'registry'}
-                    onClick={() => void confirmRenameRegistry()}
-                    type="button"
-                  >
-                    Salvar
-                  </button>
-                  <button
-                    className="button button--secondary button--sm"
-                    onClick={() => setEditingRegistry(null)}
-                    type="button"
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              ) : (
-                <>
-                  <span className="settings-list__name">{item}</span>
-                  <div className="settings-list__actions">
-                    <button
-                      className="button button--secondary button--sm"
-                      disabled={saving !== ''}
-                      onClick={() => startRenameRegistry(type, item)}
-                      type="button"
-                    >
-                      Renomear
-                    </button>
-                    <button
-                      className="button button--danger button--sm"
-                      disabled={saving !== ''}
-                      onClick={() => void handleDeleteRegistry(type, item)}
-                      type="button"
-                    >
-                      Apagar
-                    </button>
-                  </div>
-                </>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    )
-  }
-
-  // Os desativados: continuam nas imagens que já os usam, mas não aparecem na
-  // anotação nem passam na verificação até serem reativados.
-  function renderInactiveList(type: 'equipment' | 'camera', items: string[]) {
-    if (items.length === 0) return null
-    return (
-      <div className="settings-inactive">
-        <h3>Desativados</h3>
-        <p className="profile-editor__hint">
-          Foram apagados quando ainda havia imagens usando. Reative para usar na anotação e na verificação.
-        </p>
-        <ul className="settings-list settings-list--actions">
-          {items.map((item) => (
-            <li key={item} className="settings-list__item settings-list__item--inactive">
-              <span className="settings-list__name">{item}</span>
-              <div className="settings-list__actions">
-                <button
-                  className="button button--secondary button--sm"
-                  disabled={saving !== ''}
-                  onClick={() => void handleReactivateRegistry(type, item)}
-                  type="button"
-                >
-                  Reativar
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </div>
-    )
-  }
+  // O que a tela edita num perfil de import (o arquivo de exemplo fica de fora:
+  // trocar o exemplo não muda o perfil).
+  const importState = JSON.stringify([profileType, profileName, profileDescription, annotationProfileName, delimiter, encoding,
+    matchColumn, matchBy, fieldColumns, objectColumns, objectSettings, dateSettings])
+  const importDirty = activeTab === 'profile_editor' && !viewOnly && importSnapshot !== null && importState !== importSnapshot
+  // Abriu o editor (ou acabou de limpar): a foto é o que está na tela agora.
+  // Durante a renderização (e não num efeito): os set* de abrir já valeram.
+  if (activeTab === 'profile_editor' && importSnapshot === null) setImportSnapshot(importState)
 
   // quais perfis usam um cadastro (os campos de referência)
   const usedBy = (ref: 'equipment' | 'camera') => {
@@ -839,31 +659,10 @@ export function SettingsPage() {
           {activeTab === 'users' && admin && <UsersPage embedded />}
           {activeTab === 'system' && admin && <SystemSection />}
           {activeTab === 'equipments' && (
-            <form className="create-card settings-card" onSubmit={(event) => { event.preventDefault(); void submit('equipment') }}>
-              <h2>Equipamentos</h2>
-              <p>As opções do campo Equipamento na anotação. Usado por: {usedBy('equipment')}. Quem anota também pode cadastrar um novo na hora.</p>
-              <label className="form-field">
-                <span>Nome do equipamento</span>
-                <input onChange={(event) => setEquipmentName(event.target.value)} placeholder="Digite o nome" value={equipmentName} />
-              </label>
-              <button className="button button--primary" disabled={saving === 'equipment'} type="submit">{saving === 'equipment' ? 'Salvando...' : 'Cadastrar equipamento'}</button>
-              {renderRegistryList('equipment', equipments)}
-              {renderInactiveList('equipment', inactiveEquipments)}
-            </form>
+            <RegistrySection inactive={inactiveEquipments} items={equipments} kind="equipment" onChanged={loadCodes} usedBy={usedBy('equipment')} />
           )}
-
           {activeTab === 'cameras' && (
-            <form className="create-card settings-card" onSubmit={(event) => { event.preventDefault(); void submit('camera') }}>
-              <h2>Câmeras</h2>
-              <p>As opções do campo Câmera na anotação. Usado por: {usedBy('camera')}.</p>
-              <label className="form-field">
-                <span>Nome da câmera</span>
-                <input onChange={(event) => setCameraName(event.target.value)} placeholder="Digite o nome" value={cameraName} />
-              </label>
-              <button className="button button--primary" disabled={saving === 'camera'} type="submit">{saving === 'camera' ? 'Salvando...' : 'Cadastrar câmera'}</button>
-              {renderRegistryList('camera', cameras)}
-              {renderInactiveList('camera', inactiveCameras)}
-            </form>
+            <RegistrySection inactive={inactiveCameras} items={cameras} kind="camera" onChanged={loadCodes} usedBy={usedBy('camera')} />
           )}
 
           {/* Sempre montada: o rascunho não se perde ao trocar de tela. */}
@@ -874,254 +673,203 @@ export function SettingsPage() {
           />}
 
           {activeTab === 'profiles_list' && (
-            <div className="create-card settings-card">
-              <div className="profile-header-flex">
-                <div>
-                  <h2>Perfis de import cadastrados</h2>
-                  <p>Perfis que preenchem os rascunhos a partir de um CSV ou do INI embutido nas imagens.</p>
-                </div>
-                <button
-                  className="button button--primary button--sm"
-                  onClick={() => {
-                    handleCancelEdit()
-                    setActiveTab('profile_editor')
-                  }}
-                  type="button"
-                >
-                  + Novo perfil
-                </button>
-              </div>
-              {profiles.length === 0 ? (
-                <p className="profile-empty-hint">Nenhum perfil cadastrado até o momento.</p>
-              ) : (
-                <div className="profile-items-list">
-                  {profiles.map((p) => {
-                    const delimLabel = p.reader.delimiter === ';' ? 'Ponto e vírgula (;)' : p.reader.delimiter === '\t' ? 'Tabulação' : p.reader.delimiter === '|' ? 'Pipe (|)' : 'Vírgula (,)'
-                    const isSelected = editingProfile === p.name
-                    return (
-                      <div className={`profile-item ${isSelected ? 'profile-item--selected' : ''}`} key={p.name}>
-                        <div className="profile-item__header">
-                          <div>
-                            <strong className="profile-item__name">
-                              {p.name}
-                              <span className="profile-type-badge">{p.reader.type === 'jpeg-ini' ? 'INI' : 'CSV'}</span>
-                              {p.builtin && <span className="profile-type-badge">padrão</span>}
-                            </strong>
-                            {p.description && <span className="profile-item__desc">{p.description}</span>}
-                          </div>
-                          {/* Perfil padrão: vem com o SIDM, só dá para ver e duplicar. */}
-                          <div className="profile-item__actions">
-                            <button
-                              className="button button--secondary button--sm"
-                              disabled={saving !== ''}
-                              onClick={() => (p.builtin ? handleViewProfile(p) : handleEditProfile(p))}
-                              type="button"
-                            >
-                              {p.builtin ? 'Ver' : 'Editar'}
-                            </button>
-                            <button
-                              className="button button--secondary button--sm"
-                              disabled={saving !== ''}
-                              onClick={() => handleDuplicateProfile(p)}
-                              type="button"
-                            >
-                              Duplicar
-                            </button>
-                            {!p.builtin && <button
-                              className="button button--danger button--sm"
-                              disabled={saving !== ''}
-                              onClick={() => void handleDeleteProfile(p.name)}
-                              type="button"
-                            >
-                              Apagar
-                            </button>}
-                          </div>
-                        </div>
-                        {p.reader.type === 'jpeg-ini' ? (
-                          <div className="profile-item__details">
-                            <span>Lê o INI gravado dentro de cada imagem</span>
-                            <span><strong>Campos:</strong> {Object.keys(p.fields ?? {}).length + Object.values(p.objects ?? {}).reduce((n, o) => n + Object.keys(o.fields).length, 0)}</span>
-                            <span><strong>Perfil de anotação:</strong> {p.annotation_profile || DEFAULT_ANNOTATION_PROFILE}</span>
-                          </div>
-                        ) : (
-                          <div className="profile-item__details">
-                            <span><strong>Separador:</strong> {delimLabel}</span>
-                            <span><strong>Codificação:</strong> {p.reader.encoding ?? 'utf-8'}</span>
-                            {p.match?.column && <span><strong>Coluna chave:</strong> {p.match.column} ({p.match.by === 'sha1' ? 'SHA1' : 'Nome original'})</span>}
-                            <span><strong>Perfil de anotação:</strong> {p.annotation_profile || DEFAULT_ANNOTATION_PROFILE}</span>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+            <div className="set-page">
+              <SettingsHeader
+                actions={<button className="button button--primary button--sm" onClick={() => { handleCancelEdit(); setActiveTab('profile_editor') }} type="button">Criar perfil</button>}
+                description="Um perfil de importação lê os dados de um CSV ou do INI gravado nas imagens e preenche os rascunhos da anotação."
+                title="Perfis de importação"
+              />
+              <ImportProfileList
+                annotationProfiles={annotationProfiles}
+                busy={saving !== ''}
+                defaultAnnotation={DEFAULT_ANNOTATION_PROFILE}
+                onDuplicate={handleDuplicateProfile}
+                onOpen={(p) => (p.builtin ? handleViewProfile(p) : handleEditProfile(p))}
+                onRemove={(name) => void handleDeleteProfile(name)}
+                profiles={profiles}
+              />
             </div>
           )}
 
-          {activeTab === 'profile_editor' && (
-            <form className="create-card settings-card" onSubmit={(event) => void submitProfile(event)}>
-              <div className="profile-header-flex">
-                <div>
-                  <h2>{viewOnly ? `Perfil padrão: ${editingProfile}` : editingProfile ? `Editar perfil: ${editingProfile}` : `Criar novo perfil ${profileType === 'jpeg-ini' ? 'de INI' : 'CSV'}`}</h2>
-                  <p>
-                    {profileType === 'jpeg-ini'
-                      ? 'Relacione as chaves do INI gravado dentro das imagens (Secao.Chave) aos campos de anotação.'
-                      : 'Relacione as colunas do seu CSV aos campos de anotação.'}
-                  </p>
-                </div>
-                {viewOnly && editingOriginal && (
-                  <div className="profile-item__actions">
-                    <button className="button button--secondary button--sm" onClick={() => handleDuplicateProfile(editingOriginal)} type="button">
-                      Duplicar
-                    </button>
-                    <button className="button button--secondary button--sm" onClick={handleCancelEdit} type="button">
-                      Fechar
+          {activeTab === 'profile_editor' && (() => {
+            const isIni = profileType === 'jpeg-ini'
+            const word = isIni ? 'chave' : 'coluna'
+            const hasColumns = inspection !== null || availableColumns.length > 0
+            const allTargets = [...imageTargets.map((f) => fieldColumns[f.key]), ...objectTargets.flatMap((o) => o.fields.map((f) => objectColumns[o.key]?.[f.key]))]
+            const linked = allTargets.filter(Boolean).length
+            const close = async () => {
+              if (importDirty && !(await confirmDialog({
+                title: 'Descartar as alterações?',
+                message: editingProfile ? `As mudanças no perfil "${editingProfile}" ainda não foram salvas.` : 'O perfil ainda não foi criado. O que foi preenchido se perde.',
+                confirmLabel: 'Descartar alterações',
+                tone: 'danger',
+              }))) return
+              handleCancelEdit()
+              setActiveTab('profiles_list')
+            }
+            const chooseType = (type: 'csv' | 'jpeg-ini') => {
+              setProfileType(type)
+              setInspection(null)
+              setAvailableColumns([])
+              setFieldColumns({})
+              setObjectColumns({})
+              setObjectSettings({})
+              setDateSettings({})
+            }
+            return (
+            <form className="set-page pe-editor im-editor" onSubmit={(event) => void submitProfile(event)}>
+              <SettingsHeader
+                actions={viewOnly && editingOriginal ? <button className="button button--secondary button--sm" onClick={() => handleDuplicateProfile(editingOriginal)} type="button">Duplicar para editar</button> : undefined}
+                description={viewOnly
+                  ? 'Este é um perfil padrão do SIDM: só dá para ver. Para mudar, duplique.'
+                  : isIni
+                    ? 'Ligue as chaves do INI gravado dentro das imagens (Secao.Chave) aos campos da anotação.'
+                    : 'Ligue as colunas do seu CSV aos campos da anotação.'}
+                title={viewOnly ? `Perfil ${editingProfile}` : editingProfile ? `Editar ${editingProfile}` : 'Criar perfil de importação'}
+              />
+
+              {!editingProfile && (
+                <fieldset className="pe-kind im-kind">
+                  <legend>De onde vêm os dados</legend>
+                  {([
+                    ['csv', 'Planilha CSV', 'Um arquivo à parte, com uma linha por imagem (ou por veículo).'],
+                    ['jpeg-ini', 'Dados gravados na imagem', 'O INI que os equipamentos gravam dentro de cada JPEG.'],
+                  ] as const).map(([type, title, help]) => (
+                    <label className={profileType === type ? 'pe-kind__opt pe-kind__opt--on' : 'pe-kind__opt'} key={type}>
+                      <input checked={profileType === type} name="im-type" onChange={() => chooseType(type)} type="radio" />
+                      <span><strong>{title}</strong><small>{help}</small></span>
+                    </label>
+                  ))}
+                </fieldset>
+              )}
+
+              <fieldset className="profile-fieldset" disabled={viewOnly}>
+                <SettingsGroup title="Sobre o perfil">
+                  <SettingRow help="Letras sem acento, números e hífen; espaço vira hífen." htmlFor="im-name" label="Nome">
+                    <input className="pe-mono pe-w-md" id="im-name" onChange={(event) => setProfileName(event.target.value)} placeholder={isIni ? 'ini-rodovia' : 'csv-rodovia'} value={profileName} />
+                  </SettingRow>
+                  <SettingRow help="Aparece ao escolher o perfil no envio de imagens." htmlFor="im-desc" label="Descrição">
+                    <input className="pe-w-lg" id="im-desc" onChange={(event) => setProfileDescription(event.target.value)} placeholder={isIni ? 'INI dos equipamentos da rodovia' : 'Planilha da concessionária da rodovia'} value={profileDescription} />
+                  </SettingRow>
+                  <SettingRow
+                    help={<>{annotationProfile?.description ? `${annotationProfile.description}. ` : ''}Os campos a ligar são os deste perfil; trocar apaga as ligações.</>}
+                    htmlFor="im-target"
+                    label="Preenche o perfil de anotação"
+                  >
+                    <select className="pe-w-md" id="im-target" onChange={(event) => changeAnnotationProfile(event.target.value)} value={annotationProfileName}>
+                      {annotationProfiles.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+                      {!annotationProfile && <option value={annotationProfileName}>{annotationProfileName} (não existe mais)</option>}
+                    </select>
+                  </SettingRow>
+                  {editingProfile && (
+                    <SettingRow help="Não muda depois de criado: para ler de outra fonte, crie outro perfil." label="Lê de">
+                      <span className="set-value">{isIni ? 'Dados gravados na imagem (INI)' : 'Planilha CSV'}</span>
+                    </SettingRow>
+                  )}
+                  {!isIni && (
+                    <>
+                      <SettingRow help="O caractere entre as colunas do arquivo." htmlFor="im-delim" label="Separador">
+                        <select className="pe-w-md" id="im-delim" onChange={(event) => setDelimiter(event.target.value)} value={delimiter}>
+                          <option value="comma">Vírgula (,)</option>
+                          <option value="semicolon">Ponto e vírgula (;)</option>
+                          <option value="tab">Tabulação</option>
+                          <option value="pipe">Barra vertical (|)</option>
+                        </select>
+                      </SettingRow>
+                      <SettingRow help="Acentos trocados (Ã§ no lugar de ç)? Experimente Latin-1." htmlFor="im-enc" label="Codificação">
+                        <select className="pe-w-md" id="im-enc" onChange={(event) => setEncoding(event.target.value)} value={encoding}>
+                          <option value="utf-8">UTF-8</option>
+                          <option value="latin1">Latin-1</option>
+                        </select>
+                      </SettingRow>
+                    </>
+                  )}
+                </SettingsGroup>
+              </fieldset>
+
+              {!viewOnly && (
+                <section aria-labelledby="im-sample-title" className="set-group">
+                  <div className="set-group__head">
+                    <h3 id="im-sample-title">{isIni ? 'Imagens de exemplo' : 'Arquivo de exemplo'}</h3>
+                    <p>
+                      {isIni
+                        ? 'Até 20 imagens (podem ser criptografadas): o SIDM lê as chaves do INI delas para você escolher.'
+                        : editingProfile ? 'Opcional: analise um CSV novo para ver outras colunas.' : 'O SIDM lê as colunas e a primeira linha para você escolher e conferir.'}
+                    </p>
+                  </div>
+                  <div className="im-file">
+                    <label className={(isIni ? profileImages.length : profileFile) ? 'im-file__drop im-file__drop--chosen' : 'im-file__drop'}>
+                      <span className="im-file__name">
+                        {isIni
+                          ? profileImages.length ? (profileImages.length === 1 ? '1 imagem escolhida' : `${profileImages.length} imagens escolhidas`) : 'Escolher imagens'
+                          : profileFile?.name ?? 'Escolher o CSV'}
+                      </span>
+                      <span className="im-file__hint">{isIni ? 'JPEG dos equipamentos' : '.csv'}</span>
+                      {isIni ? (
+                        // sem "accept": as criptografadas não têm tipo de imagem, e o backend as abre
+                        <input className="sr-only" multiple onChange={(event) => { setProfileImages(imageFiles(event.target.files ?? []).slice(0, 20)); setInspection(null); setError('') }} type="file" />
+                      ) : (
+                        <input accept=".csv,text/csv" className="sr-only" onChange={(event) => { setProfileFile(event.target.files?.[0] ?? null); setInspection(null); setError('') }} type="file" />
+                      )}
+                    </label>
+                    <button aria-busy={saving === 'inspect' || undefined} className="button button--secondary" disabled={saving === 'inspect'} onClick={() => void inspectProfileFile()} type="button">
+                      {saving === 'inspect' ? 'Analisando…' : isIni ? 'Ler o INI' : 'Analisar CSV'}
                     </button>
                   </div>
-                )}
-                {editingProfile && !viewOnly && (
-                  <button className="button button--secondary button--sm" onClick={handleCancelEdit} type="button">
-                    Cancelar edição
-                  </button>
-                )}
-              </div>
-              {!editingProfile && (
-                <div className="import-source profile-type-toggle" role="radiogroup" aria-label="Tipo do perfil">
-                  {(['csv', 'jpeg-ini'] as const).map((type) => (
-                    <button
-                      aria-checked={profileType === type}
-                      className={profileType === type ? 'import-source__option import-source__option--active' : 'import-source__option'}
-                      key={type}
-                      onClick={() => {
-                        setProfileType(type)
-                        setInspection(null)
-                        setAvailableColumns([])
-                        setFieldColumns({})
-                        setObjectColumns({})
-                        setObjectSettings({})
-                        setDateSettings({})
-                      }}
-                      role="radio"
-                      type="button"
-                    >
-                      {type === 'csv' ? 'CSV' : 'INI embutido na imagem'}
-                    </button>
-                  ))}
+                  {inspection && (
+                    <p className="im-file__result" role="status">
+                      {isIni
+                        ? `${inspection.rows === 1 ? '1 imagem' : `${inspection.rows} imagens`} com INI, ${inspection.columns.length} chaves.`
+                        : `${inspection.rows === 1 ? '1 linha' : `${inspection.rows} linhas`}, ${inspection.columns.length} colunas.`}
+                    </p>
+                  )}
+                </section>
+              )}
+
+              {!hasColumns && (
+                <div className="pe-empty">
+                  <strong>Falta o exemplo</strong>
+                  <span>Escolha {isIni ? 'algumas imagens' : 'o CSV'} e clique em {isIni ? 'Ler o INI' : 'Analisar CSV'} para ligar cada campo a uma {word}.</span>
                 </div>
               )}
-              <fieldset className="profile-fieldset" disabled={viewOnly}>
-              <div className="profile-form-grid">
-                <label className="form-field">
-                  <span>Nome do perfil</span>
-                  <input onChange={(event) => setProfileName(event.target.value)} placeholder="Ex.: csv-rodovia" value={profileName} />
-                  <small className="profile-name-hint">Use letras, números e hífens. Espaços viram hífens.</small>
-                </label>
-                <label className="form-field">
-                  <span>Descrição (opcional)</span>
-                  <input onChange={(event) => setProfileDescription(event.target.value)} placeholder="Formato do CSV da rodovia" value={profileDescription} />
-                </label>
-                <label className="form-field">
-                  <span>Perfil de anotação</span>
-                  <select onChange={(event) => changeAnnotationProfile(event.target.value)} value={annotationProfileName}>
-                    {annotationProfiles.map((p) => <option key={p.name} value={p.name}>{p.name}{p.description ? ` — ${p.description}` : ''}</option>)}
-                    {!annotationProfile && <option value={annotationProfileName}>{annotationProfileName} (não existe mais)</option>}
-                  </select>
-                  <small className="profile-name-hint">Os campos de destino são os deste perfil. Use o perfil de import nos pacotes que usam ele.</small>
-                </label>
-                {profileType === 'csv' && (
-                  <>
-                <label className="form-field">
-                  <span>Separador</span>
-                  <select onChange={(event) => setDelimiter(event.target.value)} value={delimiter}>
-                    <option value="comma">Vírgula (,)</option>
-                    <option value="semicolon">Ponto e vírgula (;)</option>
-                    <option value="tab">Tabulação</option>
-                    <option value="pipe">Barra vertical (|)</option>
-                  </select>
-                </label>
-                <label className="form-field">
-                  <span>Codificação</span>
-                  <select onChange={(event) => setEncoding(event.target.value)} value={encoding}>
-                    <option value="utf-8">UTF-8</option>
-                    <option value="latin1">Latin-1</option>
-                  </select>
-                </label>
-                  </>
-                )}
-              </div>
-              {profileType === 'csv' ? (
-                <label className="profile-file-picker">
-                  <span>{profileFile?.name ?? (editingProfile ? 'Selecione um novo CSV para inspecionar outras colunas (opcional)' : 'Selecione o CSV para analisar')}</span>
-                  <input accept=".csv,text/csv" onChange={(event) => {
-                    setProfileFile(event.target.files?.[0] ?? null)
-                    setInspection(null)
-                    setError('')
-                  }} type="file" />
-                </label>
-              ) : (
-                <label className="profile-file-picker">
-                  <span>
-                    {profileImages.length > 0
-                      ? `${profileImages.length} imagem(ns) selecionada(s)`
-                      : 'Selecione algumas imagens de exemplo (até 20, podem ser criptografadas) para ler as chaves do INI'}
-                  </span>
-                  {/* sem "accept": as criptografadas não têm tipo de imagem, e o backend as abre */}
-                  <input multiple onChange={(event) => {
-                    setProfileImages(imageFiles(event.target.files ?? []).slice(0, 20))
-                    setInspection(null)
-                    setError('')
-                  }} type="file" />
-                </label>
-              )}
-              <button
-                className="button button--secondary"
-                disabled={(profileType === 'csv' ? !profileFile : profileImages.length === 0) || saving !== ''}
-                onClick={() => void inspectProfileFile()}
-                type="button"
-              >
-                {saving === 'inspect' ? 'Analisando...' : profileType === 'csv' ? 'Analisar CSV' : 'Ler o INI das imagens'}
-              </button>
-              {(inspection || availableColumns.length > 0) && (
-                <div className="profile-editor">
+
+              {hasColumns && (
+                <fieldset className="profile-fieldset" disabled={viewOnly}>
                   <datalist id="profile-columns">
                     {availableColumns.map((column) => <option key={column} value={column} />)}
                   </datalist>
-                  {inspection && (
-                    <p className="profile-editor__summary">
-                      {profileType === 'csv'
-                        ? `${inspection.rows} linha(s), ${inspection.columns.length} coluna(s) encontrada(s).`
-                        : `${inspection.rows} imagem(ns) com INI, ${inspection.columns.length} chave(s) encontrada(s).`}
-                    </p>
+
+                  {!isIni && (
+                    <SettingsGroup description="Cada linha do CSV vale para a imagem com o mesmo nome (ou SHA1)." title="Como achar a imagem">
+                      <SettingRow htmlFor="im-match" label="Coluna da imagem" help={sampleOf(matchColumn) ? <>Exemplo: <code>{sampleOf(matchColumn)}</code></> : undefined}>
+                        <select className="pe-w-md" id="im-match" onChange={(event) => setMatchColumn(event.target.value)} value={matchColumn}>
+                          {availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
+                        </select>
+                      </SettingRow>
+                      <SettingRow htmlFor="im-by" label="Comparar com">
+                        <select className="pe-w-md" id="im-by" onChange={(event) => setMatchBy(event.target.value as 'original_name' | 'sha1')} value={matchBy}>
+                          <option value="original_name">Nome original do arquivo</option>
+                          <option value="sha1">SHA1 da imagem</option>
+                        </select>
+                      </SettingRow>
+                    </SettingsGroup>
                   )}
-                  {profileType === 'csv' && (
-                  <div className="profile-form-grid">
-                    <label className="form-field">
-                      <span>Coluna que identifica a imagem</span>
-                      <select onChange={(event) => setMatchColumn(event.target.value)} value={matchColumn}>
-                        {availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
-                      </select>
-                    </label>
-                    <label className="form-field">
-                      <span>Comparar com</span>
-                      <select onChange={(event) => setMatchBy(event.target.value as 'original_name' | 'sha1')} value={matchBy}>
-                        <option value="original_name">Nome original do arquivo</option>
-                        <option value="sha1">SHA1 da imagem</option>
-                      </select>
-                    </label>
-                  </div>
-                  )}
-                  <h3>Campos da imagem</h3>
-                  <p className="profile-editor__hint">
-                    Os campos do perfil de anotação {annotationProfileName}. Digite para buscar a {profileType === 'csv' ? 'coluna do CSV' : 'chave do INI'} de cada um; deixe em "Não mapear" os que não existem nele.
-                  </p>
-                  {imageTargets.length === 0 && <p className="profile-empty-hint">Este perfil não tem campos na imagem.</p>}
-                  <div className="profile-fields">
-                    {imageTargets.map((field) => renderTarget(field, field.key, fieldColumns[field.key] ?? '',
-                      (column) => setFieldColumns((current) => ({ ...current, [field.key]: column })),
-                      originalFields?.[field.key], false))}
-                  </div>
-                  {imageTargets.filter((field) => field.type === 'datetime' && fieldColumns[field.key]).map((field) => renderDate(field, field.key, fieldColumns[field.key]))}
+
+                  <section aria-labelledby="im-fields" className="set-group">
+                    <div className="set-group__head">
+                      <h3 id="im-fields">Campos da imagem</h3>
+                      <p>Busque a {word} de cada campo de {annotationProfileName}. O que não existe no arquivo fica sem ligar.</p>
+                    </div>
+                    {imageTargets.length === 0
+                      ? <div className="pe-empty"><span>Este perfil de anotação não tem campos na imagem.</span></div>
+                      : (
+                        <ul className="im-map">
+                          {imageTargets.map((field) => renderTarget(field, field.key, fieldColumns[field.key] ?? '',
+                            (column) => setFieldColumns((current) => ({ ...current, [field.key]: column })),
+                            originalFields?.[field.key], false))}
+                        </ul>
+                      )}
+                  </section>
 
                   {objectTargets.map((target) => {
                     const setting = objectSetting(target.key)
@@ -1129,56 +877,66 @@ export function SettingsPage() {
                     const setSetting = (patch: Partial<ObjectSetting>) =>
                       setObjectSettings((current) => ({ ...current, [target.key]: { ...setting, ...patch } }))
                     return (
-                      <div className="profile-object" key={target.key}>
-                        <h3>{fieldLabel(target)}</h3>
-                        <div className="profile-form-grid">
-                          <label className="form-field">
-                            <span>Como os objetos aparecem</span>
+                      <section aria-labelledby={`im-obj-${target.key}`} className="set-group" key={target.key}>
+                        <div className="set-group__head">
+                          <h3 id={`im-obj-${target.key}`}>{fieldLabel(target)}</h3>
+                          <p>Os campos de cada {fieldLabel(target).toLowerCase()} da imagem.</p>
+                        </div>
+                        <div className="im-object-mode">
+                          <div className="pe-field">
+                            <label htmlFor={`im-mode-${target.key}`}>Como aparecem no arquivo</label>
                             {/* no CSV, "single" e "row" são o mesmo: um objeto por linha */}
                             <select
+                              id={`im-mode-${target.key}`}
                               onChange={(event) => setSetting({ mode: event.target.value as ObjectSetting['mode'] })}
                               value={setting.mode === 'columns' ? 'columns' : profileType === 'csv' ? 'row' : 'single'}
                             >
                               {profileType === 'csv'
-                                ? <option value="row">Um por linha (linhas da mesma imagem são agrupadas)</option>
+                                ? <option value="row">Um por linha (as linhas da mesma imagem se juntam)</option>
                                 : <option value="single">Um por imagem</option>}
                               <option value="columns">Colunas numeradas (Placa1, Placa2…)</option>
                             </select>
-                          </label>
+                          </div>
                           {setting.mode === 'columns' && (
-                            <label className="form-field">
-                              <span>Quantos, no máximo</span>
-                              <input max={20} min={1} onChange={(event) => setSetting({ max: Number.parseInt(event.target.value, 10) || 1 })} type="number" value={setting.max ?? 3} />
-                            </label>
+                            <div className="pe-field">
+                              <label htmlFor={`im-max-${target.key}`}>Quantos, no máximo</label>
+                              <input id={`im-max-${target.key}`} max={20} min={1} onChange={(event) => setSetting({ max: Number.parseInt(event.target.value, 10) || 1 })} type="number" value={setting.max ?? 3} />
+                            </div>
                           )}
                         </div>
                         {setting.mode === 'columns' && (
-                          <p className="profile-editor__hint">Escreva o nome da coluna com {'{n}'} no lugar do número, ex.: Placa{'{n}'}.</p>
+                          <p className="pe-muted im-object-help">Escreva o nome da {word} com {'{n}'} no lugar do número, ex.: Placa{'{n}'}.</p>
                         )}
-                        <div className="profile-fields">
+                        <ul className="im-map">
                           {target.fields.map((field) => renderTarget(field, `${target.key}.${field.key}`, columns[field.key] ?? '',
                             (column) => setObjectColumns((current) => ({ ...current, [target.key]: { ...(current[target.key] ?? {}), [field.key]: column } })),
                             originalObjects?.[target.key]?.fields[field.key], setting.mode === 'columns'))}
-                        </div>
-                        {target.fields.filter((field) => field.type === 'datetime' && columns[field.key]).map((field) => renderDate(field, `${target.key}.${field.key}`, columns[field.key]))}
-                      </div>
+                        </ul>
+                      </section>
                     )
                   })}
-                  {!viewOnly && <div className="profile-submit-row">
-                    <button className="button button--primary" disabled={saving !== ''} type="submit">
-                      {saving === 'profile' ? 'Salvando...' : editingProfile ? 'Salvar alterações' : 'Criar perfil CSV'}
-                    </button>
-                    {editingProfile && (
-                      <button className="button button--secondary" onClick={handleCancelEdit} type="button">
-                        Cancelar
-                      </button>
-                    )}
-                  </div>}
-                </div>
+                </fieldset>
               )}
-              </fieldset>
+
+              <div className={importDirty ? 'set-savebar set-savebar--dirty' : 'set-savebar'} role="status">
+                <span>
+                  {saving === 'profile' ? 'Salvando…'
+                    : viewOnly ? 'Perfil padrão.'
+                      : importDirty && hasColumns ? `Alterações não salvas: ${linked} de ${allTargets.length} campos ligados.`
+                      : hasColumns ? `${linked} de ${allTargets.length} campos ligados.` : 'Falta analisar um exemplo.'}
+                </span>
+                <div>
+                  <button className="button button--secondary button--sm" onClick={() => void close()} type="button">{importDirty ? 'Descartar' : 'Voltar à lista'}</button>
+                  {!viewOnly && (
+                    <button aria-busy={saving === 'profile' || undefined} className="button button--primary button--sm" disabled={saving === 'profile'} type="submit">
+                      {saving === 'profile' ? 'Salvando…' : editingProfile ? 'Salvar alterações' : 'Criar perfil'}
+                    </button>
+                  )}
+                </div>
+              </div>
             </form>
-          )}
+            )
+          })()}
         </main>
       </div>
     </section>

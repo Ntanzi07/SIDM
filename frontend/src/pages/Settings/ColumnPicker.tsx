@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 import type { KeyboardEvent } from 'react'
 
 type ColumnPickerProps = {
@@ -7,6 +7,7 @@ type ColumnPickerProps = {
   columns: string[]
   onChange: (column: string) => void
   placeholder?: string
+  id?: string // para o <label htmlFor> de fora
 }
 
 // Tira acento e caixa para a busca ("Data/Hora" acha "data").
@@ -14,8 +15,9 @@ const normalize = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLo
 
 // ColumnPicker: escolhe UMA coluna da lista, buscando pelo texto. Não cria
 // coluna: o que for digitado só filtra; sair do campo sem escolher volta ao
-// valor de antes. A primeira opção, "Não mapear", limpa.
-export function ColumnPicker({ value, columns, onChange, placeholder = 'Não mapear' }: ColumnPickerProps) {
+// valor de antes. A primeira opção, "Não ligar", limpa.
+export function ColumnPicker({ value, columns, onChange, placeholder = 'Não ligar', id }: ColumnPickerProps) {
+  const list = useId()
   // text: o que está sendo digitado (null = não está editando, mostra o valor)
   const [text, setText] = useState<string | null>(null)
   const [active, setActive] = useState(0)
@@ -25,7 +27,7 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não map
   const all = value && !columns.includes(value) ? [...columns, value] : columns
   const query = normalize(text ?? '')
   const matches = all.filter((column) => normalize(column).includes(query))
-  // Sem busca, "Não mapear" vem primeiro; buscando, só as colunas.
+  // Sem busca, "Não ligar" vem primeiro; buscando, só as colunas.
   const options = query ? matches : ['', ...matches]
 
   function choose(column: string) {
@@ -54,9 +56,12 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não map
   return (
     <div className="column-picker">
       <input
+        aria-activedescendant={open && options[active] !== undefined ? `${list}-${active}` : undefined}
         aria-autocomplete="list"
+        aria-controls={list}
         aria-expanded={open}
         autoComplete="off"
+        id={id}
         onBlur={() => setText(null)}
         onChange={(event) => {
           setText(event.target.value)
@@ -73,7 +78,7 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não map
         value={text ?? value}
       />
       {open && (
-        <ul className="column-picker__list" role="listbox">
+        <ul className="column-picker__list" id={list} role="listbox">
           {options.map((column, i) => (
             <li
               aria-selected={column === value}
@@ -82,6 +87,7 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não map
                 i === active ? 'column-picker__item--active' : '',
                 column === '' ? 'column-picker__item--none' : '',
               ].filter(Boolean).join(' ')}
+              id={`${list}-${i}`}
               key={column || '__none'}
               // mousedown (e não click): acontece antes do blur que fecha a lista
               onMouseDown={(event) => {
@@ -91,11 +97,11 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não map
               onMouseEnter={() => setActive(i)}
               role="option"
             >
-              {column || 'Não mapear'}
+              {column || 'Não ligar'}
             </li>
           ))}
           {options.length === 0 && (
-            <li className="column-picker__empty">Nenhuma chave com "{text}".</li>
+            <li className="column-picker__empty">Nada com "{text}".</li>
           )}
         </ul>
       )}

@@ -20,11 +20,13 @@ const PATHS = {
       <path d="M9 3h6v3H9zM8.5 11h7M8.5 15h4.5" />
     </>
   ),
+  // os equipamentos são os medidores de velocidade (radar): um velocímetro
   equipments: (
     <>
-      <rect height="10" rx="2" width="16" x="4" y="3" />
-      <circle cx="9" cy="8" r="2" />
-      <path d="M14 7h3M14 9.5h2M12 13v8M8 21h8" />
+      <path d="M4.2 18.5a9 9 0 1 1 15.6 0" />
+      <path d="M12 14.5l4.2-4.7" />
+      <circle cx="12" cy="15" r="1.4" />
+      <path d="M7 9.8l1.1 1M12 7.2v1.5M17 9.8l-1.1 1" />
     </>
   ),
   cameras: (

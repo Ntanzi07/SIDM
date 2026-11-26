@@ -48,6 +48,14 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
   (`SettingsIcons.tsx`, SVG próprio, sem biblioteca). A tela não fala "CVAT": as caixas são
   "caixas marcadas"; o código da opção virou "Sigla" (vai no nome do arquivo exportado e é
   aceito no import; se uma opção tem, todas têm).
+- **Perfis de importação no mesmo modelo**: lista em cards (`ImportProfileList.tsx`: lê de,
+  como acha a imagem, cada ligação "campo ← coluna"); editor com a fonte escolhida em
+  "Planilha CSV"/"Dados gravados na imagem", grupos de linhas, arquivo de exemplo e as
+  ligações uma por linha com o **valor de exemplo** lido do arquivo (`ImportEditor.css`);
+  barra presa embaixo com "N de M campos ligados". A lógica (`mergeRules`/`readRules`) não mudou.
+- **Equipamentos e Câmeras** (`RegistrySection.tsx`, saiu do `SettingsPage`): um campo só
+  busca e cadastra (sem acento/maiúscula; nome novo vira "Cadastrar", desativado vira
+  "Reativar"); renomear na linha. Usuários: grupo vazio (inclusive o de aprovação) não aparece.
 
 ### Antes
 
@@ -102,9 +110,8 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
 
 1. **Commit da branch**: incluir os arquivos novos (`git status`, os `??`) e rodar
    `go test -p 1 ./...` (sem o `-p 1`, os testes do Mongo estouram o tempo).
-2. **Configurar, telas grandes**: levar o editor de perfil de importação e
-   Equipamentos/Câmeras para o estilo de linhas (`SettingsUI.tsx`), como já está o de perfil
-   de anotação.
+2. **Configurar**: separar o estado do editor de import do `SettingsPage` num componente,
+   como o de anotação (hoje ele pergunta antes de descartar por uma foto do estado, `importSnapshot`).
 3. **Dashboard**: contar caixas por valor de atributo (`helmet` com `pessoa = garupa`) e
    filtrar por isso.
 4. **Envio do zip**: conferir cada parte (sha256 da parte num header) para pegar dado

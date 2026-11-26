@@ -47,8 +47,8 @@ export function UsersPage({ embedded = false }: { embedded?: boolean } = {}) {
 
   const groups: Array<{ status: Account['status']; title: string; hint: string }> = [
     { status: 'pending', title: 'Esperando aprovação', hint: 'Pediram uma conta. Aprove quem você reconhece.' },
-    { status: 'active', title: 'Ativas', hint: '' },
-    { status: 'disabled', title: 'Desativadas', hint: 'Não entram mais. O nome continua no histórico das imagens.' },
+    { status: 'active', title: 'Contas ativas', hint: '' },
+    { status: 'disabled', title: 'Contas desativadas', hint: 'Não entram mais. O nome continua no histórico das imagens.' },
   ]
 
   return (
@@ -66,14 +66,14 @@ export function UsersPage({ embedded = false }: { embedded?: boolean } = {}) {
       {accounts === null && !error && <PageLoader label="Carregando as contas" />}
       {accounts && groups.map((group) => {
         const list = accounts.filter((item) => item.status === group.status)
-        if (list.length === 0 && group.status !== 'pending') return null
+        // grupo vazio não aparece (nem o de aprovação: sem pedido, não há o que fazer)
+        if (list.length === 0) return null
         return (
           <div className="users-group" key={group.status}>
             <div className="users-group__head">
-              <span className="eyebrow">{group.title} · {list.length}</span>
+              <h3 className="users-group__title">{group.title} <span className="users-group__count">{list.length}</span></h3>
               {group.hint && <p>{group.hint}</p>}
             </div>
-            {list.length === 0 && <p className="users-empty">Ninguém esperando.</p>}
             <ul className="users-list">
               {list.map((account) => {
                 const self = account.username === me?.username

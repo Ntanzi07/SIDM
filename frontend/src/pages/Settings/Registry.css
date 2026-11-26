@@ -1,0 +1,166 @@
+/* Equipamentos e câmeras (RegistrySection.tsx): um campo que busca e
+   cadastra, e a lista em linhas com filetes. */
+
+.rg-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.rg-search input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 120px 10px 40px;
+  font-size: 14.5px;
+}
+
+/* a lupa: um círculo e o cabo, em CSS */
+.rg-search__icon {
+  position: absolute;
+  left: 14px;
+  width: 13px;
+  height: 13px;
+  border: 1.75px solid var(--text-3);
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translateY(-1px);
+}
+
+.rg-search__icon::after {
+  content: '';
+  position: absolute;
+  right: -5px;
+  bottom: -4px;
+  width: 6px;
+  height: 1.75px;
+  border-radius: 2px;
+  background: var(--text-3);
+  transform: rotate(45deg);
+}
+
+.rg-search__count {
+  position: absolute;
+  right: 14px;
+  color: var(--text-3);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.rg-list {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  list-style: none;
+}
+
+.rg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: 54px;
+  padding: 9px 12px 9px 18px;
+}
+
+.rg-row + .rg-row,
+.rg-row + .rg-empty {
+  border-top: 1px solid var(--border);
+}
+
+.rg-row__name {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
+}
+
+.rg-row__name strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rg-row__name small {
+  color: var(--text-3);
+  font-size: 12.5px;
+}
+
+.rg-row__actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* a linha de cadastrar: destacada, é a ação do que se digitou */
+.rg-row--new {
+  background: var(--accent-soft);
+}
+
+.rg-row--off .rg-row__name strong {
+  color: var(--text-2);
+  font-weight: 500;
+}
+
+.rg-rename {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+}
+
+.rg-rename input {
+  flex: 1;
+  min-height: 34px;
+  padding: 6px 10px;
+}
+
+.rg-empty {
+  padding: 18px;
+  color: var(--text-3);
+  font-size: 13.5px;
+}
+
+.rg-off {
+  margin-top: 28px;
+}
+
+.rg-off h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.rg-off__count {
+  margin-left: 4px;
+  color: var(--text-3);
+  font-weight: 500;
+}
+
+.rg-off > p {
+  margin: 3px 0 10px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .rg-row {
+    flex-wrap: wrap;
+  }
+
+  .rg-search__count {
+    display: none;
+  }
+
+  .rg-search input {
+    padding-right: 12px;
+  }
+}
