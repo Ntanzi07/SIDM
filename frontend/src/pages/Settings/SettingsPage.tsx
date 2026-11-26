@@ -29,11 +29,34 @@ import {
 } from '../../services/api'
 import type { AnnotationProfile, ProfileField } from '../../types/annotation'
 import { AnnotationProfilesSection } from './AnnotationProfilesSection'
+import { SettingsIcon, type SettingsIconName } from './SettingsIcons'
 import { ColumnPicker } from './ColumnPicker'
 import { useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { useSearchParams } from 'react-router-dom'
+import { useIsAdmin } from '../../services/user'
+import { AccountSection } from './AccountSection'
+import { ShortcutsSection } from './ShortcutsSection'
+import { SystemSection } from './SystemSection'
+import { UsersPage } from '../Users/UsersPage'
 import './Settings.css'
+
+// As telas do Configurar e o nome de cada uma na URL (?aba=atalhos), para
+// abrir direto (o menu da conta leva para os atalhos e os usuários).
+type Tab = 'account' | 'shortcuts' | 'equipments' | 'cameras' | 'annotation_profiles' | 'annotation_editor' | 'profiles_list' | 'profile_editor' | 'users' | 'system'
+const TAB_SLUGS: Record<Tab, string> = {
+  account: 'conta', shortcuts: 'atalhos', equipments: 'equipamentos', cameras: 'cameras',
+  annotation_profiles: 'perfis-anotacao', annotation_editor: 'editor-anotacao',
+  profiles_list: 'perfis-import', profile_editor: 'editor-import', users: 'usuarios', system: 'sistema',
+}
+const USER_TABS: Tab[] = ['account', 'shortcuts'] // o resto é de admin
+// os nomes no seletor da tela estreita
+const TAB_LABELS: Record<Tab, string> = {
+  account: 'Conta', shortcuts: 'Atalhos de teclado', annotation_profiles: 'Perfis de anotação', annotation_editor: 'Editor de perfil de anotação',
+  equipments: 'Equipamentos', cameras: 'Câmeras', profiles_list: 'Perfis de importação', profile_editor: 'Editor de perfil de importação',
+  users: 'Usuários', system: 'Armazenamento',
+}
 
 const DEFAULT_ANNOTATION_PROFILE = 'veiculos'
 
@@ -204,13 +227,18 @@ export function SettingsPage() {
   const [, setError] = useToastState('error')
   const [, setMessage] = useToastState('success')
   const [saving, setSaving] = useState<'equipment' | 'camera' | 'inspect' | 'profile' | 'registry' | ''>('')
-  const [activeTab, setActiveTab] = useState<'equipments' | 'cameras' | 'annotation_profiles' | 'annotation_editor' | 'profiles_list' | 'profile_editor'>('equipments')
+  const admin = useIsAdmin()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const fromUrl = (Object.keys(TAB_SLUGS) as Tab[]).find((tab) => TAB_SLUGS[tab] === searchParams.get('aba'))
+  // a aba é a da URL: o menu da conta muda o ?aba= com a tela aberta
+  const activeTab: Tab = fromUrl && (admin || USER_TABS.includes(fromUrl)) ? fromUrl : 'account'
+  const setActiveTab = (tab: Tab) => setSearchParams({ aba: TAB_SLUGS[tab] }, { replace: true })
   // Quantidade e nome do editor dos perfis de anotação, para o menu.
   const [annotationSummary, setAnnotationSummary] = useState({ count: 0, editorLabel: 'Criar novo perfil' })
 
   // Inline edit/rename state for equipment and camera
   const [editingRegistry, setEditingRegistry] = useState<EditingRegistry>(null)
-  const [loaded, setLoaded] = useState(false) // a primeira carga
+  const [loaded, setLoaded] = useState(!admin) // a primeira carga (usuário normal: nada a carregar)
 
   function loadCodes() {
     return Promise.all([listEquipments(), listCameras(), listInactiveEquipments(), listInactiveCameras()])
@@ -230,6 +258,7 @@ export function SettingsPage() {
   }
 
   useEffect(() => {
+    if (!admin) return // usuário normal: só a própria conta (nada a carregar)
     void Promise.allSettled([
       loadCodes(),
       loadProfiles(),
@@ -741,6 +770,26 @@ export function SettingsPage() {
     )
   }
 
+  // quais perfis usam um cadastro (os campos de referência)
+  const usedBy = (ref: 'equipment' | 'camera') => {
+    const names = annotationProfiles.filter((p) => [...p.fields, ...p.objects.flatMap((o) => o.fields)].some((f) => f.type === 'ref' && f.ref === ref)).map((p) => p.name)
+    return names.length ? names.join(', ') : 'nenhum perfil ainda'
+  }
+
+  // sub: um passo dentro do item de cima (o editor do perfil)
+  const navItem = (tab: Tab, label: string, count?: number, sub = false, icon?: SettingsIconName) => (
+    <button
+      aria-current={activeTab === tab ? 'page' : undefined}
+      className={`settings-nav-item${sub ? ' settings-nav-item--sub' : ''}${activeTab === tab ? ' settings-nav-item--active' : ''}`}
+      onClick={() => setActiveTab(tab)}
+      type="button"
+    >
+      {icon && <SettingsIcon name={icon} />}
+      <span className="settings-nav-text">{label}</span>
+      {count !== undefined && <span className="settings-nav-badge">{count}</span>}
+    </button>
+  )
+
   if (!loaded) return <section className="package-page settings-page"><PageLoader label="Carregando as configurações" /></section>
 
   return (
@@ -748,74 +797,51 @@ export function SettingsPage() {
       <div className="page-heading">
         <div>
           <h1>Configurar</h1>
-          <p>Cadastre os equipamentos, câmeras, perfis de anotação e perfis de importação.</p>
+          <p>{admin ? 'Sua conta, o que se anota, como se importa e quem usa o SIDM.' : 'Sua conta, aparência e atalhos de teclado.'}</p>
         </div>
       </div>
 
       <div className="settings-layout">
+        <label className="settings-nav-select">
+          <span className="sr-only">Seção</span>
+          <select onChange={(event) => setActiveTab(event.target.value as Tab)} value={activeTab}>
+            {(Object.keys(TAB_LABELS) as Tab[]).filter((tab) => admin || USER_TABS.includes(tab)).map((tab) => <option key={tab} value={tab}>{TAB_LABELS[tab]}</option>)}
+          </select>
+        </label>
         <aside className="settings-sidebar">
-          <nav className="settings-nav">
-            <span className="settings-nav-section-title">Geral</span>
-            <button
-              className={`settings-nav-item ${activeTab === 'equipments' ? 'settings-nav-item--active' : ''}`}
-              onClick={() => setActiveTab('equipments')}
-              type="button"
-            >
-              <span className="settings-nav-text">Equipamentos</span>
-              <span className="settings-nav-badge">{equipments.length}</span>
-            </button>
-            <button
-              className={`settings-nav-item ${activeTab === 'cameras' ? 'settings-nav-item--active' : ''}`}
-              onClick={() => setActiveTab('cameras')}
-              type="button"
-            >
-              <span className="settings-nav-text">Câmeras</span>
-              <span className="settings-nav-badge">{cameras.length}</span>
-            </button>
+          <nav aria-label="Seções do Configurar" className="settings-nav">
+            <span className="settings-nav-section-title">Você</span>
+            {navItem('account', 'Conta', undefined, false, 'account')}
+            {navItem('shortcuts', 'Atalhos de teclado', undefined, false, 'shortcuts')}
+            {admin && (
+              <>
+                <span className="settings-nav-section-title">Anotação</span>
+                {navItem('annotation_profiles', 'Perfis de anotação', annotationSummary.count, false, 'profiles')}
+                {navItem('annotation_editor', annotationSummary.editorLabel, undefined, true)}
+                {navItem('equipments', 'Equipamentos', equipments.length, false, 'equipments')}
+                {navItem('cameras', 'Câmeras', cameras.length, false, 'cameras')}
 
-            <div className="settings-nav-divider" />
-            <span className="settings-nav-section-title">Perfis de anotação</span>
-            <button
-              className={`settings-nav-item ${activeTab === 'annotation_profiles' ? 'settings-nav-item--active' : ''}`}
-              onClick={() => setActiveTab('annotation_profiles')}
-              type="button"
-            >
-              <span className="settings-nav-text">Perfis cadastrados</span>
-              <span className="settings-nav-badge">{annotationSummary.count}</span>
-            </button>
-            <button
-              className={`settings-nav-item ${activeTab === 'annotation_editor' ? 'settings-nav-item--active' : ''}`}
-              onClick={() => setActiveTab('annotation_editor')}
-              type="button"
-            >
-              <span className="settings-nav-text">{annotationSummary.editorLabel}</span>
-            </button>
+                <span className="settings-nav-section-title">Importação</span>
+                {navItem('profiles_list', 'Perfis de importação', profiles.length, false, 'imports')}
+                {navItem('profile_editor', viewOnly ? 'Ver perfil' : editingProfile ? 'Editar perfil' : 'Novo perfil', undefined, true)}
 
-            <div className="settings-nav-divider" />
-            <span className="settings-nav-section-title">Perfis de import</span>
-            <button
-              className={`settings-nav-item ${activeTab === 'profiles_list' ? 'settings-nav-item--active' : ''}`}
-              onClick={() => setActiveTab('profiles_list')}
-              type="button"
-            >
-              <span className="settings-nav-text">Perfis cadastrados</span>
-              <span className="settings-nav-badge">{profiles.length}</span>
-            </button>
-            <button
-              className={`settings-nav-item ${activeTab === 'profile_editor' ? 'settings-nav-item--active' : ''}`}
-              onClick={() => setActiveTab('profile_editor')}
-              type="button"
-            >
-              <span className="settings-nav-text">{viewOnly ? 'Ver perfil' : editingProfile ? 'Editar perfil' : 'Criar novo perfil'}</span>
-            </button>
+                <span className="settings-nav-section-title">Administração</span>
+                {navItem('users', 'Usuários', undefined, false, 'users')}
+                {navItem('system', 'Armazenamento', undefined, false, 'storage')}
+              </>
+            )}
           </nav>
         </aside>
 
         <main className="settings-content">
+          {activeTab === 'account' && <AccountSection />}
+          {activeTab === 'shortcuts' && <ShortcutsSection />}
+          {activeTab === 'users' && admin && <UsersPage embedded />}
+          {activeTab === 'system' && admin && <SystemSection />}
           {activeTab === 'equipments' && (
             <form className="create-card settings-card" onSubmit={(event) => { event.preventDefault(); void submit('equipment') }}>
               <h2>Equipamentos</h2>
-              <p>Cadastre os equipamentos usados nas anotações (ex.: radar_01, camera_norte).</p>
+              <p>As opções do campo Equipamento na anotação. Usado por: {usedBy('equipment')}. Quem anota também pode cadastrar um novo na hora.</p>
               <label className="form-field">
                 <span>Nome do equipamento</span>
                 <input onChange={(event) => setEquipmentName(event.target.value)} placeholder="Digite o nome" value={equipmentName} />
@@ -829,7 +855,7 @@ export function SettingsPage() {
           {activeTab === 'cameras' && (
             <form className="create-card settings-card" onSubmit={(event) => { event.preventDefault(); void submit('camera') }}>
               <h2>Câmeras</h2>
-              <p>Cadastre as câmeras disponíveis para anotação.</p>
+              <p>As opções do campo Câmera na anotação. Usado por: {usedBy('camera')}.</p>
               <label className="form-field">
                 <span>Nome da câmera</span>
                 <input onChange={(event) => setCameraName(event.target.value)} placeholder="Digite o nome" value={cameraName} />
@@ -841,11 +867,11 @@ export function SettingsPage() {
           )}
 
           {/* Sempre montada: o rascunho não se perde ao trocar de tela. */}
-          <AnnotationProfilesSection
+          {admin && <AnnotationProfilesSection
             onSummary={setAnnotationSummary}
             onView={(view) => setActiveTab(view === 'list' ? 'annotation_profiles' : 'annotation_editor')}
             view={activeTab === 'annotation_profiles' ? 'list' : activeTab === 'annotation_editor' ? 'editor' : null}
-          />
+          />}
 
           {activeTab === 'profiles_list' && (
             <div className="create-card settings-card">

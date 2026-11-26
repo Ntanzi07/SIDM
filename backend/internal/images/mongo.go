@@ -744,6 +744,20 @@ func (m *MongoRepo) FindTrash(ctx context.Context, sha1 string) (*Trash, error) 
 	return &t, nil
 }
 
+func (m *MongoRepo) TrashBefore(ctx context.Context, before time.Time, limit int) ([]Trash, error) {
+	cur, err := m.db.Collection("images_trash").Find(ctx,
+		bson.D{{Key: "deleted_at", Value: bson.D{{Key: "$lt", Value: before}}}},
+		options.Find().SetLimit(int64(limit)).SetProjection(bson.D{{Key: "_id", Value: 1}, {Key: "ext", Value: 1}, {Key: "deleted_at", Value: 1}}))
+	if err != nil {
+		return nil, fmt.Errorf("listar a lixeira: %w", err)
+	}
+	var out []Trash
+	if err := cur.All(ctx, &out); err != nil {
+		return nil, fmt.Errorf("listar a lixeira: %w", err)
+	}
+	return out, nil
+}
+
 func (m *MongoRepo) DeleteTrash(ctx context.Context, sha1 string) error {
 	if _, err := m.db.Collection("images_trash").DeleteOne(ctx, bson.D{{Key: "_id", Value: sha1}}); err != nil {
 		return fmt.Errorf("tirar %s da lixeira: %w", sha1, err)

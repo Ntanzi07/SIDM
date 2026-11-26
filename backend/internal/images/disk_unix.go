@@ -1,0 +1,14 @@
+//go:build !windows
+
+package images
+
+import "syscall"
+
+// diskSpace: o tamanho e o livre do disco onde fica path.
+func diskSpace(path string) (total, free uint64, err error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(path, &st); err != nil {
+		return 0, 0, err
+	}
+	return st.Blocks * uint64(st.Bsize), st.Bavail * uint64(st.Bsize), nil
+}

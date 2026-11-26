@@ -159,6 +159,29 @@ paths:
               schema: { $ref: "#/components/schemas/User" }
         "401": { $ref: "#/components/responses/Unauthorized" }
 
+  /auth/shortcuts:
+    put:
+      tags: [contas]
+      summary: Trocar os próprios atalhos de teclado
+      description: |
+        Troca todos os atalhos da pessoa logada (ação → tecla, ex.:
+        `annotation.next` → `f`, `annotation.save` → `ctrl+enter`). A tela é quem
+        conhece as ações; ação sem tecla usa o padrão da tela, e `none` deixa a
+        ação sem atalho. Uma tecla não pode servir a duas ações. `{}` volta aos
+        padrões. Vem em `shortcuts` no `GET /auth/me`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: { type: string }
+              example: { annotation.next: f, annotation.previous: d }
+      responses:
+        "200": { description: A conta, com os atalhos novos. }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { description: Sem login. }
+
   /auth/password:
     put:
       tags: [login]
@@ -1092,6 +1115,72 @@ paths:
               schema: { $ref: "#/components/schemas/AnnotationValues" }
         "400": { $ref: "#/components/responses/Problems" }
         "404": { $ref: "#/components/responses/NotFound" }
+
+  /system/storage:
+    get:
+      tags: [sistema]
+      summary: O disco das imagens, a lixeira e os envios parados (só admin)
+      description: |
+        `disk`: tamanho e livre do disco onde ficam as imagens (`warn` a partir de 90%
+        usado). `trash`: arquivos e bytes na lixeira. `uploads`: os envios de zip que
+        não terminaram (com o que os .zip ocupam).
+      responses:
+        "200":
+          description: O resumo.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disk:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      free: { type: integer }
+                      used_percent: { type: number }
+                      warn: { type: boolean }
+                  trash:
+                    type: object
+                    properties:
+                      count: { type: integer }
+                      bytes: { type: integer }
+                  uploads:
+                    type: object
+                    properties:
+                      count: { type: integer }
+                      bytes: { type: integer }
+                      items: { type: array, items: { $ref: "#/components/schemas/ZipUpload" } }
+        "403": { description: Só admin. }
+
+  /system/trash/purge:
+    post:
+      tags: [sistema]
+      summary: Esvaziar a lixeira (o que está lá há mais de N dias; só admin)
+      description: |
+        Apaga de vez o registro e o arquivo das imagens apagadas há mais de
+        `older_than_days` dias (0 = tudo). Depois disso, uma versão antiga não
+        consegue mais trazer essas imagens de volta.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [older_than_days]
+              properties:
+                older_than_days: { type: integer, minimum: 0, maximum: 3650 }
+      responses:
+        "200":
+          description: O que saiu.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  images: { type: integer }
+                  bytes: { type: integer }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "403": { description: Só admin. }
 
   /packages/{name}/zip-uploads:
     parameters:

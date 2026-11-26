@@ -168,3 +168,43 @@ func TestLoginEPermissoes(t *testing.T) {
 	}
 	assertStatus(t, anon.login("admin", "senha-do-admin"), http.StatusTooManyRequests)
 }
+
+func TestAtalhosPorUsuario(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+	env.usrSvc.EnsureAdmin(ctx, "admin", "", "senha-do-admin")
+	handler := env.usrSvc.Protect(env.srv.Routes())
+	admin := &client{t: t, handler: handler}
+	maria := &client{t: t, handler: handler}
+	assertStatus(t, admin.login("admin", "senha-do-admin"), http.StatusOK)
+	assertStatus(t, maria.do("POST", "/auth/register", `{"email": "maria@empresa.com", "name": "Maria", "password": "senha-da-maria"}`), http.StatusCreated)
+	assertStatus(t, admin.do("PATCH", "/users/maria", `{"status": "active"}`), http.StatusOK)
+	assertStatus(t, maria.login("maria", "senha-da-maria"), http.StatusOK)
+
+	// usuário normal grava os próprios atalhos
+	rec := maria.do("PUT", "/auth/shortcuts", `{"annotation.next": " F ", "annotation.previous": "d", "annotation.delete": "none"}`)
+	assertStatus(t, rec, http.StatusOK)
+	var me users.User
+	decode(t, maria.do("GET", "/auth/me", ""), &me)
+	if me.Shortcuts["annotation.next"] != "f" || me.Shortcuts["annotation.delete"] != "none" || len(me.Shortcuts) != 3 {
+		t.Errorf("atalhos: %+v", me.Shortcuts)
+	}
+	// são dela: o admin continua sem
+	var adminMe users.User
+	decode(t, admin.do("GET", "/auth/me", ""), &adminMe)
+	if len(adminMe.Shortcuts) != 0 {
+		t.Errorf("admin: %+v", me.Shortcuts)
+	}
+	// a mesma tecla em duas ações
+	if rec := maria.do("PUT", "/auth/shortcuts", `{"annotation.next": "f", "annotation.save": "F"}`); rec.Code != http.StatusBadRequest || !strings.Contains(errorMsg(t, rec), "\"f\"") {
+		t.Errorf("tecla repetida: %d %s", rec.Code, rec.Body.String())
+	}
+	assertStatus(t, maria.do("PUT", "/auth/shortcuts", `{"Ação Inválida": "x"}`), http.StatusBadRequest)
+	// {} volta aos padrões
+	assertStatus(t, maria.do("PUT", "/auth/shortcuts", `{}`), http.StatusOK)
+	var reset users.User
+	decode(t, maria.do("GET", "/auth/me", ""), &reset)
+	if reset.Shortcuts != nil {
+		t.Errorf("padrões: %+v", reset.Shortcuts)
+	}
+}

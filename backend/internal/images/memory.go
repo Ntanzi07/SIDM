@@ -438,6 +438,18 @@ func (m *Memory) FindTrash(ctx context.Context, sha1 string) (*Trash, error) {
 	return &t, nil
 }
 
+func (m *Memory) TrashBefore(ctx context.Context, before time.Time, limit int) ([]Trash, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := []Trash{}
+	for _, t := range m.Trash {
+		if t.DeletedAt.Before(before) && len(out) < limit {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
 func (m *Memory) DeleteTrash(ctx context.Context, sha1 string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

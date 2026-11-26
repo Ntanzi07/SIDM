@@ -12,7 +12,6 @@ import { ProcessPage } from '../pages/Process/ProcessPage'
 import { DashboardPage } from '../pages/Dashboard/DashboardPage'
 import { DatasetPage } from '../pages/Versions/DatasetPage'
 import { LoginPage } from '../pages/Login/LoginPage'
-import { UsersPage } from '../pages/Users/UsersPage'
 import { RequireAdmin, RequireLogin } from './auth/RequireLogin'
 
 export function Router() {
@@ -25,15 +24,17 @@ export function Router() {
           <Route path="/" element={<PackagesPage />} />
           <Route path="/pacotes" element={<PackagesPage />} />
           <Route path="/pacotes/criar" element={<CreatePackagePage />} />
-          {/* só admin: o Configurar, as contas e o Processar */}
+          {/* só admin: o Processar (o Configurar abre para todos, ver abaixo) */}
           <Route element={<RequireAdmin />}>
-            <Route path="/configurar" element={<SettingsPage />} />
             <Route path="/processar" element={<ProcessPage />} />
-            <Route path="/usuarios" element={<UsersPage />} />
           </Route>
           <Route path="/pacotes/:id" element={<PackageDetailPage />} />
           <Route path="/pacotes/:id/anotacao" element={<AnnotationPage />} />
           <Route path="/pacotes/:id/verificadas" element={<ImageViewerPage />} />
+          {/* o Configurar abre para todos (a própria conta); o resto dele é de admin */}
+          <Route path="/configurar" element={<SettingsPage />} />
+          <Route path="/atalhos" element={<Navigate replace to="/configurar?aba=atalhos" />} />
+          <Route path="/usuarios" element={<Navigate replace to="/configurar?aba=usuarios" />} />
           <Route path="/tarefas" element={<TasksPage />} />
           <Route path="/tarefas/:name" element={<TasksPage />} />
           <Route path="/exportar" element={<ExportPage />} />

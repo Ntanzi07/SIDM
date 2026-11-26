@@ -1342,6 +1342,29 @@ export async function changePassword(current: string, next: string): Promise<voi
   return request<void>('/auth/password', { method: 'PUT', body: JSON.stringify({ current, new: next }) })
 }
 
+// Os próprios atalhos de teclado (todos de uma vez; {} volta aos padrões).
+export async function saveShortcuts(shortcuts: Record<string, string>): Promise<Account> {
+  const account = await request<Account>('/auth/shortcuts', { method: 'PUT', body: JSON.stringify(shortcuts) })
+  setAccount(account)
+  return account
+}
+
+// ---------- sistema (admin) ----------
+
+export type StorageSummary = {
+  disk: { total: number; free: number; used_percent: number; warn: boolean }
+  trash: { count: number; bytes: number }
+  uploads: { count: number; bytes: number; items: ZipUpload[] }
+}
+
+export async function getStorage(): Promise<StorageSummary> {
+  return request<StorageSummary>('/system/storage')
+}
+
+export async function purgeTrash(olderThanDays: number): Promise<{ images: number; bytes: number }> {
+  return request<{ images: number; bytes: number }>('/system/trash/purge', { method: 'POST', body: JSON.stringify({ older_than_days: olderThanDays }) })
+}
+
 // ---------- contas (admin) ----------
 
 export async function listAccounts(): Promise<Account[]> {

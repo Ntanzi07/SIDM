@@ -7,11 +7,13 @@ import { useToastState } from '../../hooks/useToast'
 import { setPendingCount, useAccount, type Account } from '../../services/user'
 import { formatWhen } from '../Versions/format'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { SettingsHeader } from '../Settings/SettingsUI'
 import './Users.css'
 
 // As contas (só admin): aprovar quem pediu, trocar o papel, desativar e
 // definir uma senha nova para quem esqueceu.
-export function UsersPage() {
+// embedded: dentro do Configurar (sem o título da página).
+export function UsersPage({ embedded = false }: { embedded?: boolean } = {}) {
   const me = useAccount()
   const [accounts, setAccounts] = useState<Account[] | null>(null)
   const [error, setError] = useToastState('error') // o erro vira balão (o padrão do site)
@@ -50,13 +52,17 @@ export function UsersPage() {
   ]
 
   return (
-    <section className="package-page users-page">
-      <div className="page-heading">
-        <div>
-          <h1>Usuários</h1>
-          <p>Quem pode entrar no SIDM. Admin apaga, mexe no Configurar e aprova contas; usuário anota, importa, exporta e cria versões.</p>
+    <section className={embedded ? 'users-page users-page--embedded' : 'package-page users-page'}>
+      {embedded ? (
+        <SettingsHeader description="Quem entra no SIDM. Admin apaga, configura e aprova contas; usuário anota, importa, exporta e cria versões." title="Usuários" />
+      ) : (
+        <div className="page-heading">
+          <div>
+            <h1>Usuários</h1>
+            <p>Quem pode entrar no SIDM. Admin apaga, mexe no Configurar e aprova contas; usuário anota, importa, exporta e cria versões.</p>
+          </div>
         </div>
-      </div>
+      )}
       {accounts === null && !error && <PageLoader label="Carregando as contas" />}
       {accounts && groups.map((group) => {
         const list = accounts.filter((item) => item.status === group.status)

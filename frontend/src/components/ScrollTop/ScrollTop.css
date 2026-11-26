@@ -1,0 +1,28 @@
+.scroll-top {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000; /* os avisos (toast) ficam por cima */
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  color: var(--text);
+  cursor: pointer;
+  animation: scroll-top-in 160ms var(--ease, ease-out);
+  transition: background 160ms, border-color 160ms;
+}
+
+.scroll-top:hover {
+  border-color: var(--accent-border);
+  background: var(--surface-2);
+}
+
+@keyframes scroll-top-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}

@@ -34,7 +34,7 @@ const LINKS = [
   { to: '/processar', label: 'Processar', admin: true },
   { to: '/dashboard', label: 'Dashboard' },
   { to: '/exportar', label: 'Exportar' },
-  { to: '/configurar', label: 'Configurar', admin: true },
+  { to: '/configurar', label: 'Configurar' }, // todos: a própria conta; o resto é de admin
 ]
 
 export function Header() {

@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "a11y": "node scripts/a11y.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -17,6 +18,7 @@
     "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
+    "@axe-core/puppeteer": "^4.14.1",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.19.2",
     "@types/react": "^19.3.0",
@@ -26,6 +28,7 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.7",
     "globals": "^17.13.0",
+    "puppeteer": "^25.19.0",
     "typescript": "~6.0.3",
     "typescript-eslint": "^8.72.1",
     "vite": "^8.3.6"

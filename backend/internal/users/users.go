@@ -51,6 +51,9 @@ type User struct {
 	ApprovedBy   string     `bson:"approved_by,omitempty" json:"approved_by,omitempty"`
 	ApprovedAt   *time.Time `bson:"approved_at,omitempty" json:"approved_at,omitempty"`
 	LastLogin    *time.Time `bson:"last_login,omitempty" json:"last_login,omitempty"`
+	// Shortcuts: os atalhos de teclado da pessoa (ação → tecla, ex.:
+	// "annotation.next" → "f"); vazio = os padrões da tela.
+	Shortcuts map[string]string `bson:"shortcuts,omitempty" json:"shortcuts,omitempty"`
 }
 
 // IsAdmin: admin ativo.

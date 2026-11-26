@@ -23,7 +23,7 @@
   /* texto */
   --text: #f3f0ea;
   --text-2: #b8b2a9;
-  --text-3: #7f7a72;
+  --text-3: #908a81; /* 5,1:1 até no --surface-2 (AA pede 4,5) */
   --on-accent: #0b0a09; /* texto em cima de um fundo de destaque (claro) */
 
   /* destaque (gráficos, item ativo, foco) e estados */
@@ -79,16 +79,16 @@
 
   --text: #1c1a17;
   --text-2: #57524b;
-  --text-3: #7a746b;
+  --text-3: #6b655d; /* 5,0:1 até no --surface-2 (AA pede 4,5) */
   --on-accent: #ffffff;
 
-  --accent: #c2510f;
-  --accent-strong: #a8440a;
-  --accent-soft: rgba(194, 81, 15, 0.09);
-  --accent-border: rgba(194, 81, 15, 0.4);
-  --success: #1d7f53;
-  --success-soft: rgba(29, 127, 83, 0.09);
-  --success-border: rgba(29, 127, 83, 0.35);
+  --accent: #ad4508; /* 5,1:1 sobre o --accent-soft (badges) */
+  --accent-strong: #8f3906;
+  --accent-soft: rgba(173, 69, 8, 0.09);
+  --accent-border: rgba(173, 69, 8, 0.4);
+  --success: #176b45; /* 5,1:1 até no --surface-3 */
+  --success-soft: rgba(23, 107, 69, 0.09);
+  --success-border: rgba(23, 107, 69, 0.35);
   --warning: #8a6700;
   --warning-soft: rgba(176, 132, 0, 0.1);
   --warning-border: rgba(176, 132, 0, 0.4);

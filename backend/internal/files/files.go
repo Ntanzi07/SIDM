@@ -125,10 +125,13 @@ func (st *Storage) Store(tmpPath, rel string) error {
 	return nil
 }
 
+// TrashDir: a pasta da lixeira (dentro da raiz).
+const TrashDir = "lixeira"
+
 // TrashPath: onde uma imagem apagada fica guardada (a lixeira), para poder
 // voltar por uma versão: lixeira/<sha1>.ext.
 func TrashPath(sum, ext string) string {
-	return path.Join("lixeira", sum+ext)
+	return path.Join(TrashDir, sum+ext)
 }
 
 // MoveTo move um arquivo entre dois caminhos relativos, criando a pasta de

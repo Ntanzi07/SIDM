@@ -159,6 +159,8 @@ type Repo interface {
 	PutTrash(ctx context.Context, t *Trash) error
 	FindTrash(ctx context.Context, sha1 string) (*Trash, error)
 	DeleteTrash(ctx context.Context, sha1 string) error
+	// TrashBefore: até limit imagens apagadas antes de before (para esvaziar).
+	TrashBefore(ctx context.Context, before time.Time, limit int) ([]Trash, error)
 	InsertHistory(ctx context.Context, entries []HistoryEntry) error
 	ExistingImages(ctx context.Context, ids []string) (map[string]ExistingImage, error)
 	FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]Image, error)

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import {
   createAnnotationProfile,
   deleteAnnotationProfile,
@@ -7,294 +7,26 @@ import {
   updateAnnotationProfile,
   type Problem,
 } from '../../services/api'
-import type { AnnotationProfile, FieldType, ObjectType, ProfileField, ProfileOption } from '../../types/annotation'
+import type { AnnotationProfile, ObjectType } from '../../types/annotation'
 import { useToast, useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
 import { BoxLabelsEditor } from './BoxLabelsEditor'
 import { applyParent, ownFields, ownIndex, parentChoices } from './profileInheritance'
+import { FieldList, ObjectHead } from './ProfileEditor'
+import { pathId, profileName, under } from './profileEditorUtils'
+import { ProfileList } from './ProfileList'
+import { SettingRow, SettingsGroup, SettingsHeader } from './SettingsUI'
 
-// Editor dos PERFIS DE ANOTAÇÃO: o que se anota em cada imagem de um pacote.
-// Quem confere tudo é o backend (POST/PUT /annotation-profiles): os erros
-// voltam juntos, cada um com o caminho ("fields[2].options[1].code"), e a
-// linha do campo com problema fica marcada.
-
-const TYPES: Array<[FieldType, string]> = [
-  ['choice', 'Lista (um valor)'],
-  ['multi', 'Lista (vários valores)'],
-  ['text', 'Texto'],
-  ['number', 'Número'],
-  ['bool', 'Sim/não'],
-  ['datetime', 'Data e hora'],
-  ['ref', 'Cadastro (equipamento/câmera)'],
-]
-
-// "Cor do cabelo" -> "cor_do_cabelo" (o formato que o backend aceita).
-function slug(text: string): string {
-  const s = text.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32)
-  return /^[a-z]/.test(s) ? s : s ? `c_${s}`.slice(0, 32) : ''
-}
-
-const optionValue = (text: string) => slug(text).replace(/_/g, '-').replace(/^c-/, '') || ''
-
-function newField(): ProfileField {
-  return { key: '', label: '', type: 'choice', options: [] }
-}
-
-// Ao trocar o tipo, some o que só valia para o tipo antigo.
-function withType(field: ProfileField, type: FieldType): ProfileField {
-  const base: ProfileField = { key: field.key, label: field.label, type, required: field.required, help: field.help, repeat: field.repeat }
-  if (type === 'choice' || type === 'multi') base.options = field.options ?? []
-  if (type === 'ref') {
-    base.ref = 'equipment'
-    base.key = 'equipment' // o backend exige: a cascata de renomear procura por esse nome
-  }
-  return base
-}
-
-// Problemas de um caminho e de tudo abaixo dele.
-const under = (problems: Problem[], path: string) =>
-  problems.filter((p) => p.path === path || p.path.startsWith(`${path}.`) || p.path.startsWith(`${path}[`))
-
-type FieldsEditorProps = {
-  base: string // "fields" ou "objects[0].fields"
-  fields: ProfileField[]
-  onChange: (fields: ProfileField[]) => void
-  problems: Problem[]
-  readOnly: boolean
-}
-
-function OptionsEditor({ field, onChange, readOnly }: { field: ProfileField; onChange: (options: ProfileOption[]) => void; readOnly: boolean }) {
-  const options = field.options ?? []
-  const set = (i: number, patch: Partial<ProfileOption>) => onChange(options.map((o, j) => (j === i ? { ...o, ...patch } : o)))
-  return (
-    <div className="ap-options">
-      <span className="ap-small">Opções (valor guardado · nome na tela · código no nome do arquivo, opcional)</span>
-      {options.map((option, i) => (
-        <div className="ap-option" key={i}>
-          <input disabled={readOnly} onChange={(e) => set(i, { value: e.target.value })} placeholder="valor (ex.: black)" value={option.value} />
-          <input
-            disabled={readOnly}
-            onBlur={() => { if (!option.value && option.label) set(i, { value: optionValue(option.label) }) }}
-            onChange={(e) => set(i, { label: e.target.value })}
-            placeholder="nome (ex.: Preto)"
-            value={option.label ?? ''}
-          />
-          <input className="ap-code" disabled={readOnly} onChange={(e) => set(i, { code: e.target.value.toUpperCase() })} placeholder="código" value={option.code ?? ''} />
-          {!readOnly && <button className="button button--danger button--sm" onClick={() => onChange(options.filter((_, j) => j !== i))} type="button">✕</button>}
-        </div>
-      ))}
-      {!readOnly && (
-        <button className="button button--secondary button--sm" onClick={() => onChange([...options, { value: '', label: '' }])} type="button">+ Opção</button>
-      )}
-    </div>
-  )
-}
-
-// O valor inicial: o que a tela de anotação já traz numa imagem sem rascunho.
-function DefaultEditor({ field, onChange, readOnly }: { field: ProfileField; onChange: (value: unknown) => void; readOnly: boolean }) {
-  const value = field.default
-  if (field.type === 'ref' || field.type === 'datetime') return null
-  if (field.type === 'choice' || field.type === 'bool') {
-    const options = field.type === 'bool' ? [{ value: 'true', label: 'Sim' }, { value: 'false', label: 'Não' }] : field.options ?? []
-    const current = value === undefined || value === null ? '' : String(value)
-    return (
-      <label className="ap-inline">
-        <span>Valor inicial</span>
-        <select
-          disabled={readOnly}
-          onChange={(e) => onChange(e.target.value === '' ? undefined : field.type === 'bool' ? e.target.value === 'true' : e.target.value)}
-          value={current}
-        >
-          <option value="">(nenhum)</option>
-          {options.map((o) => <option key={o.value} value={o.value}>{o.label || o.value}</option>)}
-        </select>
-      </label>
-    )
-  }
-  if (field.type === 'multi') {
-    const chosen = Array.isArray(value) ? value.map(String) : []
-    return (
-      <div className="ap-inline">
-        <span>Marcadas no início</span>
-        <div className="ap-checks">
-          {(field.options ?? []).filter((o) => o.value).map((o) => (
-            <label key={o.value}>
-              <input
-                checked={chosen.includes(o.value)}
-                disabled={readOnly}
-                onChange={(e) => {
-                  const next = e.target.checked ? [...chosen, o.value] : chosen.filter((v) => v !== o.value)
-                  onChange(next.length ? next : undefined)
-                }}
-                type="checkbox"
-              />
-              {o.label || o.value}
-            </label>
-          ))}
-        </div>
-      </div>
-    )
-  }
-  return (
-    <label className="ap-inline">
-      <span>Valor inicial</span>
-      <input
-        disabled={readOnly}
-        onChange={(e) => {
-          const text = e.target.value
-          onChange(text === '' ? undefined : field.type === 'number' ? Number(text) : text)
-        }}
-        type={field.type === 'number' ? 'number' : 'text'}
-        value={value === undefined || value === null ? '' : String(value)}
-      />
-    </label>
-  )
-}
-
-function FieldsEditor({ base, fields, onChange, problems, readOnly }: FieldsEditorProps) {
-  const set = (i: number, field: ProfileField) => onChange(fields.map((f, j) => (j === i ? field : f)))
-  const move = (i: number, d: number) => {
-    const next = [...fields]
-    const [item] = next.splice(i, 1)
-    next.splice(i + d, 0, item)
-    onChange(next)
-  }
-  const num = (text: string) => (text === '' ? undefined : Number(text))
-
-  return (
-    <div className="ap-fields">
-      {fields.length === 0 && <p className="ap-small">Nenhum campo.</p>}
-      {fields.map((field, i) => {
-        const path = `${base}[${i}]`
-        const errors = under(problems, path)
-        return (
-          <div className={errors.length ? 'ap-field ap-field--error' : 'ap-field'} key={i}>
-            <div className="ap-row">
-              <label className="ap-inline">
-                <span>Nome na tela</span>
-                <input
-                  disabled={readOnly}
-                  onBlur={() => { if (!field.key && field.label) set(i, { ...field, key: slug(field.label) }) }}
-                  onChange={(e) => set(i, { ...field, label: e.target.value })}
-                  placeholder="ex.: Cor do cabelo"
-                  value={field.label ?? ''}
-                />
-              </label>
-              <label className="ap-inline">
-                <span>Chave (no banco)</span>
-                <input
-                  disabled={readOnly || field.type === 'ref'}
-                  onChange={(e) => set(i, { ...field, key: e.target.value })}
-                  placeholder="ex.: cor_cabelo"
-                  value={field.key}
-                />
-              </label>
-              <label className="ap-inline">
-                <span>Tipo</span>
-                <select disabled={readOnly} onChange={(e) => set(i, withType(field, e.target.value as FieldType))} value={field.type}>
-                  {TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
-                </select>
-              </label>
-              <label className="ap-check">
-                <input checked={Boolean(field.required)} disabled={readOnly} onChange={(e) => set(i, { ...field, required: e.target.checked || undefined })} type="checkbox" />
-                Obrigatório
-              </label>
-              {!readOnly && (
-                <div className="ap-row-actions">
-                  <button className="button button--secondary button--sm" disabled={i === 0} onClick={() => move(i, -1)} title="Subir" type="button">↑</button>
-                  <button className="button button--secondary button--sm" disabled={i === fields.length - 1} onClick={() => move(i, 1)} title="Descer" type="button">↓</button>
-                  <button className="button button--danger button--sm" onClick={() => onChange(fields.filter((_, j) => j !== i))} type="button">Remover</button>
-                </div>
-              )}
-            </div>
-
-            {(field.type === 'choice' || field.type === 'multi') && (
-              <OptionsEditor field={field} onChange={(options) => set(i, { ...field, options })} readOnly={readOnly} />
-            )}
-            {field.type === 'text' && (
-              <div className="ap-row">
-                <label className="ap-inline">
-                  <span>Formato (expressão regular, opcional)</span>
-                  <input disabled={readOnly} onChange={(e) => set(i, { ...field, pattern: e.target.value || undefined })} placeholder="ex.: [A-Z0-9]{7}" value={field.pattern ?? ''} />
-                </label>
-                <label className="ap-inline">
-                  <span>Tamanho máximo</span>
-                  <input disabled={readOnly} min={0} onChange={(e) => set(i, { ...field, max_len: num(e.target.value) })} type="number" value={field.max_len ?? ''} />
-                </label>
-                <label className="ap-check">
-                  <input checked={Boolean(field.upper)} disabled={readOnly} onChange={(e) => set(i, { ...field, upper: e.target.checked || undefined })} type="checkbox" />
-                  Guardar em maiúsculas
-                </label>
-              </div>
-            )}
-            {field.type === 'number' && (
-              <div className="ap-row">
-                <label className="ap-inline">
-                  <span>Mínimo</span>
-                  <input disabled={readOnly} onChange={(e) => set(i, { ...field, min: num(e.target.value) })} type="number" value={field.min ?? ''} />
-                </label>
-                <label className="ap-inline">
-                  <span>Máximo</span>
-                  <input disabled={readOnly} onChange={(e) => set(i, { ...field, max: num(e.target.value) })} type="number" value={field.max ?? ''} />
-                </label>
-                <label className="ap-check">
-                  <input checked={Boolean(field.integer)} disabled={readOnly} onChange={(e) => set(i, { ...field, integer: e.target.checked || undefined })} type="checkbox" />
-                  Só inteiros
-                </label>
-              </div>
-            )}
-            {field.type === 'ref' && (
-              <div className="ap-row">
-                <label className="ap-inline">
-                  <span>Qual cadastro</span>
-                  <select
-                    disabled={readOnly}
-                    onChange={(e) => { const ref = e.target.value as 'equipment' | 'camera'; set(i, { ...field, ref, key: ref }) }}
-                    value={field.ref ?? 'equipment'}
-                  >
-                    <option value="equipment">Equipamentos</option>
-                    <option value="camera">Câmeras</option>
-                  </select>
-                </label>
-              </div>
-            )}
-            <div className="ap-row">
-              <DefaultEditor field={field} onChange={(value) => set(i, { ...field, default: value })} readOnly={readOnly} />
-              <label className="ap-inline ap-grow">
-                <span>Ajuda (aparece no campo)</span>
-                <input disabled={readOnly} onChange={(e) => set(i, { ...field, help: e.target.value || undefined })} value={field.help ?? ''} />
-              </label>
-            </div>
-            {errors.map((p) => <small className="ap-error" key={p.path + p.msg}>{p.path.slice(path.length).replace(/^\./, '') || 'campo'}: {p.msg}</small>)}
-          </div>
-        )
-      })}
-      {!readOnly && (
-        <button className="button button--secondary button--sm" onClick={() => onChange([...fields, newField()])} type="button">+ Campo</button>
-      )}
-    </div>
-  )
-}
-
-// Os campos que vieram do pai, só para ver (mudam no perfil de onde vieram).
-function Inherited({ fields }: { fields: ProfileField[] }) {
-  const inherited = fields.filter((f) => f.from)
-  if (inherited.length === 0) return null
-  const from = [...new Set(inherited.map((f) => f.from))].join(', ')
-  return (
-    <div className="ap-inherited">
-      <span>Herdados de {from}: {inherited.map((f) => f.label || f.key).join(', ')}</span>
-    </div>
-  )
-}
+// Os PERFIS DE ANOTAÇÃO: o que se anota em cada imagem de um pacote. A
+// lista e o editor são duas telas no menu do Configurar; a seção fica
+// montada o tempo todo (view null = escondida) para o rascunho não se perder
+// ao trocar de tela. As peças do editor estão em ProfileEditor.tsx.
 
 const empty = (): AnnotationProfile => ({ name: '', description: '', fields: [], objects: [] })
 
-// A seção tem duas telas no menu de Configurar, como os perfis de import:
-// a lista (com a quantidade no menu) e o editor ("Criar novo perfil"). Ela
-// fica montada o tempo todo (view null = escondida) para o rascunho não se
-// perder ao trocar de tela.
+// "3 campos" / "1 campo"
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
+
 type View = 'list' | 'editor'
 type Props = {
   view: View | null
@@ -303,11 +35,14 @@ type Props = {
 }
 
 export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
+  const uid = useId()
   const [profiles, setProfiles] = useState<AnnotationProfile[]>([])
   const [draft, setDraft] = useState<AnnotationProfile | null>(null)
+  const [snapshot, setSnapshot] = useState('') // o rascunho como abriu (para saber se mudou)
   const [isNew, setIsNew] = useState(false)
   const [problems, setProblems] = useState<Problem[]>([])
   const [error, setError] = useState('')
+  const [nameTouched, setNameTouched] = useState(false)
   useToast(error && !problems.length ? error : '', 'error')
   const [, setMessage] = useToastState('success')
   const [saving, setSaving] = useState(false)
@@ -316,30 +51,48 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
   useEffect(() => { void load() }, [])
 
   const readOnly = Boolean(draft?.builtin)
+  const dirty = draft !== null && JSON.stringify(draft) !== snapshot
 
   // O menu mostra a quantidade e o nome do editor ("Ver", "Editar"...).
   const editorLabel = !draft || isNew ? 'Criar novo perfil' : readOnly ? 'Ver perfil' : 'Editar perfil'
   useEffect(() => { onSummary({ count: profiles.length, editorLabel }) }, [profiles.length, editorLabel, onSummary])
 
-  // Abriu "Criar novo perfil" pelo menu sem nada aberto: um perfil em branco.
-  if (view === 'editor' && !draft) {
-    setDraft(empty())
-    setIsNew(true)
+  // só o estado daqui (dá para chamar durante a renderização)
+  function start(profile: AnnotationProfile, asNew: boolean) {
+    const copy = structuredClone(profile)
+    setDraft(copy)
+    setSnapshot(JSON.stringify(copy))
+    setIsNew(asNew)
+    setProblems([])
+    setError('')
+    setNameTouched(false)
   }
 
-  function close() {
+  function open(profile: AnnotationProfile, asNew: boolean) {
+    start(profile, asNew)
+    setMessage('')
+    onView('editor')
+  }
+
+  // Abriu "Criar novo perfil" pelo menu sem nada aberto: um perfil em branco.
+  if (view === 'editor' && !draft) start(empty(), true)
+
+  function reset() {
     setDraft(null)
+    setSnapshot('')
     setProblems([])
     onView('list')
   }
 
-  function open(profile: AnnotationProfile, asNew: boolean) {
-    setDraft(structuredClone(profile))
-    setIsNew(asNew)
-    setProblems([])
-    setError('')
-    setMessage('')
-    onView('editor')
+  // Fechar com mudança pergunta antes (o rascunho se perderia).
+  async function close() {
+    if (dirty && !(await confirmDialog({
+      title: 'Descartar as alterações?',
+      message: isNew ? 'O perfil ainda não foi criado. O que foi preenchido se perde.' : `As mudanças no perfil "${draft?.name}" ainda não foram salvas.`,
+      confirmLabel: 'Descartar alterações',
+      tone: 'danger',
+    }))) return
+    reset()
   }
 
   // Uma cópia editável (do padrão, por exemplo): o nome muda e sai o "padrão".
@@ -350,6 +103,12 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
 
   async function save() {
     if (!draft) return
+    // o nome é o único obrigatório que dá para conferir aqui; o resto o backend diz
+    if (isNew && !draft.name) {
+      setNameTouched(true)
+      document.getElementById(`${uid}-name`)?.focus()
+      return
+    }
     setSaving(true)
     setProblems([])
     setError('')
@@ -357,12 +116,17 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
     try {
       const saved = isNew ? await createAnnotationProfile(draft) : await updateAnnotationProfile(draft)
       // Como nos perfis de import: salvou, volta para a lista.
-      close()
+      reset()
       setMessage(`Perfil "${saved.name}" ${isNew ? 'criado' : 'salvo'}.`)
       await load()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Não foi possível salvar o perfil.')
-      if (e instanceof RequestError) setProblems(e.problems)
+      if (e instanceof RequestError) {
+        setProblems(e.problems)
+        // leva até o primeiro problema (o campo dele já abre sozinho)
+        const first = e.problems[0]?.path.match(/^(objects\[\d+\]\.)?fields\[\d+\]/)?.[0] ?? e.problems[0]?.path.match(/^objects\[\d+\]/)?.[0]
+        requestAnimationFrame(() => (first ? document.getElementById(pathId(first)) : document.getElementById(`${uid}-problems`))?.scrollIntoView({ block: 'center', behavior: 'smooth' }))
+      }
     } finally {
       setSaving(false)
     }
@@ -378,7 +142,6 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
     }))) return
     try {
       await deleteAnnotationProfile(name)
-      setDraft(null)
       setMessage(`Perfil "${name}" apagado.`)
       await load()
     } catch (e: unknown) {
@@ -386,216 +149,203 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
     }
   }
 
-  const setObject = (i: number, patch: Partial<ObjectType>) =>
-    draft && setDraft({ ...draft, objects: draft.objects.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
-
   if (view === null) return null
 
-  const notices = (
-    <>
-    </>
-  )
-
+  // ------------------------------------------------------------ a lista
   if (view === 'list') return (
-    <div className="create-card settings-card">
-      <div className="profile-header-flex">
-        <div>
-          <h2>Perfis de anotação cadastrados</h2>
-          <p>O que se anota em cada imagem de um pacote: os campos da imagem e os tipos de objeto.</p>
-        </div>
-        <button className="button button--primary button--sm" onClick={() => open(empty(), true)} type="button">+ Novo perfil</button>
-      </div>
-      {notices}
-
-      <div className="profile-items-list">
-        {profiles.map((p) => (
-          <div className={`profile-item ${draft?.name === p.name && !isNew ? 'profile-item--selected' : ''}`} key={p.name}>
-            <div className="profile-item__header">
-              <div>
-                <strong className="profile-item__name">
-                  {p.name}
-                  {p.builtin && <span className="profile-type-badge">padrão</span>}
-                  {p.extends && <span className="profile-type-badge">estende {p.extends}</span>}
-                </strong>
-                {p.description && <span className="profile-item__desc">{p.description}</span>}
-              </div>
-              <div className="profile-item__actions">
-                <button className="button button--secondary button--sm" onClick={() => open(p, false)} type="button">{p.builtin ? 'Abrir' : 'Editar'}</button>
-                <button className="button button--secondary button--sm" onClick={() => duplicate(p)} type="button">Duplicar</button>
-                {!p.builtin && <button className="button button--danger button--sm" onClick={() => void remove(p.name)} type="button">Apagar</button>}
-              </div>
-            </div>
-            <div className="profile-item__details">
-              <span><strong>Campos:</strong> {p.fields.length}</span>
-              <span><strong>Objetos:</strong> {p.objects.map((o) => `${o.label || o.key}${o.box ? ' (caixa)' : ''}`).join(', ') || 'nenhum'}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className="set-page">
+      <SettingsHeader
+        actions={<button className="button button--primary button--sm" onClick={() => open(empty(), true)} type="button">Criar perfil</button>}
+        description="Cada pacote usa um perfil, que diz o que se anota em cada imagem. Um perfil pode estender outro: herda tudo dele e acrescenta o que falta."
+        title="Perfis de anotação"
+      />
+      <ProfileList onDuplicate={duplicate} onOpen={(p) => open(p, false)} onRemove={(name) => void remove(name)} profiles={profiles} />
     </div>
   )
 
+  if (!draft) return null
+
+  // ------------------------------------------------------------ o editor
+  const setObject = (i: number, patch: Partial<ObjectType>) =>
+    setDraft({ ...draft, objects: draft.objects.map((o, j) => (j === i ? { ...o, ...patch } : o)) })
+  const addObject = () => {
+    setDraft({ ...draft, objects: [...draft.objects, { key: '', label: '', fields: [] }] })
+    requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.pe-object:last-of-type input')?.focus())
+  }
+  const nameMissing = isNew && nameTouched && !draft.name
+  const nameProblems = under(problems, 'name')
+  const ownFieldCount = ownFields(draft.fields).length
+
   return (
-    <div className="create-card settings-card">
-      {notices}
-      {draft && (
-        <div className="ap-editor">
-          <div className="profile-header-flex">
-            <div>
-              <h2>{isNew ? 'Criar novo perfil de anotação' : readOnly ? `Perfil padrão: ${draft.name}` : `Editar perfil: ${draft.name}`}</h2>
-              <p>{readOnly ? 'Perfil padrão: aqui só mudam as caixas ligadas a cada tipo de objeto. Para mudar o resto, use Duplicar.' : 'Os campos da imagem e os tipos de objeto que se anotam nos pacotes deste perfil.'}</p>
-            </div>
-            {readOnly && (
-              <div className="profile-item__actions">
-                <button className="button button--secondary button--sm" onClick={() => duplicate(draft)} type="button">Duplicar</button>
-                <button className="button button--secondary button--sm" onClick={close} type="button">Fechar</button>
-              </div>
-            )}
-          </div>
-          <div className="ap-row">
-            <label className="ap-inline">
-              <span>Nome</span>
-              <input
-                className={under(problems, 'name').length ? 'ap-input--error' : ''}
-                disabled={!isNew}
-                onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                placeholder="ex.: capacete-moto"
-                value={draft.name}
-              />
-            </label>
-            <label className="ap-inline ap-grow">
-              <span>Descrição</span>
-              <input disabled={readOnly} onChange={(e) => setDraft({ ...draft, description: e.target.value })} value={draft.description ?? ''} />
-            </label>
-          </div>
-          {under(problems, 'name').map((p) => <small className="ap-error" key={p.msg}>nome: {p.msg}</small>)}
-          <div className="ap-row">
-            <label className="ap-inline">
-              <span>Estende (herda os campos e os tipos de)</span>
-              <select
-                disabled={readOnly}
-                onChange={(e) => setDraft(applyParent(draft, profiles.find((p) => p.name === e.target.value)))}
-                value={draft.extends ?? ''}
-              >
-                <option value="">Nenhum</option>
-                {parentChoices(profiles, isNew ? '' : draft.name).map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-              </select>
-            </label>
-            {draft.extends && (
-              <p className="ap-small ap-grow">
-                Os pacotes deste perfil entram nos datasets e na pesquisa de {draft.extends}. O herdado aparece só para
-                leitura: muda no perfil {draft.extends}.
-              </p>
-            )}
-          </div>
-          {under(problems, 'extends').map((p) => <small className="ap-error" key={p.msg}>estende: {p.msg}</small>)}
+    <div className="set-page pe-editor">
+      <SettingsHeader
+        actions={readOnly ? <button className="button button--secondary button--sm" onClick={() => duplicate(draft)} type="button">Duplicar para editar</button> : undefined}
+        description={readOnly
+          ? 'Este é um perfil padrão do SIDM: só dá para mudar as caixas ligadas a cada tipo de objeto. Para mudar o resto, duplique.'
+          : 'Os campos que se preenchem em cada imagem e os objetos que se anotam nela. Abra um campo para editar e ver como ele fica na anotação.'}
+        title={isNew ? 'Criar perfil de anotação' : readOnly ? `Perfil ${draft.name}` : `Editar ${draft.name}`}
+      />
 
-          <h4>Campos da imagem</h4>
-          <Inherited fields={draft.fields} />
-          <FieldsEditor
-            base="fields"
-            fields={ownFields(draft.fields)}
-            onChange={(fields) => setDraft({ ...draft, fields: [...draft.fields.filter((f) => f.from), ...fields] })}
-            problems={problems}
-            readOnly={readOnly}
+      <SettingsGroup title="Sobre o perfil">
+        <SettingRow
+          help={isNew ? 'Vai na URL e no pacote: minúsculas, números e hífen. Não muda depois.' : 'O nome não muda depois de criado. Para outro nome, duplique.'}
+          htmlFor={`${uid}-name`}
+          label="Nome"
+        >
+          <div className={nameMissing || nameProblems.length ? 'pe-field pe-field--error' : 'pe-field'}>
+            <input
+              aria-describedby={nameMissing || nameProblems.length ? `${uid}-name-err` : undefined}
+              aria-invalid={nameMissing || nameProblems.length > 0 || undefined}
+              className="pe-mono pe-w-md"
+              disabled={!isNew}
+              id={`${uid}-name`}
+              onBlur={() => { setNameTouched(true); setDraft({ ...draft, name: draft.name.replace(/-+$/, '') }) }}
+              onChange={(e) => setDraft({ ...draft, name: profileName(e.target.value) })}
+              onFocus={() => setNameTouched(false)}
+              placeholder="caminhoes"
+              value={draft.name}
+            />
+            {(nameMissing || nameProblems.length > 0) && (
+              <small className="pe-error" id={`${uid}-name-err`}>{nameMissing ? 'Dê um nome ao perfil, como caminhoes.' : nameProblems.map((p) => p.msg).join(' ')}</small>
+            )}
+          </div>
+        </SettingRow>
+        <SettingRow help="Aparece na lista e ao escolher o perfil de um pacote." htmlFor={`${uid}-desc`} label="Descrição">
+          <input
+            className="pe-w-lg"
+            disabled={readOnly}
+            id={`${uid}-desc`}
+            onChange={(e) => setDraft({ ...draft, description: e.target.value })}
+            placeholder="Caminhões: eixos e tipo de carroceria"
+            value={draft.description ?? ''}
           />
+        </SettingRow>
+        <SettingRow
+          help={draft.extends
+            ? `Herda os campos e os tipos de ${draft.extends}, que aparecem aqui só para leitura. Os pacotes deste perfil entram nos datasets e na pesquisa de ${draft.extends}.`
+            : 'Herdar de outro perfil traz os campos e os tipos dele; aqui você só acrescenta.'}
+          htmlFor={`${uid}-extends`}
+          label="Estende"
+        >
+          <select
+            className="pe-w-md"
+            disabled={readOnly}
+            id={`${uid}-extends`}
+            onChange={(e) => setDraft(applyParent(draft, profiles.find((p) => p.name === e.target.value)))}
+            value={draft.extends ?? ''}
+          >
+            <option value="">Nenhum (começa do zero)</option>
+            {parentChoices(profiles, isNew ? '' : draft.name).map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+        </SettingRow>
+        {under(problems, 'extends').map((p) => <small className="pe-error pe-pad" key={p.msg}>{p.msg}</small>)}
+      </SettingsGroup>
 
-          <h4>Tipos de objeto</h4>
-          <p className="ap-small">
-            Com caixa: o objeto é uma label do CVAT (cada caixa importada ganha os campos). Sem caixa: uma lista na
-            imagem, preenchida na tela de anotação (como os veículos).
-          </p>
-          {draft.objects.map((object, i) => {
-            const path = `objects[${ownIndex(draft.objects, i)}]`
-            const own = problems.filter((p) => p.path === path || p.path === `${path}.key`)
-            const locked = readOnly || Boolean(object.from)
-            return (
-              <div className={own.length ? 'ap-object ap-field--error' : 'ap-object'} key={i}>
-                <div className="ap-row">
-                  <label className="ap-inline">
-                    <span>Nome na tela</span>
-                    <input
-                      disabled={locked}
-                      onBlur={() => { if (!object.key && object.label) setObject(i, { key: slug(object.label) }) }}
-                      onChange={(e) => setObject(i, { label: e.target.value })}
-                      placeholder="ex.: Capacete"
-                      value={object.label ?? ''}
-                    />
-                  </label>
-                  <label className="ap-inline">
-                    <span>Chave (label do CVAT, se tiver caixa)</span>
-                    <input disabled={locked} onChange={(e) => setObject(i, { key: e.target.value })} placeholder="ex.: helmet" value={object.key} />
-                  </label>
-                  <label className="ap-check">
-                    <input checked={Boolean(object.box)} disabled={locked} onChange={(e) => setObject(i, { box: e.target.checked || undefined, box_labels: e.target.checked ? undefined : object.box_labels })} type="checkbox" />
-                    Tem caixa (CVAT)
-                  </label>
-                  {!object.box && (
-                    <>
-                      <label className="ap-inline ap-num">
-                        <span>Mínimo</span>
-                        <input disabled={locked} min={0} onChange={(e) => setObject(i, { min: e.target.value === '' ? undefined : Number(e.target.value) })} type="number" value={object.min ?? ''} />
-                      </label>
-                      <label className="ap-inline ap-num">
-                        <span>Máximo (0 = sem limite)</span>
-                        <input disabled={locked} min={0} onChange={(e) => setObject(i, { max: e.target.value === '' ? undefined : Number(e.target.value) })} type="number" value={object.max ?? ''} />
-                      </label>
-                    </>
-                  )}
-                  {!locked && (
-                    <div className="ap-row-actions">
-                      <button className="button button--danger button--sm" onClick={() => setDraft({ ...draft, objects: draft.objects.filter((_, j) => j !== i) })} type="button">Remover</button>
-                    </div>
-                  )}
-                  {object.from && <span className="ap-from">tipo de {object.from}: aqui dá para acrescentar campos e caixas</span>}
-                </div>
-                {own.map((p) => <small className="ap-error" key={p.path + p.msg}>{p.msg}</small>)}
-                <Inherited fields={object.fields} />
-                <FieldsEditor
+      <section className="set-group" aria-labelledby={`${uid}-fields`}>
+        <div className="set-group__head">
+          <h3 id={`${uid}-fields`}>Campos da imagem</h3>
+          <p>Preenchidos uma vez por imagem, como o clima, a câmera ou o ângulo.</p>
+        </div>
+        <FieldList
+          addLabel={ownFieldCount ? 'Adicionar campo' : 'Adicionar o primeiro campo'}
+          base="fields"
+          empty={<><strong>Nenhum campo ainda</strong><span>Por exemplo: Clima (lista com Sol, Chuva, Noite) ou Placa legível (sim/não).</span></>}
+          fields={draft.fields}
+          onChange={(own) => setDraft({ ...draft, fields: [...draft.fields.filter((f) => f.from), ...own] })}
+          problems={problems}
+          readOnly={readOnly}
+        />
+      </section>
+
+      <section className="set-group" aria-labelledby={`${uid}-objects`}>
+        <div className="set-group__head">
+          <h3 id={`${uid}-objects`}>Tipos de objeto</h3>
+          <p>O que aparece dentro da imagem e tem campos próprios, como um veículo ou um capacete.</p>
+        </div>
+        {draft.objects.length === 0 && (
+          <div className="pe-empty">
+            <strong>Nenhum tipo de objeto</strong>
+            <span>Um perfil pode ter só campos da imagem. Acrescente um tipo quando cada imagem tiver vários itens para anotar.</span>
+          </div>
+        )}
+        {draft.objects.map((object, i) => {
+          const path = `objects[${ownIndex(draft.objects, i)}]`
+          const locked = readOnly || Boolean(object.from)
+          return (
+            <article aria-label={object.label || object.key || 'Tipo de objeto sem nome'} className="pe-object" id={pathId(path)} key={i}>
+              <header className="pe-object__title">
+                <h4>{object.label || object.key || <em>Tipo sem nome</em>}</h4>
+                <span className="pe-card__meta">
+                  {object.box ? 'caixas marcadas' : 'lista na anotação'}, {count(object.fields.length, 'campo', 'campos')}
+                </span>
+                {object.from && <span className="pe-tag">de {object.from}: aqui só se acrescentam campos e caixas</span>}
+                {!locked && (
+                  <button className="pe-remove pe-object__remove" onClick={() => setDraft({ ...draft, objects: draft.objects.filter((_, j) => j !== i) })} type="button">
+                    Remover tipo
+                  </button>
+                )}
+              </header>
+              <ObjectHead
+                locked={locked}
+                object={object}
+                onChange={(patch) => setObject(i, patch)}
+                path={path}
+                problems={problems}
+              />
+              <div className="pe-object__fields">
+                <h5>Campos de cada {(object.label || 'objeto').toLowerCase()}</h5>
+                <FieldList
+                  addLabel="Adicionar campo"
                   base={`${path}.fields`}
-                  fields={ownFields(object.fields)}
-                  onChange={(fields) => setObject(i, { fields: [...object.fields.filter((f) => f.from), ...fields] })}
+                  empty={<span>Nenhum campo. Por exemplo: Cor (lista) ou Tem garupa (sim/não).</span>}
+                  fields={object.fields}
+                  onChange={(own) => setObject(i, { fields: [...object.fields.filter((f) => f.from), ...own] })}
                   problems={problems}
                   readOnly={readOnly}
                 />
-                {!object.box && (
-                  <BoxLabelsEditor
-                    object={object}
-                    onChange={(box_labels) => setObject(i, { box_labels: box_labels.length ? box_labels : undefined })}
-                    problems={under(problems, `objects[${i}].box_labels`)}
-                    readOnly={false} // até num padrão: labels novas aparecem com tarefas novas
-                  />
-                )}
               </div>
-            )
-          })}
-          {!readOnly && (
-            <button
-              className="button button--secondary button--sm"
-              onClick={() => setDraft({ ...draft, objects: [...draft.objects, { key: '', label: '', fields: [] }] })}
-              type="button"
-            >
-              + Tipo de objeto
-            </button>
-          )}
+              {!object.box && (
+                <BoxLabelsEditor
+                  object={object}
+                  onChange={(box_labels) => setObject(i, { box_labels: box_labels.length ? box_labels : undefined })}
+                  problems={under(problems, `objects[${i}].box_labels`)}
+                  readOnly={false} // até num padrão: labels novas aparecem com tarefas novas
+                />
+              )}
+            </article>
+          )
+        })}
+        {!readOnly && <button className="pe-add" onClick={addObject} type="button">Adicionar tipo de objeto</button>}
+      </section>
 
-          {problems.length > 0 && (
-            <div className="ap-problems">
-              <strong>{problems.length === 1 ? '1 problema' : `${problems.length} problemas`} (as linhas estão marcadas):</strong>
-              <ul>{problems.map((p) => <li key={p.path + p.msg}><code>{p.path}</code>: {p.msg}</li>)}</ul>
-            </div>
-          )}
-
-          <div className="profile-submit-row">
-            <button className="button button--secondary" onClick={close} type="button">{isNew ? 'Cancelar' : 'Fechar'}</button>
-            {(!readOnly || draft.builtin) && (
-              <button className="button button--primary" disabled={saving} onClick={() => void save()} type="button">
-                {saving ? 'Salvando...' : isNew ? 'Criar perfil' : 'Salvar perfil'}
-              </button>
-            )}
-          </div>
+      {problems.length > 0 && (
+        <div className="pe-problems" id={`${uid}-problems`} role="alert">
+          <strong>{problems.length === 1 ? 'Falta corrigir 1 coisa' : `Faltam corrigir ${problems.length} coisas`}</strong>
+          <ul>
+            {problems.map((p) => {
+              const target = p.path.match(/^(objects\[\d+\]\.)?fields\[\d+\]/)?.[0] ?? p.path.match(/^objects\[\d+\]/)?.[0]
+              return (
+                <li key={p.path + p.msg}>
+                  {target ? (
+                    <button className="set-link" onClick={() => document.getElementById(pathId(target))?.scrollIntoView({ block: 'center', behavior: 'smooth' })} type="button">{p.msg}</button>
+                  ) : p.msg}
+                  <code>{p.path}</code>
+                </li>
+              )
+            })}
+          </ul>
         </div>
       )}
+
+      <div className={dirty ? 'set-savebar set-savebar--dirty' : 'set-savebar'} role="status">
+        <span>{saving ? 'Salvando…' : dirty ? (isNew ? 'Perfil ainda não criado.' : 'Alterações não salvas.') : readOnly ? 'Perfil padrão.' : isNew ? 'Preencha o nome e os campos.' : 'Tudo salvo.'}</span>
+        <div>
+          <button className="button button--secondary button--sm" onClick={() => void close()} type="button">{dirty ? 'Descartar' : 'Voltar à lista'}</button>
+          <button aria-busy={saving || undefined} className="button button--primary button--sm" disabled={saving} onClick={() => void save()} type="button">
+            {saving ? 'Salvando…' : isNew ? 'Criar perfil' : 'Salvar perfil'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

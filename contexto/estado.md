@@ -1,8 +1,55 @@
 # Estado atual
 
-Atualizado em 2026-11-24. Branch de trabalho: `feat/integracao-ia`.
+Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a `main` juntada: Processar, LPR e eixos do colega).
 
 ## Pronto
+
+### Nesta branch (`feat/perfil_anotacao`, parte ainda sem commit)
+
+- **Herança de perfis de anotação** (`extends`, `annotation/inherit.go`): `moto` estende
+  `veiculos`; o banco guarda só o que é do perfil, a API devolve resolvido (`from`,
+  `lineage`). Pacotes dos filhos entram nos datasets/pesquisa do pai.
+- **Caixa ligada a objeto** (`box_labels` no tipo de lista, `Object.box`, `annotation/links.go`):
+  a label (escolhida por tarefa → label no editor) diz campos (`motorcycle` → tipo moto) e
+  mapeia atributos do CVAT para campos (`attributes`: `color` → Cor; vale o campo do SIDM).
+  O padrão `veiculos` aceita `box_labels` editáveis (guardadas no banco, `annotation/tuning.go`).
+- **Ligação automática** no import das caixas e no botão "Ligar caixas aos objetos" do pacote
+  (`annotation/autolink.go`, `images/links.go`, `POST /packages/{name}/boxes/link`).
+  Na tela, caixas são objetos: o veículo ligado é um card só (borda na cor da caixa), as
+  soltas aparecem em "Outros objetos da imagem".
+- **Envio de .zip em partes** (`images/zipupload.go`, `hooks/useZipUploads.ts`): partes de
+  16 MB, retoma escolhendo o mesmo zip, grava em segundo plano, estado em `envios/<id>.json`.
+  Botão único "Adicionar pasta de imagens ou zip" (`FolderOrZip.tsx`).
+- **Atalhos de teclado por conta** (`PUT /auth/shortcuts`, `utils/shortcuts.ts`,
+  `hooks/useShortcuts.ts`): D/F/Ctrl+Enter/A/P/B/E/Q/Shift+Delete/? na anotação; ajuda com "?".
+- **Configurar reorganizado e aberto a todos** (`?aba=` na URL): Conta, Atalhos (todos);
+  Perfis, Equipamentos, Câmeras, Importação, Usuários, Armazenamento (admin). Peças
+  `pages/Settings/SettingsUI.tsx` (cabeçalho, grupo, linha). Sistema: disco, lixeira
+  (`POST /system/trash/purge`), envios parados (`GET /system/storage`).
+- Seta de voltar ao topo em todas as telas (`components/ScrollTop`).
+- **Acessibilidade (WCAG 2.2 AA) zerada** com `npm run a11y` (axe + puppeteer, usa o Edge
+  no Windows; login de admin em `frontend/a11y.env.local`, fora do git). Cores do tema
+  ajustadas para ≥ 4,5:1 (`--text-3` nos dois temas; `--accent` e `--success` no claro).
+  Atalhos: o nome acessível do botão começa pela tecla visível; "Salvar" nunca fica
+  desabilitado (leva à tecla repetida); "Restaurar padrões" só muda o rascunho.
+- **Editor de perfil de anotação refeito** (`ProfileEditor.tsx`/`.css`, contas em
+  `profileEditorUtils.ts`): lista e editor no estilo de linhas (`SettingsUI`); cada campo é
+  uma linha com resumo (tipo, opções, obrigatório) que abre para editar, com **prévia** do
+  campo como na anotação (`FieldInput`); opções numa tabela com cabeçalho (nome na tela →
+  valor guardado sai dele → código); chave no banco escondida atrás de "Mudar"; `repeat`
+  editável; tipo de objeto escolhe "Caixas do CVAT" ou "Lista na anotação"; herdados em
+  linhas só de leitura; barra de salvar presa embaixo, pergunta antes de descartar;
+  problema do backend abre e leva até o campo. As caixas ligadas (`BoxLabelsEditor`) seguem o
+  mesmo padrão: linha com resumo ("motorcycle: Tipo de veículo: Moto"), o que a caixa diz e os
+  atributos numa tabela. O CSS `ap-*` antigo saiu.
+- **Lista de perfis** (`ProfileList.tsx`/`.css`): um card por perfil com os campos em
+  etiquetas (da imagem e de cada tipo de objeto); quem estende outro fica embaixo do pai,
+  ligado por um fio, mostrando só o que acrescenta. Ícones no menu do Configurar
+  (`SettingsIcons.tsx`, SVG próprio, sem biblioteca). A tela não fala "CVAT": as caixas são
+  "caixas marcadas"; o código da opção virou "Sigla" (vai no nome do arquivo exportado e é
+  aceito no import; se uma opção tem, todas têm).
+
+### Antes
 
 - Página **Processar** (`/processar`, branch `feat/integracao-ia`, ainda sem commit):
   pré-anotação pelo detector de placas `lpr-class` (módulo `processing`, biblioteca
@@ -53,31 +100,35 @@ Atualizado em 2026-11-24. Branch de trabalho: `feat/integracao-ia`.
 
 ## Próximos passos (em ordem)
 
-- **Pesquisa/dashboard (Nathan):** pronta a primeira versão. Backend:
-  `GET /images/stats` (contagens por campo, com `missing` = "Não informado") e
-  `GET /boxes/stats` (labels das tarefas nas mesmas imagens). Tela `/pesquisa`
-  (`pages/Search`): perfil, status, vários pacotes, tarefas (todas ou algumas), filtros
-  dos campos, cartões com barras (clicar num valor filtra). O front vai ser refeito;
-  falta abrir a lista das imagens de um número.
-- **Versionamento (Nathan, em andamento, branch `feat/datacontrol`):** etapas 1 a 3 prontas:
-  backend (módulo `versions`: datasets, criar/listar versões, itens; o diff entre duas
-  versões pelo `hash` de cada item, e o detalhe do que mudou numa imagem) e a tela Versões
-  (`/versoes`; o dataset nasce na Pesquisa, "Salvar como dataset"). Próxima: o export de uma versão (com o número no manifesto do zip, para o DVC do lado do treino).
-- Depois: levar os atributos das caixas para o export; histórico das edições de atributo.
-- Processar: testar o LPR e os eixos com fotos reais (localmente, nunca no repositório) e
-  ajustar o score mínimo padrão; próximos modelos entram como adaptadores
-  (`processing.Model`).
+1. **Commit da branch**: incluir os arquivos novos (`git status`, os `??`) e rodar
+   `go test -p 1 ./...` (sem o `-p 1`, os testes do Mongo estouram o tempo).
+2. **Configurar, telas grandes**: levar o editor de perfil de importação e
+   Equipamentos/Câmeras para o estilo de linhas (`SettingsUI.tsx`), como já está o de perfil
+   de anotação.
+3. **Dashboard**: contar caixas por valor de atributo (`helmet` com `pessoa = garupa`) e
+   filtrar por isso.
+4. **Envio do zip**: conferir cada parte (sha256 da parte num header) para pegar dado
+   estragado no caminho; um zip de 26 GB chegou e "não abriu" na Jetson (causa não confirmada:
+   testar o zip com 7-Zip e `python3 -c "import zipfile..."` antes de reenviar).
+5. Versionamento: o export de uma versão já existe; falta o histórico de atributos das caixas.
+6. Processar: testar LPR e eixos com fotos reais (fora do repositório) e ajustar o score.
+
+## Jetson (scs-orin-nano)
+
+- Projeto em `~/workspace/SIDM`; as imagens foram para `/data/sidm/images`
+  (`IMAGES_HOST_DIR` no `.env`) porque o `/` (34 GB) encheu.
+- Falta mover o Docker inteiro (`/var/lib/docker`, com o volume do Mongo) para
+  `/data/docker` (`data-root` no `/etc/docker/daemon.json`, mantendo o runtime da NVIDIA).
+- Subir com `docker compose up -d --build` (o `-d` deixa rodar com o terminal fechado).
 
 ## Pendências menores
 
 - Recortes das letras da placa (anotar no recorte; decidir se o modelo treina na imagem inteira).
 - Mover os testes de cada módulo de `internal/api/` para o próprio módulo.
 - Swagger UI embutido (hoje vem de CDN); graceful shutdown.
-- Lixeira: não tem limpeza (cresce para sempre) nem tela própria; hoje uma imagem só sai dela pela volta de uma versão.
 - Os serviços `backend` e `frontend` do `docker-compose.yml` são imagens: código novo só entra com `docker compose up -d --build <serviço>`.
 - Data do import: falta a prévia (endpoint que lê a data em imagens de exemplo, ✔/✘ no
   editor) e um aviso na anotação quando a data não deu para ler.
-- O editor de perfil de anotação ainda não tem onde marcar `repeat` (só pelo JSON).
 - Um `splice-ini` salvo no banco antes de virar padrão fica escondido; pode ser apagado.
 
 ## Documentos desatualizados (não siga)

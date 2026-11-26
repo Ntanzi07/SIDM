@@ -59,11 +59,12 @@ export function UserMenu() {
             <span>{account.username} · {admin ? 'admin' : 'usuário'}</span>
           </div>
           {admin && (
-            <NavLink className="user-menu__item" onClick={() => setOpen(false)} role="menuitem" to="/usuarios">
+            <NavLink className="user-menu__item" onClick={() => setOpen(false)} role="menuitem" to="/configurar?aba=usuarios">
               Usuários
               {pending > 0 && <span className="user-menu__count">{pending} esperando</span>}
             </NavLink>
           )}
+          <NavLink className="user-menu__item" onClick={() => setOpen(false)} role="menuitem" to="/configurar?aba=atalhos">Atalhos de teclado</NavLink>
           <button className="user-menu__item" onClick={() => { setOpen(false); setChanging(true) }} role="menuitem" type="button">Trocar a senha</button>
           <button className="user-menu__item user-menu__item--out" onClick={() => void logout()} role="menuitem" type="button">Sair</button>
         </div>
@@ -73,7 +74,7 @@ export function UserMenu() {
   )
 }
 
-function ChangePasswordModal({ onClose }: { onClose: () => void }) {
+export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
   const [confirm, setConfirm] = useState('')

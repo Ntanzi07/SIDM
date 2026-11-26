@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -422,4 +424,49 @@ func (s *Service) ResetPassword(ctx context.Context, username, password string) 
 		return err
 	}
 	return s.setPassword(ctx, u, password)
+}
+
+var (
+	shortcutAction = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$`)
+	maxShortcuts   = 60
+)
+
+// SetShortcuts troca os atalhos de teclado da pessoa. A tela é quem sabe
+// as ações; aqui só se confere o formato e que uma tecla não serve a duas
+// ações.
+func (s *Service) SetShortcuts(ctx context.Context, username string, in map[string]string) (*User, error) {
+	if len(in) > maxShortcuts {
+		return nil, &InvalidError{fmt.Sprintf("no máximo %d atalhos", maxShortcuts)}
+	}
+	clean := make(map[string]string, len(in))
+	used := map[string]string{}
+	for _, action := range slices.Sorted(maps.Keys(in)) {
+		key := strings.ToLower(strings.TrimSpace(in[action]))
+		switch {
+		case len(action) > 60 || !shortcutAction.MatchString(action):
+			return nil, &InvalidError{fmt.Sprintf("ação inválida: %q", action)}
+		case len(key) > 40:
+			return nil, &InvalidError{fmt.Sprintf("tecla longa demais em %q", action)}
+		case key == "":
+			continue // sem tecla: a ação fica sem atalho só se a tela mandar "none"
+		case used[key] != "":
+			return nil, &InvalidError{fmt.Sprintf("a tecla %q está em %q e em %q", key, used[key], action)}
+		}
+		if key != "none" {
+			used[key] = action
+		}
+		clean[action] = key
+	}
+	u, err := s.repo.FindUser(ctx, username)
+	if err != nil {
+		return nil, err
+	}
+	u.Shortcuts = clean
+	if len(clean) == 0 {
+		u.Shortcuts = nil
+	}
+	if err := s.repo.ReplaceUser(ctx, u); err != nil {
+		return nil, err
+	}
+	return u, nil
 }

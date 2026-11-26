@@ -18,6 +18,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "POST", Path: "/auth/logout", Handler: s.handleLogout},
 		{Method: "GET", Path: "/auth/me", Handler: s.handleMe},
 		{Method: "PUT", Path: "/auth/password", Handler: s.handleChangePassword},
+		{Method: "PUT", Path: "/auth/shortcuts", Handler: s.handleShortcuts},
 		{Method: "GET", Path: "/users", Handler: s.handleList},
 		{Method: "PATCH", Path: "/users/{username}", Handler: s.handleUpdate},
 		{Method: "PUT", Path: "/users/{username}/password", Handler: s.handleResetPassword},
@@ -76,6 +77,7 @@ var userWrites = []string{
 	"POST /datasets/{name}/versions/{number}/items/{sha1}/restore", // a volta
 	// a própria conta
 	"PUT /auth/password",
+	"PUT /auth/shortcuts", // os próprios atalhos de teclado
 }
 
 // userMux casa um pedido com userWrites do mesmo jeito que o servidor casa
@@ -108,6 +110,7 @@ func adminOnly(r *http.Request) bool {
 var adminAreas = []string{
 	"/users",      // as contas
 	"/processing", // a página Processar (modelos de IA)
+	"/system",     // o Sistema do Configurar (disco, lixeira)
 }
 
 type ctxKey struct{}
@@ -285,6 +288,21 @@ func (s *Service) handleChangePassword(w http.ResponseWriter, r *http.Request) {
 	}
 	http.SetCookie(w, sessionCookie(r, token, int(SessionTTL.Seconds())))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// PUT /auth/shortcuts  {"annotation.next": "f", ...}: troca todos os atalhos
+// da pessoa logada ({} volta aos padrões). Devolve a conta.
+func (s *Service) handleShortcuts(w http.ResponseWriter, r *http.Request) {
+	var in map[string]string
+	if !decode(w, r, &in) {
+		return
+	}
+	u, err := s.SetShortcuts(r.Context(), platform.UserFrom(r), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, u)
 }
 
 func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {

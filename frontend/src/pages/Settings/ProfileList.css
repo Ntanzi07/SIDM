@@ -1,0 +1,193 @@
+/* A lista dos perfis de anotação (ProfileList.tsx): um card por perfil, os
+   filhos (estende) embaixo do pai, ligados por um fio à esquerda. */
+
+.pl-tree {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pl-tree--kids {
+  position: relative;
+  margin-top: 10px;
+  padding-left: 28px;
+}
+
+/* o fio do pai até cada filho */
+.pl-tree--kids > li {
+  position: relative;
+}
+
+.pl-tree--kids > li::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  left: -16px;
+  width: 14px;
+  height: 36px;
+  border-bottom: 1.5px solid var(--border-strong);
+  border-left: 1.5px solid var(--border-strong);
+  border-bottom-left-radius: 8px;
+}
+
+.pl-tree--kids > li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  top: -10px;
+  bottom: -12px;
+  left: -16px;
+  border-left: 1.5px solid var(--border-strong);
+}
+
+.pl-card {
+  display: grid;
+  gap: 10px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+.pl-card--child {
+  background: var(--surface);
+  border-style: solid;
+}
+
+.pl-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pl-card__title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 0;
+  min-width: 0;
+}
+
+.pl-card__title h3 {
+  margin: 0;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.pl-extends {
+  margin-left: 8px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+.pl-card__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+
+.pl-card__desc {
+  margin: -4px 0 0;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.pl-card__body {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pl-line {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  gap: 12px;
+  align-items: baseline;
+}
+
+.pl-line dt {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.pl-kind {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.pl-line dd {
+  margin: 0;
+}
+
+.pl-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.pl-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.pl-chip--inherited {
+  border-style: dashed;
+  background: transparent;
+  color: var(--text-2);
+}
+
+.pl-chip--more {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-3);
+}
+
+.pl-none {
+  color: var(--text-3);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .pl-card__head {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .pl-line {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
+
+  .pl-tree--kids {
+    padding-left: 18px;
+  }
+
+  .pl-tree--kids > li::before,
+  .pl-tree--kids > li:not(:last-child)::after {
+    left: -12px;
+  }
+
+  .pl-tree--kids > li::before {
+    width: 10px;
+  }
+}

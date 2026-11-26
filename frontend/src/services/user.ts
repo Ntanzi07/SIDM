@@ -14,6 +14,7 @@ export type Account = {
   approved_by?: string
   approved_at?: string
   last_login?: string
+  shortcuts?: Record<string, string> // atalhos de teclado (ação → tecla); vazio = padrões
 }
 
 let current: Account | null | undefined

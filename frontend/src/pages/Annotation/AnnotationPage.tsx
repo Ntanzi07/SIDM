@@ -11,6 +11,8 @@ import { FieldInput } from './AnnotationFields'
 import { BoxLink } from './BoxLink'
 import { linkedKeys, toObjectBox } from '../../utils/boxLinks'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { useShortcuts } from '../../hooks/useShortcuts'
+import { ShortcutsHelp } from './ShortcutsHelp'
 import './Annotation.css'
 
 function formatSize(bytes: number) {
@@ -66,6 +68,37 @@ export function AnnotationPage() {
   // Os problemas que não são de um campo só (ex.: "pelo menos 1 veículo").
   const generalProblems = annotator.problems.filter((problem) => problem.path === 'objects' || problem.path.endsWith('.type'))
 
+  // Atalhos de teclado (os da pessoa; Atalhos, no menu da conta)
+  const [showHelp, setShowHelp] = useState(false)
+  const allBoxes = boxSets.flatMap((set) => set.boxes.map((_, index) => ({ task: set.task, index })))
+  const stepBox = (delta: number) => {
+    if (allBoxes.length === 0) return
+    const at = selectedBox ? allBoxes.findIndex((b) => b.task === selectedBox.task && b.index === selectedBox.index) : -1
+    showBox(allBoxes[(at + delta + allBoxes.length) % allBoxes.length])
+  }
+  const shortcutKeys = useShortcuts({
+    'annotation.previous': () => { if (annotator.canGoBack && !annotator.saving) void annotator.previous() },
+    'annotation.next': () => {
+      if (annotator.saving || !image) return
+      void (annotator.revisiting ? annotator.forward() : annotator.skip())
+    },
+    'annotation.save': () => { if (!annotator.saving && image) void annotator.save() },
+    'annotation.add_object': () => {
+      const type = objectTypes[0]
+      if (type && !((type.max ?? 0) > 0 && countOf(type.key) >= (type.max ?? 0))) annotator.addObject(type.key)
+    },
+    'annotation.focus_first': () => {
+      const rows = document.querySelectorAll('.vehicle-row')
+      const scope = rows[rows.length - 1] ?? document.querySelector('.annotation-fields')
+      scope?.querySelector<HTMLElement>('.annotation-fields input:not(:disabled), .annotation-fields select:not(:disabled)')?.focus()
+    },
+    'annotation.toggle_boxes': () => setShowBoxes((value) => !value),
+    'annotation.next_box': () => stepBox(1),
+    'annotation.previous_box': () => stepBox(-1),
+    'annotation.delete_image': () => { if (image) setShowDeleteModal(true) },
+    'annotation.help': () => setShowHelp((value) => !value),
+  }, !showDeleteModal)
+
   const { done, total } = annotator.progress
   const percent = total ? Math.round((done / total) * 100) : 0
 
@@ -88,6 +121,7 @@ export function AnnotationPage() {
   return (
     <section className="annotation-page">
       {/* Delete image confirmation modal */}
+      {showHelp && <ShortcutsHelp keys={shortcutKeys} onClose={() => setShowHelp(false)} />}
       {showDeleteModal && (
         <div className="modal-backdrop" onClick={() => setShowDeleteModal(false)}>
           <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
@@ -118,6 +152,7 @@ export function AnnotationPage() {
           <span className="progress-line"><span style={{ width: `${percent}%` }} /></span>
         </div>
         <div className="annotation-navigation">
+          <button className="button button--secondary button--sm annotation-shortcuts" onClick={() => setShowHelp(true)} title="Atalhos de teclado (?)" type="button">⌨ Atalhos</button>
           <button className="button button--secondary" disabled={!annotator.canGoBack || annotator.saving} onClick={() => void annotator.previous()} type="button">← Anterior</button>
           <span>
             {annotator.revisiting
