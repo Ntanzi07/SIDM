@@ -1193,7 +1193,8 @@ paths:
         e, quando chega tudo, `POST /zip-uploads/{id}/finish` grava as imagens em
         segundo plano. Se já existe um envio que não terminou do mesmo arquivo
         (pacote, nome e tamanho), ele é devolvido, com `received` dizendo de onde
-        continuar.
+        continuar. Antes, confere o disco: o resto do zip e as imagens dele (~2x o
+        tamanho), com 1 GB de folga; sem espaço, 507.
       requestBody:
         required: true
         content:
@@ -1213,6 +1214,11 @@ paths:
               schema: { $ref: "#/components/schemas/ZipUpload" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "507":
+          description: Falta espaço em disco para o zip e as imagens dele (a mensagem diz quanto).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     get:
       tags: [imagens]
       summary: Os envios de zip do pacote (o mais novo primeiro)
@@ -1269,6 +1275,11 @@ paths:
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
           description: A parte não começa onde o envio parou; `upload.received` diz onde.
+        "507":
+          description: O disco encheu: a parte não foi gravada (o `received` não muda). Não adianta tentar de novo sem liberar espaço.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /zip-uploads/{id}/finish:
     parameters:
@@ -1290,6 +1301,11 @@ paths:
               schema: { $ref: "#/components/schemas/ZipUpload" }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
+        "507":
+          description: Falta espaço em disco para gravar as imagens do zip.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /packages/{name}/next:
     post:

@@ -36,6 +36,7 @@ function ZipCard({ upload: u, sendingHere, onResume, onRemove }: { upload: ZipUp
         {u.status === 'processing' && u.running && `Gravando as imagens no servidor: ${fmt(u.processed)} de ${fmt(u.total)}. Segue mesmo se você fechar a página.`}
         {u.status === 'processing' && !u.running && `A gravação parou em ${fmt(u.processed)} de ${fmt(u.total)} (o servidor reiniciou?).`}
         {u.status === 'failed' && `Não deu para gravar: ${u.error}`}
+        {u.status === 'failed' && u.received >= u.size && ' O zip chegou inteiro: dá para tentar gravar de novo sem reenviar.'}
         {u.status === 'done' && `Concluído: ${fmt(u.total)} imagem(ns) no zip.`}
       </p>
       {u.status !== 'receiving' && u.processed > 0 && (
@@ -52,6 +53,8 @@ function ZipCard({ upload: u, sendingHere, onResume, onRemove }: { upload: ZipUp
       {u.error_count > 5 && <p className="import-report__detail">… e mais {fmt(u.error_count - 5)}.</p>}
       <div className="zip-upload__actions">
         {u.status === 'processing' && !u.running && <button className="button button--primary button--sm" onClick={onResume} type="button">Continuar a gravação</button>}
+        {/* falhou com o zip inteiro no servidor (ex.: o servidor foi corrigido): grava de novo, sem reenviar */}
+        {u.status === 'failed' && u.received >= u.size && !u.running && <button className="button button--primary button--sm" onClick={onResume} type="button">Tentar gravar de novo</button>}
         {!sendingHere && !u.running && (
           <button className="button button--secondary button--sm" onClick={onRemove} type="button">
             {u.status === 'done' ? 'Fechar' : 'Cancelar envio'}

@@ -160,6 +160,11 @@ func (s *Service) StartZip(ctx context.Context, pkg, fileName string, size int64
 	}
 	for _, z := range existing {
 		if z.FileName == fileName && z.Size == size && z.Status != ZipDone {
+			if z.Status == ZipReceiving {
+				if err := s.needSpace(zipRoom(&z), "o resto do zip e as imagens dele"); err != nil {
+					return nil, err
+				}
+			}
 			if z.Status == ZipReceiving && z.Profile != profile {
 				z.Profile = profile
 				if err := s.saveZip(&z); err != nil {
@@ -168,6 +173,9 @@ func (s *Service) StartZip(ctx context.Context, pkg, fileName string, size int64
 			}
 			return &z, nil
 		}
+	}
+	if err := s.needSpace(2*size, "o zip e as imagens dele"); err != nil {
+		return nil, err
 	}
 	if err := os.MkdirAll(s.files.Abs(zipDir), 0o755); err != nil {
 		return nil, err
@@ -206,6 +214,10 @@ func (s *Service) WriteZipChunk(id string, offset int64, body io.Reader) (*ZipUp
 	}
 	if offset != z.Received {
 		return z, ErrZipOffset
+	}
+	// o disco pode encher no meio do envio (outro envio, outra coisa)
+	if err := s.needSpace(min(maxZipChunk, z.Size-z.Received), "a próxima parte"); err != nil {
+		return z, err
 	}
 	f, err := os.OpenFile(s.zipPath(id, ".zip"), os.O_WRONLY, 0)
 	if err != nil {
@@ -254,6 +266,9 @@ func (s *Service) FinishZip(id string) (*ZipUpload, error) {
 		return z, &InvalidZipError{fmt.Sprintf("faltam %d bytes do zip", z.Size-z.Received)}
 	case z.Status == ZipDone || z.Running:
 		return z, nil
+	}
+	if err := s.needSpace(z.Size, "gravar as imagens do zip"); err != nil {
+		return z, err
 	}
 	z.Status, z.Error = ZipProcessing, ""
 	if err := s.saveZip(z); err != nil {
@@ -321,12 +336,18 @@ func (s *Service) processZip(z ZipUpload) {
 			return
 		}
 	}
-	r, err := zip.OpenReader(s.zipPath(z.ID, ".zip"))
+	// openZip (zipopen.go): também abre o zip64 com o "total de discos" 0
+	r, closer, err := openZip(s.zipPath(z.ID, ".zip"))
 	if err != nil {
-		fail("o arquivo não abriu como zip (corrompido ou outro formato?): " + err.Error())
+		msg := "o arquivo não abriu como zip (corrompido ou outro formato?): " + err.Error()
+		if zeroTail(s.zipPath(z.ID, ".zip")) {
+			msg = "o zip chegou com o fim zerado: o disco do servidor provavelmente encheu durante o envio. " +
+				"Libere espaço (Configurar → Armazenamento), cancele e envie de novo (" + err.Error() + ")"
+		}
+		fail(msg)
 		return
 	}
-	defer r.Close()
+	defer closer.Close()
 
 	var imgs []*zip.File
 	skipped := 0
@@ -371,7 +392,7 @@ func (s *Service) processZip(z ZipUpload) {
 			last = time.Now()
 		}
 	}
-	r.Close()
+	closer.Close() // antes de apagar (no Windows, aberto não apaga); o defer fecha de novo sem efeito
 	z.Status = ZipDone
 	os.Remove(s.zipPath(z.ID, ".zip")) // as imagens já estão no pacote
 	s.endZip(&z)
@@ -400,6 +421,7 @@ func (s *Service) endZip(z *ZipUpload) {
 
 func writeZipErr(w http.ResponseWriter, z *ZipUpload, err error) {
 	var invalid *InvalidZipError
+	var noSpace *NoSpaceError
 	switch {
 	case errors.Is(err, platform.ErrNotFound):
 		platform.WriteError(w, http.StatusNotFound, "envio não encontrado (já terminou ou foi cancelado?)")
@@ -407,6 +429,8 @@ func writeZipErr(w http.ResponseWriter, z *ZipUpload, err error) {
 		platform.WriteJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "upload": z})
 	case errors.As(err, &invalid):
 		platform.WriteError(w, http.StatusBadRequest, invalid.Msg)
+	case errors.As(err, &noSpace):
+		platform.WriteError(w, http.StatusInsufficientStorage, noSpace.Msg)
 	default:
 		platform.ServerError(w, err)
 	}
@@ -442,7 +466,7 @@ func (s *Service) handleStartZip(w http.ResponseWriter, r *http.Request) {
 	}
 	z, err := s.StartZip(r.Context(), pkg, in.FileName, in.Size, in.Profile, platform.UserFrom(r))
 	if err != nil {
-		platform.ServerError(w, err)
+		writeZipErr(w, z, err) // sem disco: 507
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, z)

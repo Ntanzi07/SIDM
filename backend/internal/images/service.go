@@ -26,6 +26,7 @@ type Service struct {
 	listeners []Listener
 	now       func() time.Time
 	zips      zipState // os envios de zip gravando agora
+	diskFree  func(path string) (uint64, error) // nil: mede o disco (zipspace.go)
 }
 
 // New monta o módulo. catalog e profiles podem ser nil nos testes que não

@@ -115,8 +115,13 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
 3. **Dashboard**: contar caixas por valor de atributo (`helmet` com `pessoa = garupa`) e
    filtrar por isso.
 4. **Envio do zip**: conferir cada parte (sha256 da parte num header) para pegar dado
-   estragado no caminho; um zip de 26 GB chegou e "não abriu" na Jetson (causa não confirmada:
-   testar o zip com 7-Zip e `python3 -c "import zipfile..."` antes de reenviar).
+   estragado no caminho. O zip de 26 GB que "não abriu" na Jetson estava **bom**: o programa
+   que o gerou grava o "total de discos" do localizador zip64 como 0, e o `archive/zip` do Go
+   exige 1 (o Python e o 7-Zip abrem). Agora o envio abre por `images/zipopen.go`, que lê esse
+   campo como 1 (sem mexer no arquivo); testado com o zip real (68.091 itens). À parte, o
+   envio passou a conferir o espaço em disco (`zipspace.go`, 507) e o zip com o fim zerado
+   diz que foi o disco. Na Jetson: reconstruir o backend e reenviar (ou "Gravar" de novo o
+   envio que falhou, se o zip ainda estiver em `envios/`).
 5. Versionamento: o export de uma versão já existe; falta o histórico de atributos das caixas.
 6. Processar: testar LPR e eixos com fotos reais (fora do repositório) e ajustar o score.
 

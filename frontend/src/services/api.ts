@@ -449,13 +449,17 @@ export async function sendZip(
         continue
       }
       if (error instanceof RequestError && error.status >= 400 && error.status < 500) throw error
+      // 507: o disco do servidor encheu. Tentar de novo não adianta (a
+      // mensagem diz o que liberar); escolher o mesmo zip depois continua.
+      if (error instanceof RequestError && error.status === 507) throw error
       failures++
       if (failures > 8) throw new Error('A conexão caiu várias vezes. Escolha o mesmo zip de novo para continuar de onde parou.', { cause: error })
       await wait(Math.min(30_000, 1000 * 2 ** failures))
       upload = await getZipUpload(upload.id).catch(() => upload)
     }
   }
-  if (upload.status === 'receiving' || (upload.status === 'processing' && !upload.running)) {
+  // falhou com o zip inteiro lá (escolheu o mesmo de novo): grava de novo, sem reenviar
+  if (upload.status === 'receiving' || (upload.status === 'processing' && !upload.running) || (upload.status === 'failed' && upload.received >= upload.size)) {
     upload = await finishZipUpload(upload.id)
   }
   onProgress(upload)
