@@ -26,6 +26,8 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
   Perfis, Equipamentos, Câmeras, Importação, Usuários, Armazenamento (admin). Peças
   `pages/Settings/SettingsUI.tsx` (cabeçalho, grupo, linha). Sistema: disco, lixeira
   (`POST /system/trash/purge`), envios parados (`GET /system/storage`).
+- **Admin cadastra conta** (`POST /users`, "+ Nova conta" em Configurar → Usuários): nome,
+  e-mail, senha e papel; a conta já nasce ativa. Branch `feat/admin-cria-conta`.
 - Seta de voltar ao topo em todas as telas (`components/ScrollTop`).
 - **Acessibilidade (WCAG 2.2 AA) zerada** com `npm run a11y` (axe + puppeteer, usa o Edge
   no Windows; login de admin em `frontend/a11y.env.local`, fora do git). Cores do tema

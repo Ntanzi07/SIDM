@@ -1376,6 +1376,11 @@ export async function listAccounts(): Promise<Account[]> {
   return response.items
 }
 
+// o admin cadastra um colaborador: a conta já nasce ativa
+export async function createAccount(input: { email: string; name: string; password: string; role?: 'admin' | 'user' }): Promise<Account> {
+  return request<Account>('/users', { method: 'POST', body: JSON.stringify(input) })
+}
+
 export async function updateAccount(username: string, change: { status?: 'active' | 'disabled'; role?: 'admin' | 'user' }): Promise<Account> {
   return request<Account>(`/users/${encodeURIComponent(username)}`, { method: 'PATCH', body: JSON.stringify(change) })
 }

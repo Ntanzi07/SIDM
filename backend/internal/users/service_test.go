@@ -169,6 +169,7 @@ func TestRegras(t *testing.T) {
 		{"POST", "/export-profiles", true},
 		{"DELETE", "/equipments/x", true},
 		{"GET", "/users", true},
+		{"POST", "/users", true}, // o admin cria uma conta
 		{"PATCH", "/users/maria", true},
 		// a página Processar: só admin, até para ler
 		{"GET", "/processing/models", true},
@@ -225,5 +226,53 @@ func TestEmail(t *testing.T) {
 	var le *LoginError
 	if _, _, err := s.Login(ctx, "ninguem@empresa.com.br", "senha-boa-1"); !errors.As(err, &le) {
 		t.Errorf("e-mail que não existe: %v", err)
+	}
+}
+
+func TestAdminCriaConta(t *testing.T) {
+	s, mem, now := newTestService(t)
+	ctx := context.Background()
+	u, err := s.CreateByAdmin(ctx, "chefe", CreateInput{Email: " Maria.Silva@Empresa.com ", Name: "Maria Silva", Password: "senha-boa-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Username != "maria.silva" || u.Email != "maria.silva@empresa.com" || u.Status != StatusActive || u.Role != RoleUser {
+		t.Errorf("conta: %+v", u)
+	}
+	if u.ApprovedBy != "chefe" || u.ApprovedAt == nil || !u.ApprovedAt.Equal(*now) {
+		t.Errorf("aprovada por quem criou: %+v", u)
+	}
+	if _, _, err := s.Login(ctx, "maria.silva@empresa.com", "senha-boa-1"); err != nil {
+		t.Errorf("entra na hora: %v", err)
+	}
+	// e-mail que já tem conta (até pendente): 409
+	if _, err := s.CreateByAdmin(ctx, "chefe", CreateInput{Email: "maria.silva@empresa.com", Name: "X", Password: "senha-boa-1"}); !errors.Is(err, ErrEmailTaken) {
+		t.Errorf("e-mail repetido: %v", err)
+	}
+	if _, err := s.Register(ctx, RegisterInput{Email: "joao@empresa.com", Name: "João", Password: "senha-boa-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CreateByAdmin(ctx, "chefe", CreateInput{Email: "joao@empresa.com", Name: "João", Password: "senha-boa-1"}); !errors.Is(err, ErrEmailTaken) {
+		t.Errorf("e-mail de conta pendente: %v", err)
+	}
+	// o nome de usuário já existe: ganha -2; papel admin vale
+	a, err := s.CreateByAdmin(ctx, "chefe", CreateInput{Email: "maria.silva@outra.com", Name: "Outra Maria", Password: "senha-boa-1", Role: RoleAdmin})
+	if err != nil || a.Username != "maria.silva-2" || !a.IsAdmin() {
+		t.Errorf("colisão/admin: %+v %v", a, err)
+	}
+	var invalid *InvalidError
+	for name, in := range map[string]CreateInput{
+		"senha curta":   {Email: "a1@x.com", Name: "A", Password: "curta"},
+		"papel errado":  {Email: "a2@x.com", Name: "A", Password: "senha-boa-1", Role: "dono"},
+		"sem nome":      {Email: "a3@x.com", Name: " ", Password: "senha-boa-1"},
+		"e-mail errado": {Email: "sem-arroba", Name: "A", Password: "senha-boa-1"},
+	} {
+		if _, err := s.CreateByAdmin(ctx, "chefe", in); !errors.As(err, &invalid) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	// o cadastro pela tela de login continua pendente e sem aprovador
+	if p := mem.Users["joao"]; p.Status != StatusPending || p.ApprovedBy != "" {
+		t.Errorf("autocadastro: %+v", p)
 	}
 }

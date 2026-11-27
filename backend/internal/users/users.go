@@ -1,7 +1,8 @@
 // Package users é o login do SIDM: as contas (admin ou usuário normal), o
 // cadastro com aprovação, as sessões e quem pode o quê.
 //
-// Uma pessoa se cadastra e fica PENDENTE até um admin aprovar. O login dura
+// Uma pessoa se cadastra e fica PENDENTE até um admin aprovar; o admin também
+// pode cadastrar um colaborador direto (POST /users), já ativo. O login dura
 // 8 horas: um token aleatório num cookie HttpOnly; no banco fica só o hash
 // dele (quem lê o banco não consegue entrar com o que está lá). A senha é
 // guardada com PBKDF2-SHA256 (biblioteca padrão do Go), nunca em texto.

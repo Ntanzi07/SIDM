@@ -16,7 +16,7 @@ mexem nelas pelo `Service` dele.
 | `exports` | módulo | perfis de export salvos, preview e download do zip | `export_profiles` |
 | `versions` | módulo | datasets (pesquisas salvas) e versões congeladas deles, com o resumo para o dashboard | `datasets`, `versions`, `version_items` |
 | `processing` | módulo | a página Processar: modelos de IA (adaptadores `Model`: LPR e eixos) passam pelas imagens dos pacotes escolhidos e gravam caixas numa tarefa pelo `boxes` (`PutModelSets`, que pula o que veio do CVAT ou foi editado); um processamento por modelo, em segundo plano | `processing_runs` |
-| `users` | módulo | login: contas (admin/usuário, cadastro pendente até aprovar), sessões de 8 h, o middleware `Protect` (401/403) | `users`, `sessions` |
+| `users` | módulo | login: contas (admin/usuário, cadastro pendente até aprovar, ou criada já ativa pelo admin), sessões de 8 h, o middleware `Protect` (401/403) | `users`, `sessions` |
 | `filename` | biblioteca pura | nome v2 (formatar e ler), tabelas de códigos, sanitização | — |
 | `importer` | biblioteca pura | ler CSV e INI, traduzir com um perfil de import para os campos de um perfil de anotação (`annotation.Values`) | — |
 | `export` | biblioteca pura | perfis de export, divisão train/valid/test, pastas e nomes pelos campos do perfil de anotação (`MetaFields`), escrita COCO/YOLO/VOC e só imagens (com `anotacoes.csv`) | — |

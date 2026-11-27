@@ -20,6 +20,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "PUT", Path: "/auth/password", Handler: s.handleChangePassword},
 		{Method: "PUT", Path: "/auth/shortcuts", Handler: s.handleShortcuts},
 		{Method: "GET", Path: "/users", Handler: s.handleList},
+		{Method: "POST", Path: "/users", Handler: s.handleCreate},
 		{Method: "PATCH", Path: "/users/{username}", Handler: s.handleUpdate},
 		{Method: "PUT", Path: "/users/{username}/password", Handler: s.handleResetPassword},
 	}
@@ -312,6 +313,20 @@ func (s *Service) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, platform.Page[User]{Total: int64(len(list)), Items: list})
+}
+
+// POST /users: o admin cadastra um colaborador (a conta já nasce ativa).
+func (s *Service) handleCreate(w http.ResponseWriter, r *http.Request) {
+	var in CreateInput
+	if !decode(w, r, &in) {
+		return
+	}
+	u, err := s.CreateByAdmin(r.Context(), platform.UserFrom(r), in)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusCreated, u)
 }
 
 func (s *Service) handleUpdate(w http.ResponseWriter, r *http.Request) {

@@ -218,6 +218,35 @@ paths:
                   items: { type: array, items: { $ref: "#/components/schemas/User" } }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [login]
+      summary: Cadastrar uma conta já ativa (admin)
+      description: |
+        O admin cadastra um colaborador. A conta nasce **ativa**, aprovada por quem
+        criou (sem passar pela fila de aprovação). Mesmas regras do `/auth/register`:
+        o e-mail é único e o nome de usuário sai dele (`-2`, `-3`... se já existe).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, name, password]
+              properties:
+                email: { type: string, format: email, example: maria.silva@empresa.com.br }
+                name: { type: string, example: Maria Silva }
+                password: { type: string, format: password, minLength: 8, description: "Passe por um canal seguro; a pessoa troca depois em Trocar a senha." }
+                role: { type: string, enum: [admin, user], default: user }
+      responses:
+        "201":
+          description: Conta criada, ativa.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/User" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { description: "E-mail que já tem conta.", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
 
   /users/{username}:
     patch:
