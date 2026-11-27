@@ -10,7 +10,8 @@ import type { AnnotationProfile, ImageDetail } from '../../types/annotation'
 import { displayValue, fieldLabel } from '../../utils/annotationForm'
 import { linkedKeys } from '../../utils/boxLinks'
 import { useToastState } from '../../hooks/useToast'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkFields } from '../../components/Skeleton/Shapes'
 import './Viewer.css'
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -132,7 +133,17 @@ export function ImageViewerPage() {
         )}
       </div>
 
-      {loading && !image && <PageLoader label="Carregando as verificadas" />}
+      {loading && !image && (
+        <Skeleton label="Carregando as verificadas">
+          <div className="viewer-layout">
+            <div className="viewer-main"><div className="viewer-image"><Bone h={420} r={8} w="100%" /></div></div>
+            <div className="viewer-card">
+              <Bone h={22} w={170} />
+              <SkFields columns={1} count={7} />
+            </div>
+          </div>
+        </Skeleton>
+      )}
       {!loading && !image && !error && <p className="viewer-empty">Nenhuma imagem verificada neste pacote ainda.</p>}
 
       {image && (

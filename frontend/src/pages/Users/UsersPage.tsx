@@ -6,7 +6,7 @@ import { notify } from '../../services/toast'
 import { useToastState } from '../../hooks/useToast'
 import { setPendingCount, useAccount, type Account } from '../../services/user'
 import { formatWhen } from '../Versions/format'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import { SettingsHeader } from '../Settings/SettingsUI'
 import './Users.css'
 
@@ -63,7 +63,22 @@ export function UsersPage({ embedded = false }: { embedded?: boolean } = {}) {
           </div>
         </div>
       )}
-      {accounts === null && !error && <PageLoader label="Carregando as contas" />}
+      {accounts === null && !error && (
+        <Skeleton label="Carregando as contas">
+          <div className="users-group">
+            <div className="users-group__head"><Bone h={14} w={130} /></div>
+            <ul className="users-list">
+              {[0, 1, 2].map((i) => (
+                <li className="users-row" key={i}>
+                  <div className="sk-title"><Bone h={15} w={[90, 120, 76][i]} /><Bone h={12} w={[190, 160, 210][i]} /></div>
+                  <Bone h={12} w={170} />
+                  <div className="sk-buttons"><Bone h={32} r={8} w={92} /><Bone h={32} r={8} w={104} /></div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Skeleton>
+      )}
       {accounts && groups.map((group) => {
         const list = accounts.filter((item) => item.status === group.status)
         // grupo vazio não aparece (nem o de aprovação: sem pedido, não há o que fazer)

@@ -1,0 +1,207 @@
+/* O esqueleto (Skeleton.tsx): blocos na cor das superfícies, com um brilho
+   que passa devagar. Com movimento reduzido, os blocos ficam parados. */
+
+.skeleton {
+  opacity: 0;
+  animation: skeleton-in 260ms var(--ease) 150ms forwards;
+}
+
+@keyframes skeleton-in {
+  to {
+    opacity: 1;
+  }
+}
+
+/* os cartões do esqueleto usam as classes dos de verdade (mesma grade e
+   mesmo tamanho), mas sem a entrada, o hover e o cursor de link */
+.skeleton__shape .package-card,
+.skeleton__shape .task-card {
+  animation: none;
+  cursor: default;
+  transform: none;
+}
+
+.skeleton__shape .package-card:hover,
+.skeleton__shape .task-card:hover {
+  border-color: var(--border);
+  background: var(--surface);
+  transform: none;
+}
+
+.bone {
+  position: relative;
+  display: block;
+  flex-shrink: 0;
+  max-width: 100%;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+
+/* o brilho: uma faixa clara que atravessa o bloco */
+.bone::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, var(--hover) 45%, var(--hover) 55%, transparent);
+  transform: translateX(-100%);
+  animation: bone-shine 1.6s ease-in-out infinite;
+}
+
+@keyframes bone-shine {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* uma capa inteira (a imagem do pacote) */
+.bone--fill {
+  width: 100% !important;
+  height: 100% !important;
+  border-radius: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+    opacity: 1;
+  }
+
+  .bone::after {
+    display: none;
+  }
+}
+
+/* o que o leitor de tela ouve (escondido na tela) */
+.skeleton__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* o espaço entre os blocos: no de verdade, ele vem da altura das linhas de
+   texto, que o bloco não tem */
+.skeleton__shape .package-card__body,
+.skeleton__shape .package-card__progress,
+.skeleton__shape .task-card__head,
+.skeleton__shape .set-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.skeleton__shape .package-card__progress {
+  gap: 7px;
+  margin-top: 6px;
+}
+
+.skeleton__shape .package-card__stats dd {
+  margin-top: 8px;
+}
+
+/* ---- as peças (Shapes.tsx) ---- */
+.sk-title {
+  display: grid;
+  gap: 12px;
+}
+
+.sk-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sk-stat {
+  display: grid;
+  gap: 8px;
+}
+
+.skeleton__shape .side-section {
+  display: grid;
+  gap: 10px;
+}
+
+.sk-feed__item {
+  animation: none;
+}
+
+.sk-feed__status {
+  margin-left: auto;
+}
+
+.sk-profile {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+}
+
+.skeleton__shape .export-profiles {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.sk-form {
+  display: grid;
+  gap: 12px;
+}
+
+.sk-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 10px;
+}
+
+.sk-fields {
+  display: grid;
+  gap: 14px 16px;
+}
+
+.sk-field {
+  display: grid;
+  gap: 7px;
+}
+
+@media (max-width: 720px) {
+  .sk-form__grid,
+  .sk-fields {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* cartões de link (perfis do Dashboard) e a tabela da tarefa */
+.skeleton__shape .profile-card {
+  display: grid;
+  gap: 10px;
+  animation: none;
+  cursor: default;
+}
+
+.skeleton__shape .profile-card:hover {
+  transform: none;
+}
+
+.sk-table-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+
+.skeleton__shape .annotation-form-heading {
+  margin-bottom: 16px;
+}
+
+.skeleton__shape .viewer-card {
+  display: grid;
+  gap: 16px;
+}

@@ -1235,3 +1235,39 @@
     transition: none;
   }
 }
+
+/* o esqueleto do Configurar (SettingsSkeleton, no SettingsPage): a mesma
+   grade de menu e conteúdo; o Skeleton por fora só faz a entrada */
+.settings-skeleton {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 40px;
+  align-items: start;
+}
+
+.settings-skeleton__group {
+  display: grid;
+  gap: 14px;
+  padding: 0 10px 22px;
+}
+
+.settings-skeleton__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-skeleton__title {
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 860px) {
+  .settings-skeleton {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-skeleton .settings-sidebar {
+    display: none;
+  }
+}

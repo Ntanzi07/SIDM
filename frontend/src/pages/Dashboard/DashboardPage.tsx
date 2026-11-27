@@ -11,6 +11,7 @@ import { fmt } from '../../utils/stats'
 import { useToastState } from '../../hooks/useToast'
 import { useIsAdmin } from '../../services/user'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import './Dashboard.css'
 
 // Dashboard: primeiro escolhe o perfil de anotação; depois, à esquerda, de
@@ -56,7 +57,22 @@ function ProfilePicker() {
           <p>Escolha um perfil de anotação para ver os números das imagens e as versões dos datasets dele.</p>
         </div>
       </div>
-      {profiles === null && !error && <PageLoader label="Carregando os perfis" />}
+      {profiles === null && !error && (
+        <Skeleton label="Carregando os perfis">
+          <div className="profile-grid">
+            {[220, 170, 250].map((w, i) => (
+              <div className="profile-card sk-card" key={i}>
+                <Bone h={10} w={48} />
+                <Bone h={26} w={w * 0.7} />
+                <Bone h={12} w="85%" />
+                <dl>
+                  {[0, 1, 2].map((n) => <div className="sk-stat" key={n}><Bone h={9} w={56} /><Bone h={22} w={34} /></div>)}
+                </dl>
+              </div>
+            ))}
+          </div>
+        </Skeleton>
+      )}
       {profiles && (
         <div className="profile-grid">
           {profiles.map((item, index) => (

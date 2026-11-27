@@ -27,6 +27,13 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
   `pages/Settings/SettingsUI.tsx` (cabeçalho, grupo, linha). Sistema: disco, lixeira
   (`POST /system/trash/purge`), envios parados (`GET /system/storage`).
 - Seta de voltar ao topo em todas as telas (`components/ScrollTop`).
+- **Esqueleto ao carregar** (`components/Skeleton`): Pacotes, Tarefas e Configurar mostram a
+  silhueta da tela (os mesmos cartões na grade escolhida, a barra de busca, o menu e as
+  linhas do Configurar) no lugar do anel; aparece depois de 150 ms, brilho parado com
+  movimento reduzido. Também o detalhe do pacote (e a lista de imagens dele), a anotação, as
+  verificadas, o Dashboard, Exportar, Processar, o detalhe da tarefa, Usuários e Armazenamento,
+  com as peças de `components/Skeleton/Shapes.tsx`. O `PageLoader` ficou só em duas esperas
+  pequenas (as versões no Dashboard e os pacotes num pop-up das Tarefas).
 - **Import com andamento**: com `Accept: application/x-ndjson`, `POST /packages/{name}/import`
   responde uma linha JSON por passo (fases lendo, conferindo, cadastros, gravando) e o
   relatório no fim (`imports/progress.go`); sem o cabeçalho, igual a antes. O diálogo

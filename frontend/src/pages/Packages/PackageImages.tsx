@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkImageFeed } from '../../components/Skeleton/Shapes'
 import { deleteImage, imageFileUrl, listPackageImages, type ImageSummary } from '../../services/api'
 import { useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
@@ -122,6 +124,7 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
 
   return (
     <>
+      {total < 0 && <Skeleton label="Carregando as imagens"><SkImageFeed count={8} /></Skeleton>}
       {total === 0 && <p className="package-images__empty">{status ? 'Nenhuma imagem com este status.' : 'Este pacote ainda não tem imagens.'}</p>}
       {items.length > 0 && (
         <ul className="image-feed">
@@ -150,8 +153,7 @@ function ImageFeed({ packageName, status, onRemoved }: { packageName: string; st
         </ul>
       )}
       <div className="image-feed__sentinel" ref={sentinel}>
-        {total < 0 && 'Carregando...'}
-        {total > 0 && hasMore && 'Carregando mais...'}
+        {total > 0 && hasMore && 'Carregando mais…'}
         {total > 0 && !hasMore && items.length > PAGE && `Fim · ${fmt(total)} imagem(ns)`}
       </div>
     </>
