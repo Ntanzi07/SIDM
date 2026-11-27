@@ -26,6 +26,8 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
   Perfis, Equipamentos, Câmeras, Importação, Usuários, Armazenamento (admin). Peças
   `pages/Settings/SettingsUI.tsx` (cabeçalho, grupo, linha). Sistema: disco, lixeira
   (`POST /system/trash/purge`), envios parados (`GET /system/storage`).
+- **Admin cadastra conta** (`POST /users`, "+ Nova conta" em Configurar → Usuários): nome,
+  e-mail, senha e papel; a conta já nasce ativa. Branch `feat/admin-cria-conta`.
 - Seta de voltar ao topo em todas as telas (`components/ScrollTop`).
 - **Import com andamento**: com `Accept: application/x-ndjson`, `POST /packages/{name}/import`
   responde uma linha JSON por passo (fases lendo, conferindo, cadastros, gravando) e o

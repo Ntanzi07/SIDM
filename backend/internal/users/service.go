@@ -114,6 +114,34 @@ type RegisterInput struct {
 // e-mail já tem conta. O nome de usuário vem do e-mail; se já existe, ganha
 // um número (maria.silva-2).
 func (s *Service) Register(ctx context.Context, in RegisterInput) (*User, error) {
+	return s.create(ctx, in, RoleUser, StatusPending, "")
+}
+
+// CreateInput é o corpo da conta criada por um admin. Sem role, é "user".
+type CreateInput struct {
+	Email    string `json:"email"`
+	Name     string `json:"name"`
+	Password string `json:"password"`
+	Role     string `json:"role,omitempty"`
+}
+
+// CreateByAdmin: o admin cadastra um colaborador. A conta já nasce ATIVA
+// (aprovada por quem criou). Mesmas regras do cadastro: e-mail único, nome
+// de usuário tirado do e-mail.
+func (s *Service) CreateByAdmin(ctx context.Context, admin string, in CreateInput) (*User, error) {
+	role := in.Role
+	if role == "" {
+		role = RoleUser
+	}
+	if role != RoleAdmin && role != RoleUser {
+		return nil, &InvalidError{`role: "admin" ou "user"`}
+	}
+	return s.create(ctx, RegisterInput{Email: in.Email, Name: in.Name, Password: in.Password}, role, StatusActive, admin)
+}
+
+// create: o que o cadastro e a conta criada pelo admin têm em comum.
+// approvedBy vazio = ninguém aprovou ainda.
+func (s *Service) create(ctx context.Context, in RegisterInput, role, status, approvedBy string) (*User, error) {
 	in.Email = cleanEmail(in.Email)
 	if err := checkEmail(in.Email); err != nil {
 		return nil, err
@@ -135,9 +163,13 @@ func (s *Service) Register(ctx context.Context, in RegisterInput) (*User, error)
 		if i > 1 {
 			in.Username = fmt.Sprintf("%s-%d", base, i)
 		}
-		u, err := s.newUser(in, RoleUser, StatusPending)
+		u, err := s.newUser(in, role, status)
 		if err != nil {
 			return nil, err
+		}
+		if approvedBy != "" {
+			now := s.now()
+			u.ApprovedBy, u.ApprovedAt = approvedBy, &now
 		}
 		err = s.repo.CreateUser(ctx, u)
 		if errors.Is(err, platform.ErrDuplicate) && i < 50 {
