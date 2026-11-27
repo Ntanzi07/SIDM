@@ -2,3 +2,5 @@ node_modules
 dist
 .env
 .env.*
+# o login do npm run a11y (a11y.env.local) e outros locais: nunca na imagem
+*.local

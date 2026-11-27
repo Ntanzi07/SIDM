@@ -1,6 +1,8 @@
 # --- build: gera o site estático (dist/) ---
 FROM node:22-alpine AS build
 WORKDIR /app
+# o puppeteer (do npm run a11y) não roda na imagem: sem baixar o Chrome dele
+ENV PUPPETEER_SKIP_DOWNLOAD=true
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
