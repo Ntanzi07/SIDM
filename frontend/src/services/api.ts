@@ -301,6 +301,12 @@ export async function getImage(sha1: string): Promise<ImageDetail> {
   return request<ImageDetail>(`/images/${encodeURIComponent(sha1)}`)
 }
 
+// O número da imagem no pacote ("3 de 3000"), pela ordem de chegada: fixo,
+// não muda com o status nem quando alguém pula a imagem na fila.
+export async function getImagePosition(sha1: string): Promise<{ package: string; position: number; total: number }> {
+  return request(`/images/${encodeURIComponent(sha1)}/position`)
+}
+
 export function imageFileUrl(sha1: string): string {
   return `${API_BASE_URL}/images/${encodeURIComponent(sha1)}/file`
 }

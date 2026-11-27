@@ -9,6 +9,7 @@ import {
   deleteImage,
   getAnnotationProfile,
   getImage,
+  getImagePosition,
   getPackage,
   imageFileUrl,
   nextImage,
@@ -126,6 +127,8 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
   const [error, setError] = useToastState('error') // também vira balão
   const [problems, setProblems] = useState<Problem[]>([]) // os erros de validação, campo a campo
   const [message, setMessage] = useToastState('info')
+  // O número da imagem aberta no pacote ("3 de 3000"); só informativo.
+  const [place, setPlace] = useState<{ sha1: string; position: number; total: number } | null>(null)
 
   // A imagem aberta, para devolver à fila ao sair da página.
   const current = useRef<ImageDetail | null>(null)
@@ -214,6 +217,17 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
       release()
     }
   }, [initialSha1, packageName, pull, show, setError])
+
+  // Busca o número a cada imagem aberta (apagar uma muda o das seguintes).
+  const sha1 = image?.sha1
+  useEffect(() => {
+    if (!sha1) return
+    let active = true
+    getImagePosition(sha1)
+      .then((found) => { if (active) setPlace({ sha1, position: found.position, total: found.total }) })
+      .catch(() => { /* sem o número, a anotação segue */ })
+    return () => { active = false }
+  }, [sha1])
 
   const run = useCallback(async (action: () => Promise<void>, fallback: string) => {
     setSaving(true)
@@ -376,5 +390,7 @@ export function useAnnotator(packageName: string, initialSha1?: string) {
     problems,
     message,
     progress,
+    // só o da imagem aberta (enquanto o da próxima não chega, nada)
+    place: place && place.sha1 === sha1 ? { position: place.position, total: place.total } : null,
   }
 }

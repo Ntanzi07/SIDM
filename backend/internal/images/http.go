@@ -42,6 +42,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "POST", Path: "/images/exists", Handler: s.handleExists},
 		{Method: "GET", Path: "/images/{sha1}", Handler: s.handleGetImage},
 		{Method: "GET", Path: "/images/{sha1}/file", Handler: s.handleImageFile},
+		{Method: "GET", Path: "/images/{sha1}/position", Handler: s.handlePosition},
 		{Method: "PUT", Path: "/images/{sha1}", Handler: s.handleAnnotate},
 		{Method: "DELETE", Path: "/images/{sha1}", Handler: s.handleDeleteImage},
 		{Method: "POST", Path: "/images/{sha1}/reopen", Handler: s.handleReopen},
@@ -147,6 +148,21 @@ func (s *Service) handleGetImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	platform.WriteJSON(w, http.StatusOK, img)
+}
+
+// GET /images/{sha1}/position — o número da imagem no pacote ("3 de 3000"),
+// pela ordem de chegada: fixo, não muda com o status nem ao pular.
+func (s *Service) handlePosition(w http.ResponseWriter, r *http.Request) {
+	img, ok := s.imageFromPath(w, r)
+	if !ok {
+		return
+	}
+	position, total, err := s.repo.PackagePosition(r.Context(), img)
+	if err != nil {
+		platform.ServerError(w, err)
+		return
+	}
+	platform.WriteJSON(w, http.StatusOK, map[string]any{"package": img.Package, "position": position, "total": total})
 }
 
 // GET /images/{sha1}/file — o arquivo da imagem, para o front exibir.

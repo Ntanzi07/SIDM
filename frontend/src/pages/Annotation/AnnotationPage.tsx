@@ -154,10 +154,17 @@ export function AnnotationPage() {
         <div className="annotation-navigation">
           <button className="button button--secondary button--sm annotation-shortcuts" onClick={() => setShowHelp(true)} title="Atalhos de teclado (?)" type="button">⌨ Atalhos</button>
           <button className="button button--secondary" disabled={!annotator.canGoBack || annotator.saving} onClick={() => void annotator.previous()} type="button">← Anterior</button>
-          <span>
-            {annotator.revisiting
-              ? 'Revendo uma anterior'
-              : `${annotator.progress.pending.toLocaleString('pt-BR')} pendente(s) na fila`}
+          <span className="annotation-place">
+            {image && annotator.place && (
+              <strong aria-label={`Imagem ${annotator.place.position} de ${annotator.place.total} do pacote`} title="Número da imagem no pacote, pela ordem de chegada">
+                Imagem {annotator.place.position.toLocaleString('pt-BR')} / {annotator.place.total.toLocaleString('pt-BR')}
+              </strong>
+            )}
+            <small>
+              {annotator.revisiting
+                ? 'Revendo uma anterior'
+                : `${annotator.progress.pending.toLocaleString('pt-BR')} pendente(s) na fila`}
+            </small>
           </span>
           {annotator.revisiting ? (
             <button className="button button--secondary" disabled={annotator.saving} onClick={() => void annotator.forward()} type="button">Seguinte →</button>

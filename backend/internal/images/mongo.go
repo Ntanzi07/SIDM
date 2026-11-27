@@ -764,3 +764,24 @@ func (m *MongoRepo) DeleteTrash(ctx context.Context, sha1 string) error {
 	}
 	return nil
 }
+
+// PackagePosition: quantas do pacote chegaram antes dela, mais 1 (índice
+// {package, ingested_at, _id}, criado no EnsureIndexes).
+func (m *MongoRepo) PackagePosition(ctx context.Context, img *Image) (int64, int64, error) {
+	coll := m.db.Collection("images")
+	total, err := coll.CountDocuments(ctx, bson.D{{Key: "package", Value: img.Package}})
+	if err != nil {
+		return 0, 0, fmt.Errorf("contar o pacote %s: %w", img.Package, err)
+	}
+	before, err := coll.CountDocuments(ctx, bson.D{
+		{Key: "package", Value: img.Package},
+		{Key: "$or", Value: bson.A{
+			bson.D{{Key: "ingested_at", Value: bson.D{{Key: "$lt", Value: img.IngestedAt}}}},
+			bson.D{{Key: "ingested_at", Value: img.IngestedAt}, {Key: "_id", Value: bson.D{{Key: "$lt", Value: img.SHA1}}}},
+		}},
+	})
+	if err != nil {
+		return 0, 0, fmt.Errorf("posição de %s: %w", img.SHA1, err)
+	}
+	return before + 1, total, nil
+}

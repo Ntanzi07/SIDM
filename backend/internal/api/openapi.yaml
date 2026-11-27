@@ -2223,6 +2223,30 @@ paths:
               schema: { type: string, format: binary }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /images/{sha1}/position:
+    get:
+      tags: [imagens]
+      summary: O número da imagem no pacote ("3 de 3000")
+      description: |
+        Pela ordem de chegada no pacote (`ingested_at`, desempate pelo sha1), contando
+        de 1. O número é fixo: não muda com o status (pendente ou verificada) nem quando
+        alguém pula a imagem na fila. A tela de anotação mostra.
+      parameters:
+        - $ref: "#/components/parameters/SHA1"
+      responses:
+        "200":
+          description: A posição e o total do pacote.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  package: { type: string, example: lote-01 }
+                  position: { type: integer, example: 3 }
+                  total: { type: integer, example: 3000 }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /images/{sha1}/release:
     post:
       tags: [fila]

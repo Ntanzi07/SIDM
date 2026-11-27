@@ -26,6 +26,8 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
   Perfis, Equipamentos, Câmeras, Importação, Usuários, Armazenamento (admin). Peças
   `pages/Settings/SettingsUI.tsx` (cabeçalho, grupo, linha). Sistema: disco, lixeira
   (`POST /system/trash/purge`), envios parados (`GET /system/storage`).
+- **Número da imagem na anotação** ("Imagem 3 / 3.000", `GET /images/{sha1}/position`):
+  posição fixa no pacote pela ordem de chegada. Branch `feat/indice-anotacao`.
 - **Admin cadastra conta** (`POST /users`, "+ Nova conta" em Configurar → Usuários): nome,
   e-mail, senha e papel; a conta já nasce ativa. Branch `feat/admin-cria-conta`.
 - Seta de voltar ao topo em todas as telas (`components/ScrollTop`).

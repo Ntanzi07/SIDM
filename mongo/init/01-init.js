@@ -20,6 +20,7 @@ db.equipments.createIndex({ name: 1 }, { unique: true });
 
 db.images.createIndex({ package: 1, status: 1, queued_at: 1 });  // fila de trabalho e progresso de cada pacote
 db.images.createIndex({ package: 1, original_name: 1 });         // import: casar a linha do CSV com a imagem
+db.images.createIndex({ package: 1, ingested_at: 1, _id: 1 });   // o número da imagem no pacote (anotação: "3 de 3000")
 // A anotação fica em fields/objects (campos do perfil de anotação do pacote).
 // O servidor também cria estes índices na subida (images.EnsureIndexes).
 db.images.createIndex({ "fields.equipment": 1 });

@@ -75,6 +75,8 @@ func (m *MongoRepo) EnsureIndexes(ctx context.Context) error {
 		{Keys: bson.D{{Key: "fields.camera", Value: 1}}},
 		{Keys: bson.D{{Key: "fields.day_time", Value: 1}}},
 		{Keys: bson.D{{Key: "fields.weather", Value: 1}}},
+		// o número da imagem no pacote (PackagePosition): ordem de chegada
+		{Keys: bson.D{{Key: "package", Value: 1}, {Key: "ingested_at", Value: 1}, {Key: "_id", Value: 1}}},
 	})
 	if err != nil {
 		return fmt.Errorf("índices de images: %w", err)

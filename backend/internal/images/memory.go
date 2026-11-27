@@ -456,3 +456,19 @@ func (m *Memory) DeleteTrash(ctx context.Context, sha1 string) error {
 	delete(m.Trash, sha1)
 	return nil
 }
+
+func (m *Memory) PackagePosition(ctx context.Context, img *Image) (int64, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var position, total int64 = 1, 0
+	for _, other := range m.Images {
+		if other.Package != img.Package {
+			continue
+		}
+		total++
+		if other.IngestedAt.Before(img.IngestedAt) || (other.IngestedAt.Equal(img.IngestedAt) && other.SHA1 < img.SHA1) {
+			position++
+		}
+	}
+	return position, total, nil
+}

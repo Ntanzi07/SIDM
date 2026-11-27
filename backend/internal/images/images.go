@@ -166,6 +166,10 @@ type Repo interface {
 	FindImagesByKeys(ctx context.Context, pkg, by string, keys []string) ([]Image, error)
 	ClaimNext(ctx context.Context, pkg, user, skip string, lease time.Duration, now time.Time) (*Image, error)
 	ReleaseClaim(ctx context.Context, sha1, user string) error
+	// PackagePosition: o lugar da imagem no pacote pela ordem de chegada
+	// (ingested_at, desempate pelo sha1), contando de 1, e o total do pacote.
+	// Não depende do status nem da fila (pular não muda o número).
+	PackagePosition(ctx context.Context, img *Image) (position, total int64, err error)
 	VerifiedIDs(ctx context.Context, ids []string) (map[string]bool, error)
 
 	// Stats conta as imagens do filtro (Limit e Skip não valem) pelo que o

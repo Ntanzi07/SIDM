@@ -338,3 +338,41 @@ func TestReabrirPendenteSoReserva(t *testing.T) {
 	assertStatus(t, env.do("POST", "/images/"+sha+"/reopen", nil, nil), http.StatusBadRequest)
 	assertStatus(t, env.do("POST", "/images/"+strings.Repeat("0", 40)+"/reopen", nil, map[string]string{"X-User": "maria"}), http.StatusNotFound)
 }
+
+// O número da imagem no pacote é fixo: ordem de chegada, sem depender do
+// status nem da fila.
+func TestPosicaoNoPacote(t *testing.T) {
+	env := newTestEnv(t)
+	shas := env.seedQueue(t, "a", "b", "c")
+	for i, sha := range shas {
+		img := env.img.Images[sha]
+		img.IngestedAt = time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC)
+		env.img.Images[sha] = img
+	}
+	position := func(sha string) (int64, int64) {
+		t.Helper()
+		rec := env.do("GET", "/images/"+sha+"/position", nil, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET position: %d %s", rec.Code, rec.Body.String())
+		}
+		var got struct{ Position, Total int64 }
+		decode(t, rec, &got)
+		return got.Position, got.Total
+	}
+	a, _ := env.next(t, "nathan", "")
+	env.next(t, "nathan", `{"skip":"`+a.SHA1+`"}`) // pular manda "a" para o fim da fila
+	verified := env.img.Images[shas[1]]
+	verified.Status = images.StatusVerified
+	env.img.Images[shas[1]] = verified
+	for i, sha := range shas {
+		if pos, total := position(sha); pos != int64(i+1) || total != 3 {
+			t.Errorf("%s: %d de %d, esperava %d de 3", sha, pos, total, i+1)
+		}
+	}
+	if rec := env.do("GET", "/images/xyz/position", nil, nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("sha1 inválido: %d", rec.Code)
+	}
+	if rec := env.do("GET", "/images/"+strings.Repeat("0", 40)+"/position", nil, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("imagem que não existe: %d", rec.Code)
+	}
+}

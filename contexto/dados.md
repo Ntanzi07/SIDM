@@ -73,7 +73,7 @@ Rodam na subida do servidor, são idempotentes e não pedem nada:
 | Migração | O que faz |
 |---|---|
 | `images.MongoRepo.Migrate` | campos soltos + `vehicles` → `fields`/`objects` (update com pipeline, no Mongo) |
-| `images.MongoRepo.EnsureIndexes` | índices em `fields.*` (e apaga os antigos) |
+| `images.MongoRepo.EnsureIndexes` | índices em `fields.*` (e apaga os antigos) e `{package, ingested_at, _id}` (número da imagem no pacote) |
 | `images.Service.MigrateFiles` | verificadas com nome v2 no disco → `<sha1>.ext` |
 | `boxes.MongoRepo.EnsureIndexes` | caixas de antes das tarefas → tarefa `padrao` |
 

@@ -809,3 +809,30 @@ func TestMongoLixeira(t *testing.T) {
 		t.Errorf("apagada da lixeira: %v", err)
 	}
 }
+
+func TestPackagePosition(t *testing.T) {
+	s := testRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	// cccc chega primeiro; aaaa e bbbb chegam juntas (desempate pelo sha1)
+	imgs := []*Image{newImage("cccc", base), newImage("bbbb", base.Add(time.Second)), newImage("aaaa", base.Add(time.Second))}
+	imgs[1].Status = StatusVerified            // o status não muda o número
+	imgs[2].QueuedAt = ms(base.Add(time.Hour)) // pulada: a fila não muda o número
+	other := newImage("dddd", base)
+	other.Package = "outro"
+	for _, img := range append(imgs, other) {
+		if err := s.InsertImage(ctx, img); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for want, sha := range map[int64]string{1: "cccc", 2: "aaaa", 3: "bbbb"} {
+		img, err := s.FindImage(ctx, sha)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pos, total, err := s.PackagePosition(ctx, img)
+		if err != nil || pos != want || total != 3 {
+			t.Errorf("%s: %d de %d (%v), esperava %d de 3", sha, pos, total, err, want)
+		}
+	}
+}
