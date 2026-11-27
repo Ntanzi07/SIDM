@@ -69,6 +69,11 @@ func Vehicles() Profile {
 		f.Repeat = true
 		return f
 	}
+	// a resolução é a do arquivo: quem anota não escolhe
+	fromImage := func(f Field) Field {
+		f.FromImage = FromImageSize
+		return f
+	}
 	return Profile{
 		Name:        DefaultProfile,
 		Description: "Veículos e placas (o padrão do SIDM, com o nome de arquivo v2)",
@@ -79,7 +84,7 @@ func Vehicles() Profile {
 			{Key: "equipment", Label: "Equipamento", Type: TypeRef, Ref: RefEquipment, Repeat: true},
 			{Key: "camera", Label: "Câmera", Type: TypeRef, Ref: RefCamera, Repeat: true},
 			repeat(choice("direction", "Direção", "direction", "rear")),
-			choice("resolution", "Resolução", "resolution"),
+			fromImage(choice("resolution", "Resolução", "resolution")), // quem dita é o arquivo
 			repeat(choice("capture_angle", "Ângulo de captura", "capture_angle", "lateral")),
 			choice("day_time", "Período", "day_time", "day"),
 			choice("image_range", "Abrangência", "image_range", "narrow"),

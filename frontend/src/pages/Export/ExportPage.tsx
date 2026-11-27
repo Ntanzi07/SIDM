@@ -23,7 +23,8 @@ import { Link } from 'react-router-dom'
 import { useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
 import { useIsAdmin } from '../../services/user'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkFormCard, SkProfileList } from '../../components/Skeleton/Shapes'
 import './Export.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -150,6 +151,8 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
     ...(allChecked && !previousInclude?.length ? {} : { include: ordered }),
   }
 }
+
+const EXPORT_INTRO = 'Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa, ou só as imagens com o nome e os dados anotados.'
 
 export function ExportPage() {
   const admin = useIsAdmin() // salvar e apagar perfis: só admin
@@ -359,14 +362,25 @@ export function ExportPage() {
   // passam nos filtros; vão para "Desconhecido").
   const otherProfile = (name: string) => Boolean(packageProfiles[name]) && packageProfiles[name] !== annotationName
 
-  if (!loaded) return <section className="export-page"><PageLoader label="Carregando o export" /></section>
+  // a silhueta do export: a lista de perfis e o formulário (o título é o de verdade)
+  if (!loaded) return (
+    <section className="export-page">
+      <div className="page-heading"><div><h1>Exportar</h1><p>{EXPORT_INTRO}</p></div></div>
+      <Skeleton label="Carregando o export">
+        <div className="export-layout">
+          <SkProfileList count={4} />
+          <div className="export-editor"><SkFormCard blocks={2} fields={6} /></div>
+        </div>
+      </Skeleton>
+    </section>
+  )
 
   return (
     <section className="export-page">
       <div className="page-heading">
         <div>
           <h1>Exportar</h1>
-          <p>Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa, ou só as imagens com o nome e os dados anotados.</p>
+          <p>{EXPORT_INTRO}</p>
         </div>
       </div>
 

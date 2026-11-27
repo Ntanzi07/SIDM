@@ -34,6 +34,8 @@ export const newField = (): ProfileField => ({ key: '', label: '', type: 'choice
 // Ao trocar o tipo, some o que só valia para o tipo antigo.
 export function withType(field: ProfileField, type: FieldType): ProfileField {
   const base: ProfileField = { key: field.key, label: field.label, type, required: field.required, help: field.help, repeat: field.repeat }
+  // "vem da imagem" só em lista ou texto
+  if (field.from_image && (type === 'choice' || type === 'text')) base.from_image = field.from_image
   if (type === 'choice' || type === 'multi') base.options = field.options ?? []
   if (type === 'ref') {
     base.ref = 'equipment'
@@ -59,6 +61,7 @@ export function summary(field: ProfileField): string {
   if (field.type === 'ref') parts.push(field.ref === 'camera' ? 'câmeras' : 'equipamentos')
   if (field.required) parts.push('obrigatório')
   if (field.repeat) parts.push('repete a última')
+  if (field.from_image) parts.push('vem da imagem')
   return parts.join(', ')
 }
 

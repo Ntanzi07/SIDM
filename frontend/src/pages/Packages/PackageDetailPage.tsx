@@ -13,7 +13,8 @@ import { FolderOrZip } from './FolderOrZip'
 import { useZipUploads } from '../../hooks/useZipUploads'
 import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importProfiles'
 import { useToastState } from '../../hooks/useToast'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkButtons, SkImageFeed, SkSide, SkStats, SkTitle } from '../../components/Skeleton/Shapes'
 import './Packages.css'
 import { useIsAdmin } from '../../services/user'
 
@@ -142,7 +143,32 @@ export function PackageDetailPage() {
   }
 
   if (loading) {
-    return <section className="package-page"><PageLoader label="Carregando o pacote" /></section>
+    // a silhueta do pacote: título, números, cartões ao lado e a lista de imagens
+    return (
+      <section className="package-page">
+        <button className="back-button" onClick={() => navigate('/pacotes')} type="button">← Voltar para pacotes</button>
+        <Skeleton label="Carregando o pacote">
+          <div className="page-heading detail-heading">
+            <SkTitle sub={340} title={300} />
+            <SkButtons widths={[132, 140, 148]} />
+          </div>
+          <SkStats count={3} />
+          <div className="detail-layout">
+            <aside className="detail-side">
+              <SkSide buttons={[128, 104]} lines={2} />
+              <SkSide buttons={[116, 168]} lines={2} />
+            </aside>
+            <div className="detail-main">
+              <div className="detail-main__head">
+                <div className="sk-title"><Bone h={22} w={110} /><Bone h={12} w={96} /></div>
+                <Bone h={32} r={8} w={250} />
+              </div>
+              <SkImageFeed count={8} />
+            </div>
+          </div>
+        </Skeleton>
+      </section>
+    )
   }
 
   if (!selectedPackage) {

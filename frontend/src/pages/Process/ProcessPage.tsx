@@ -11,7 +11,8 @@ import {
 } from '../../services/api'
 import { confirmDialog } from '../../services/confirm'
 import { notify } from '../../services/toast'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkFormCard, SkProfileList } from '../../components/Skeleton/Shapes'
 import type { ProcessingModel, ProcessingRun, ProcessingScope, ProcessingStatus } from '../../types/processing'
 import './Process.css'
 
@@ -67,6 +68,8 @@ function modelState(model: ProcessingModel): string {
 }
 
 const HISTORY = '__historico__'
+
+const PROCESS_INTRO = 'Pré-anote as imagens com um modelo de IA: ele acha as caixas e grava numa tarefa, para alguém só corrigir.'
 
 export function ProcessPage() {
   const [models, setModels] = useState<ProcessingModel[] | null>(null)
@@ -145,7 +148,18 @@ export function ProcessPage() {
     )
   }
   if (models === null || packages === null || runs === null) {
-    return <section className="processing-page"><PageLoader label="Carregando os modelos" /></section>
+    // a silhueta: os modelos à esquerda e o formulário (o título é o de verdade)
+    return (
+      <section className="processing-page">
+        <div className="page-heading"><div><h1>Processar</h1><p>{PROCESS_INTRO}</p></div></div>
+        <Skeleton label="Carregando os modelos">
+          <div className="export-layout">
+            <SkProfileList count={2} />
+            <div className="export-editor"><SkFormCard fields={4} /></div>
+          </div>
+        </Skeleton>
+      </section>
+    )
   }
 
   const model = models.find((item) => item.key === view)
@@ -203,7 +217,7 @@ export function ProcessPage() {
       <div className="page-heading">
         <div>
           <h1>Processar</h1>
-          <p>Pré-anote as imagens com um modelo de IA: ele acha as caixas e grava numa tarefa, para alguém só corrigir.</p>
+          <p>{PROCESS_INTRO}</p>
         </div>
       </div>
 

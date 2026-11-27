@@ -10,7 +10,8 @@ import { fieldLabel, listObjectTypes, impliedKeys } from '../../utils/annotation
 import { FieldInput } from './AnnotationFields'
 import { BoxLink } from './BoxLink'
 import { linkedKeys, toObjectBox } from '../../utils/boxLinks'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkButtons, SkFields } from '../../components/Skeleton/Shapes'
 import { useShortcuts } from '../../hooks/useShortcuts'
 import { ShortcutsHelp } from './ShortcutsHelp'
 import './Annotation.css'
@@ -107,7 +108,38 @@ export function AnnotationPage() {
     if (ok) setShowDeleteModal(false)
   }
 
-  if (annotator.loading) return <section className="annotation-page"><PageLoader label="Carregando a fila" /></section>
+  // a silhueta da anotação: o progresso, a imagem e o formulário
+  if (annotator.loading) return (
+    <section className="annotation-page">
+      <button className="back-button" onClick={() => navigate(`/pacotes/${encodeURIComponent(packageName)}`)} type="button">← Voltar para {packageName}</button>
+      <Skeleton label="Carregando a fila">
+        <div className="page-heading annotation-heading">
+          <div className="sk-title">
+            <Bone h={10} w={180} />
+            <Bone h={40} r={8} w={300} />
+            <Bone h={4} r={999} w={360} />
+          </div>
+          <SkButtons widths={[96, 112, 150, 92]} />
+        </div>
+        <div className="annotation-layout">
+          <main className="annotation-main">
+            <div className="annotation-workspace">
+              <div className="annotation-preview-column">
+                <div className="annotation-preview-card">
+                  <div className="annotation-image-meta"><Bone h={12} w={240} /></div>
+                  <div className="annotation-preview"><Bone h={360} r={8} w="100%" /></div>
+                </div>
+              </div>
+              <div className="annotation-form-card">
+                <div className="annotation-form-heading"><Bone h={20} w={170} /></div>
+                <SkFields columns={2} count={8} />
+              </div>
+            </div>
+          </main>
+        </div>
+      </Skeleton>
+    </section>
+  )
   if (annotator.error && !image && !annotator.finished) {
     return (
       <section className="annotation-page annotation-empty">

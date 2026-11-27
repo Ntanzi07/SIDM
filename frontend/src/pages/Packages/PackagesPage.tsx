@@ -4,7 +4,7 @@ import { listPackageTasks, listPackages, type PackageSummary } from '../../servi
 import type { Package } from '../../types/package'
 import { GridPicker, Menu, SearchField, SearchIcon } from '../../components/Toolbar/Toolbar'
 import { COLUMNS, savedColumns, saveColumns, type Columns, type MenuOption } from '../../components/Toolbar/columns'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import './Packages.css'
 
 // "há 3 dias"; vazio quando a data falta (pacotes antigos vêm sem ela)
@@ -65,6 +65,46 @@ function PackageCard({ packageItem, index, onClick }: { packageItem: Package; in
         </div>
       </dl>
     </button>
+  )
+}
+
+// A silhueta da lista enquanto carrega: os mesmos cartões, na grade
+// escolhida (lista, 2 a 5 colunas), com blocos no lugar do conteúdo.
+const NAME_WIDTHS = ['72%', '58%', '84%', '64%', '76%']
+
+function PackagesSkeleton({ columns }: { columns: Columns }) {
+  const count = columns === 1 ? 4 : columns * 2 // duas fileiras
+  return (
+    <Skeleton label="Carregando os pacotes">
+      <div
+        className={columns === 1 ? 'package-grid package-grid--list package-grid--row' : columns === 2 ? 'package-grid package-grid--row' : 'package-grid'}
+        data-cols={columns}
+        style={{ '--cols': columns } as CSSProperties}
+      >
+        {Array.from({ length: count }, (_, i) => (
+          <div className="package-card" key={i}>
+            <div className="package-card__cover"><Bone className="bone--fill" /></div>
+            <div className="package-card__body">
+              <Bone h={10} w={64} />
+              <Bone h={columns >= 4 ? 18 : 22} w={NAME_WIDTHS[i % NAME_WIDTHS.length]} />
+              <Bone h={12} w="42%" />
+              <div className="package-card__progress">
+                <Bone h={4} r={999} />
+                <Bone h={10} w={118} />
+              </div>
+            </div>
+            <dl className="package-card__stats">
+              {[0, 1, 2, 3].map((n) => (
+                <div key={n}>
+                  <dt><Bone h={9} w={56} /></dt>
+                  <dd><Bone h={28} w={n === 0 ? 82 : 52} /></dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </Skeleton>
   )
 }
 
@@ -208,7 +248,7 @@ export function PackagesPage() {
           ))}
         </div>
       ) : loading ? (
-        <PageLoader label="Carregando os pacotes" />
+        <PackagesSkeleton columns={columns} />
       ) : error ? (
         <div className="empty-package">
           <h2>Não foi possível carregar os pacotes</h2>

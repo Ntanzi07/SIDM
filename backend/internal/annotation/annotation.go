@@ -61,6 +61,11 @@ type Field struct {
 	// valor da última salva (ex.: equipamento, câmera, direção, que mudam
 	// pouco de uma foto para a outra). Só nos campos da imagem.
 	Repeat bool `json:"repeat,omitempty" bson:"repeat,omitempty"`
+	// FromImage: o valor vem do próprio arquivo, não de quem anota. "size" =
+	// "<largura>x<altura>" (ex.: a resolução). Ao salvar, o servidor mede a
+	// imagem e sobrescreve o que veio; num choice, o tamanho tem que ser uma
+	// das opções (senão o campo fica vazio). Só nos campos da imagem.
+	FromImage string `json:"from_image,omitempty" bson:"from_image,omitempty"`
 
 	Options []Option `json:"options,omitempty" bson:"options,omitempty"` // choice, multi
 

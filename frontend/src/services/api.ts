@@ -1392,6 +1392,24 @@ export async function purgeTrash(olderThanDays: number): Promise<{ images: numbe
   return request<{ images: number; bytes: number }>('/system/trash/purge', { method: 'POST', body: JSON.stringify({ older_than_days: olderThanDays }) })
 }
 
+// Corrigir pelo arquivo os campos que vêm da imagem (ex.: a resolução) nas
+// imagens de antes da regra. dryRun: só conta (o padrão do servidor).
+export type FromImageReport = {
+  dry_run: boolean
+  checked: number
+  changed: number
+  verified: number
+  cleared: number
+  busy: number
+  failed: number
+  examples: string[]
+  errors: string[]
+}
+
+export async function fixFromImage(dryRun: boolean): Promise<FromImageReport> {
+  return request<FromImageReport>('/system/from-image', { method: 'POST', body: JSON.stringify({ dry_run: dryRun }) })
+}
+
 // ---------- contas (admin) ----------
 
 export async function listAccounts(): Promise<Account[]> {

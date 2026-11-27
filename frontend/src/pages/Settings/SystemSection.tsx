@@ -2,7 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { cancelZipUpload, getStorage, purgeTrash, type StorageSummary } from '../../services/api'
 import { confirmDialog } from '../../services/confirm'
 import { notify } from '../../services/toast'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
+import { FromImageFix } from './FromImageFix'
 import { SettingRow, SettingsGroup, SettingsHeader } from './SettingsUI'
 
 const size = (bytes: number) => {
@@ -63,7 +64,29 @@ export function SystemSection() {
     }
   }
 
-  if (!st) return <PageLoader label="Lendo o disco" />
+  // a silhueta: o título é o de verdade; o disco e as linhas viram blocos
+  if (!st) return (
+    <>
+      <SettingsHeader description="O espaço do disco das imagens e o que dá para liberar." title="Armazenamento" />
+      <Skeleton label="Lendo o disco">
+        <div className="set-group">
+          <div className="set-group__panel">
+            <div className="set-row set-row--stack">
+              <div className="set-row__text"><Bone h={14} w={130} /><Bone h={12} w={220} /></div>
+              <Bone h={8} r={999} />
+              <div className="sk-buttons"><Bone h={12} w={80} /><Bone h={12} w={140} /></div>
+            </div>
+            {[150, 120, 170].map((w, i) => (
+              <div className="set-row" key={i}>
+                <div className="set-row__text"><Bone h={14} w={w} /><Bone h={12} w={w + 90} /></div>
+                <Bone h={32} r={8} w={120} />
+              </div>
+            ))}
+          </div>
+        </div>
+      </Skeleton>
+    </>
+  )
   const used = st.disk.total - st.disk.free
   const percent = Math.round(st.disk.used_percent)
   return (
@@ -115,6 +138,8 @@ export function SystemSection() {
       <SettingsGroup description="Imagens apagadas ficam aqui para uma versão poder trazer de volta." title="Lixeira">
         <SettingRow help={st.trash.count ? `${size(st.trash.bytes)} ocupados.` : 'Vazia.'} label={`${st.trash.count.toLocaleString('pt-BR')} imagem(ns)`} />
       </SettingsGroup>
+
+      <FromImageFix />
 
       <SettingsGroup tone="danger" title="Zona de perigo">
         <SettingRow help="Apaga de vez. Uma versão antiga não vai mais conseguir trazer essas imagens de volta." htmlFor="purge-days" label="Esvaziar a lixeira">

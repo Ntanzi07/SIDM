@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { deleteDataset, getAnnotationProfile, getCurrentVersion, listAnnotationProfiles, listDatasets, listPackagesOfProfile, listVersions, type Dataset, type Version } from '../../services/api'
+import { deleteDataset, getAnnotationProfile, getCurrentVersion, listAnnotationProfiles, listDatasets, listPackageSummaries, listVersions, type Dataset, type Version } from '../../services/api'
 import type { AnnotationProfile } from '../../types/annotation'
 import { SearchPage } from '../Search/SearchPage'
 import { DatasetTimeline, NewVersionModal, VersionPanel, type PanelTab } from '../Versions/VersionParts'
@@ -10,7 +10,7 @@ import { Sparkline } from '../../components/Charts/Sparkline'
 import { fmt } from '../../utils/stats'
 import { useToastState } from '../../hooks/useToast'
 import { useIsAdmin } from '../../services/user'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import './Dashboard.css'
 
 // Dashboard: primeiro escolhe o perfil de anotação; depois, à esquerda, de
@@ -24,53 +24,108 @@ export function DashboardPage() {
   return profile ? <ProfileDashboard key={`${profile}#${fresh}`} profile={profile} /> : <ProfilePicker />
 }
 
+// Os números de cada perfil no seletor: as imagens (verificadas de quantas),
+// os pacotes e os datasets. Tudo de dois pedidos (pacotes e datasets).
+type ProfileNumbers = { packages: number; total: number; verified: number; datasets: number }
+
 function ProfilePicker() {
   const [profiles, setProfiles] = useState<AnnotationProfile[] | null>(null)
-  const [packages, setPackages] = useState<Record<string, number>>({})
+  const [numbers, setNumbers] = useState<Record<string, ProfileNumbers> | null>(null)
   const [error, setError] = useToastState('error')
 
   useEffect(() => {
     let active = true
     listAnnotationProfiles()
-      .then((items) => {
-        if (!active) return
-        setProfiles(items)
-        // quantos pacotes usam cada perfil (um extra: sem ele os cartões aparecem igual)
-        for (const item of items) {
-          listPackagesOfProfile(item.name)
-            .then((list) => { if (active) setPackages((current) => ({ ...current, [item.name]: list.length })) })
-            .catch(() => { /* só informativo */ })
-        }
-      })
+      .then((items) => { if (active) setProfiles(items) })
       .catch((requestError: unknown) => {
         if (active) setError(requestError instanceof Error ? requestError.message : 'Não foi possível carregar os perfis.')
       })
+    // os números são um extra: sem eles os cartões aparecem com o nome
+    Promise.all([listPackageSummaries(), listDatasets().catch(() => [] as Dataset[])])
+      .then(([packages, datasets]) => {
+        if (!active) return
+        const out: Record<string, ProfileNumbers> = {}
+        const of = (name: string) => (out[name] ??= { packages: 0, total: 0, verified: 0, datasets: 0 })
+        for (const p of packages) {
+          const n = of(p.profile)
+          n.packages += 1
+          n.total += p.total
+          n.verified += p.verified
+        }
+        for (const d of datasets) of(d.profile).datasets += 1
+        setNumbers(out)
+      })
+      .catch(() => { if (active) setNumbers({}) })
     return () => { active = false }
   }, [setError])
+
+  // os com imagens primeiro (os vazios no fim, apagados)
+  const sorted = profiles && [...profiles].sort((a, b) => (numbers?.[b.name]?.total ?? 0) - (numbers?.[a.name]?.total ?? 0))
 
   return (
     <section className="dashboard-page">
       <div className="page-heading">
         <div>
           <h1>Dashboard</h1>
-          <p>Escolha um perfil de anotação para ver os números das imagens e as versões dos datasets dele.</p>
+          <p>Escolha um perfil de anotação para ver os números das imagens, as caixas por label e as versões dos datasets dele.</p>
         </div>
       </div>
-      {profiles === null && !error && <PageLoader label="Carregando os perfis" />}
-      {profiles && (
+      {profiles === null && !error && (
+        <Skeleton label="Carregando os perfis">
+          <div className="profile-grid">
+            {[220, 170, 250].map((w, i) => (
+              <div className="profile-card sk-card" key={i}>
+                <Bone h={26} w={w * 0.7} />
+                <Bone h={12} w="85%" />
+                <Bone h={34} r={8} w={140} />
+                <Bone h={6} r={999} />
+                <Bone h={12} w={150} />
+              </div>
+            ))}
+          </div>
+        </Skeleton>
+      )}
+      {sorted && (
         <div className="profile-grid">
-          {profiles.map((item, index) => (
-            <Link className="profile-card" key={item.name} style={{ animationDelay: `${Math.min(index, 10) * 45}ms` }} to={`/dashboard/${encodeURIComponent(item.name)}`}>
-              <span className="eyebrow">Perfil</span>
-              <h2>{item.name}</h2>
-              {item.description && <p>{item.description}</p>}
-              <dl>
-                <div><dt>Campos</dt><dd>{item.fields.length}</dd></div>
-                <div><dt>Objetos</dt><dd>{item.objects.length}</dd></div>
-                <div><dt>Pacotes</dt><dd>{packages[item.name] ?? '—'}</dd></div>
-              </dl>
-            </Link>
-          ))}
+          {sorted.map((item, index) => {
+            // números carregados: quem não aparece neles não tem pacote nem dataset
+            const n = numbers ? numbers[item.name] ?? { packages: 0, total: 0, verified: 0, datasets: 0 } : undefined
+            const percent = n && n.total > 0 ? Math.round((n.verified / n.total) * 100) : 0
+            return (
+              <Link
+                className={n && n.total === 0 ? 'profile-card profile-card--empty' : 'profile-card'}
+                key={item.name}
+                style={{ animationDelay: `${Math.min(index, 10) * 45}ms` }}
+                to={`/dashboard/${encodeURIComponent(item.name)}`}
+              >
+                <h2>{item.name}</h2>
+                {item.description && <p className="profile-card__desc">{item.description}</p>}
+                {!n ? (
+                  <Bone h={34} r={8} w={140} />
+                ) : n.total === 0 ? (
+                  <p className="profile-card__none">Nenhuma imagem ainda</p>
+                ) : (
+                  <>
+                    <p className="profile-card__big">
+                      <strong>{fmt(n.verified)}</strong>
+                      <span>de {fmt(n.total)} {n.total === 1 ? 'imagem verificada' : 'imagens verificadas'}</span>
+                    </p>
+                    <span aria-label={`${percent}% verificadas`} className="profile-card__bar" role="img">
+                      <span style={{ width: `${percent}%` }} />
+                    </span>
+                  </>
+                )}
+                <p className="profile-card__meta">
+                  {n ? (
+                    <>
+                      {n.packages} {n.packages === 1 ? 'pacote' : 'pacotes'}, {n.datasets} {n.datasets === 1 ? 'dataset' : 'datasets'}
+                      {n.total > 0 && <>, {percent}% verificado</>}
+                    </>
+                  ) : '\u00a0'}
+                </p>
+              </Link>
+            )
+          })}
         </div>
       )}
     </section>
@@ -93,6 +148,14 @@ function ProfileDashboard({ profile }: { profile: string }) {
   const [reload, setReload] = useState(0) // muda depois de criar uma versão
   const [creating, setCreating] = useState('') // o dataset do pop-up "Nova versão"
   const [deleting, setDeleting] = useState('') // o dataset do pop-up "Apagar"
+  const [description, setDescription] = useState('')
+  useEffect(() => {
+    let active = true
+    getAnnotationProfile(profile)
+      .then((item) => { if (active) setDescription(item.description ?? '') })
+      .catch(() => { /* sem a descrição: fica o texto padrão */ })
+    return () => { active = false }
+  }, [profile])
 
   useEffect(() => {
     let active = true
@@ -135,8 +198,8 @@ function ProfileDashboard({ profile }: { profile: string }) {
       <button className="back-button" onClick={() => navigate('/dashboard')} type="button">← Perfis</button>
       <div className="page-heading dashboard-heading">
         <div>
-          <span className="eyebrow">Dashboard</span>
           <h1>{profile}</h1>
+          <p>{description || 'Os números das imagens verificadas deste perfil, as caixas por label e as versões dos datasets.'}</p>
         </div>
       </div>
 
@@ -153,8 +216,14 @@ function ProfileDashboard({ profile }: { profile: string }) {
           </button>
           {chosen && <small className="dashboard-side__note">o estado atual de <strong>{chosen.dataset.name}</strong> vira a v{(chosen.versions[0]?.number ?? 0) + 1}</small>}
 
-          <span className="eyebrow dashboard-side__group">Versões</span>
-          {datasets === null && <PageLoader inline label="Carregando as versões" />}
+          <span className="dashboard-side__group">Versões</span>
+          {datasets === null && (
+            <Skeleton label="Carregando as versões">
+              {[0, 1].map((i) => (
+                <div className="source-item sk-source" key={i}><Bone h={14} w={[120, 90][i]} /><Bone h={11} w={150} /></div>
+              ))}
+            </Skeleton>
+          )}
           {datasets?.length === 0 && !error && (
             <p className="dashboard-hint">Nenhum dataset ainda. Monte a pesquisa à direita e use “Salvar como dataset”.</p>
           )}
@@ -271,7 +340,11 @@ function VersionSource({ dataset, versions, number, onPick }: { dataset: Dataset
         selected={version?.number}
         versions={versions}
       />
-      {!version && !error && <p className="dashboard-hint">Montando o estado atual...</p>}
+      {!version && !error && (
+        <Skeleton label="Montando o estado atual">
+          <div className="sk-title sk-panel-head"><Bone h={10} w={160} /><Bone h={28} r={8} w={220} /><Bone h={13} w="60%" /></div>
+        </Skeleton>
+      )}
       {version && (
         <VersionPanel
           dataset={dataset.name}

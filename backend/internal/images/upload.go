@@ -193,6 +193,13 @@ func (s *Service) ingestOne(ctx context.Context, pkg string, annot *annotation.P
 		}
 	}
 
+	// Os campos que vêm do arquivo (ex.: a resolução): medidos do temporário.
+	if usesImage(annot) {
+		var warnings []string
+		img.Fields, warnings = annot.FillFromImage(img.Fields, measure(tmp))
+		res.Warnings = append(res.Warnings, warnings...)
+	}
+
 	// Banco primeiro, disco depois: se o sha1 já existe, o Mongo recusa
 	// e o temporário é descartado sem nunca tocar na pasta do pacote.
 	if err := s.repo.InsertImage(ctx, img); err != nil {

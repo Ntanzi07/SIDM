@@ -281,6 +281,11 @@ func (p *Profile) Fit(v Values) (Values, []string) {
 	out := Values{Fields: map[string]any{}, Objects: []Object{}}
 	var warnings []string
 	out.Fields, warnings = fitFields("", "o perfil "+p.Name, p.Fields, v.Fields, false)
+	for _, f := range p.Fields {
+		if f.FromImage != "" {
+			delete(out.Fields, f.Key) // quem dita é o arquivo (FillFromImage)
+		}
+	}
 	for _, o := range v.Objects {
 		t, ok := p.Object(o.Type)
 		if !ok || t.Box {

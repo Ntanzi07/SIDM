@@ -161,6 +161,8 @@ function DefaultEditor({ field, onChange, readOnly, id }: { field: ProfileField;
 // O campo como quem anota vai ver (dá para mexer: não grava nada).
 function Preview({ field }: { field: ProfileField }) {
   const [value, setValue] = useState<FormValue>(() => {
+    // vem da imagem: sem imagem aqui, mostra um tamanho de exemplo
+    if (field.from_image) return field.options?.[0]?.value ?? '1920x1080'
     const d = field.default
     if (Array.isArray(d)) return d.map(String)
     return d === undefined || d === null ? '' : String(d)
@@ -202,6 +204,7 @@ type FieldCardProps = {
 }
 
 function FieldCard({ field, path, index, count, open, onToggle, onChange, onMove, onRemove, problems, readOnly }: FieldCardProps) {
+  const imageLevel = path.startsWith('fields[') // campo da imagem, não de um objeto
   const uid = useId()
   const errors = under(problems, path)
   const own = errors.filter((p) => !p.path.slice(path.length).startsWith('.options'))
@@ -264,11 +267,30 @@ function FieldCard({ field, path, index, count, open, onToggle, onChange, onMove
                 <input checked={Boolean(field.required)} disabled={readOnly} onChange={(e) => set({ required: e.target.checked || undefined })} type="checkbox" />
                 <span>Obrigatório para verificar a imagem</span>
               </label>
-              <label>
-                <input checked={Boolean(field.repeat)} disabled={readOnly} onChange={(e) => set({ repeat: e.target.checked || undefined })} type="checkbox" />
-                <span>Repetir o valor da última imagem salva do pacote</span>
-              </label>
+              {/* repetir e "vem da imagem" só valem nos campos da imagem (não nos de objeto) */}
+              {imageLevel && !field.from_image && (
+                <label>
+                  <input checked={Boolean(field.repeat)} disabled={readOnly} onChange={(e) => set({ repeat: e.target.checked || undefined })} type="checkbox" />
+                  <span>Repetir o valor da última imagem salva do pacote</span>
+                </label>
+              )}
+              {imageLevel && (field.type === 'choice' || field.type === 'text') && (
+                <label>
+                  <input
+                    checked={Boolean(field.from_image)}
+                    disabled={readOnly}
+                    onChange={(e) => set(e.target.checked ? { from_image: 'size', repeat: undefined, default: undefined } : { from_image: undefined })}
+                    type="checkbox"
+                  />
+                  <span>Vem do arquivo da imagem (largura × altura): quem anota não escolhe</span>
+                </label>
+              )}
             </div>
+            {field.from_image && (
+              <p className="pe-muted">
+                O SIDM mede cada imagem ao subir e ao salvar, e põe o tamanho aqui{field.type === 'choice' ? ': as opções precisam ser os tamanhos, como 1920x1080. Um tamanho que não está na lista deixa o campo vazio.' : '.'}
+              </p>
+            )}
 
             {(field.type === 'choice' || field.type === 'multi') && (
               <OptionsTable base={path} field={field} onChange={(options) => set({ options })} problems={problems} readOnly={readOnly} />
@@ -324,7 +346,7 @@ function FieldCard({ field, path, index, count, open, onToggle, onChange, onMove
             )}
 
             <div className="pe-grid">
-              <DefaultEditor field={field} id={`${uid}-default`} onChange={(value) => set({ default: value })} readOnly={readOnly} />
+              {!field.from_image && <DefaultEditor field={field} id={`${uid}-default`} onChange={(value) => set({ default: value })} readOnly={readOnly} />}
               <div className="pe-field">
                 <label htmlFor={`${uid}-help`}>Ajuda para quem anota (opcional)</label>
                 <input disabled={readOnly} id={`${uid}-help`} onChange={(e) => set({ help: e.target.value || undefined })} placeholder="Na dúvida entre preto e cinza, escolha cinza" value={field.help ?? ''} />

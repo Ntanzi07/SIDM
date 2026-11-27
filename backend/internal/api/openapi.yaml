@@ -1181,6 +1181,43 @@ paths:
                       items: { type: array, items: { $ref: "#/components/schemas/ZipUpload" } }
         "403": { description: Só admin. }
 
+  /system/from-image:
+    post:
+      tags: [sistema]
+      summary: Corrigir pelo arquivo os campos que vêm da imagem (ex.: a resolução; só admin)
+      description: |
+        Para as imagens gravadas antes de o campo vir da imagem (`from_image`), quando era
+        escolhido à mão: mede cada arquivo e põe o valor certo. **O padrão é ensaio**
+        (`dry_run` ausente ou true: só conta). Corrigindo, a verificada ganha o nome v2
+        novo (ele leva o código da resolução) e cada mudança fica no histórico
+        ("<usuário> via resolução da imagem"). Imagem que alguém está anotando é pulada.
+        Faça backup do banco antes de corrigir.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dry_run: { type: boolean, default: true }
+      responses:
+        "200":
+          description: O que muda (ou mudou).
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  checked: { type: integer, description: "Imagens de perfis com campo que vem da imagem." }
+                  changed: { type: integer, description: "Com o valor diferente do arquivo." }
+                  verified: { type: integer, description: "Das que mudam, verificadas: o nome v2 muda junto." }
+                  cleared: { type: integer, description: "Das que mudam, o tamanho não é opção: o campo fica vazio." }
+                  busy: { type: integer, description: "Alguém está anotando: puladas." }
+                  failed: { type: integer }
+                  examples: { type: array, items: { type: string }, description: "Algumas das que mudam (antes → depois)." }
+                  errors: { type: array, items: { type: string } }
+
   /system/trash/purge:
     post:
       tags: [sistema]
@@ -2853,6 +2890,10 @@ components:
         help: { type: string }
         default: { description: "O valor que a tela já traz numa imagem sem rascunho (tem que ser válido no campo)." }
         repeat: { type: boolean, description: "Só nos campos da imagem: na anotação, a próxima imagem pendente do pacote já vem com o valor da última salva (no veiculos: equipamento, câmera, direção, ângulo e clima)." }
+        from_image:
+          type: string
+          enum: [size]
+          description: "Só nos campos da imagem, de lista ou texto: o valor vem do arquivo, não de quem anota. `size` = \"<largura>x<altura>\" (no veiculos: a resolução). O upload já mede; ao salvar (PUT /images/{sha1}) o servidor põe o medido por cima do que veio; numa lista, um tamanho que não é opção deixa o campo vazio. O import (CSV, INI) não preenche."
         options:
           type: array
           description: "choice e multi. `code` é a forma curta no nome do arquivo (se uma opção tem, todas têm)."

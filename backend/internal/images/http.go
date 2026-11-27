@@ -50,6 +50,7 @@ func (s *Service) Routes() []platform.Route {
 		{Method: "POST", Path: "/packages/{name}/next", Handler: s.handleNext},
 		{Method: "GET", Path: "/system/storage", Handler: s.handleStorage},
 		{Method: "POST", Path: "/system/trash/purge", Handler: s.handlePurgeTrash},
+		{Method: "POST", Path: "/system/from-image", Handler: s.handleFixFromImage},
 		{Method: "POST", Path: "/packages/{name}/zip-uploads", Handler: s.handleStartZip},
 		{Method: "GET", Path: "/packages/{name}/zip-uploads", Handler: s.handleListZips},
 		{Method: "GET", Path: "/zip-uploads/{id}", Handler: s.handleGetZip},
@@ -147,7 +148,7 @@ func (s *Service) handleGetImage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	platform.WriteJSON(w, http.StatusOK, img)
+	platform.WriteJSON(w, http.StatusOK, s.presented(r.Context(), img))
 }
 
 // GET /images/{sha1}/position — o número da imagem no pacote ("3 de 3000"),
@@ -266,6 +267,11 @@ func (s *Service) handleAnnotate(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		platform.ServerError(w, err)
 		return
+	}
+	// O que vem do arquivo (ex.: a resolução) não é de quem anota: o
+	// servidor mede a imagem e põe por cima do que veio.
+	if usesImage(profile) {
+		req.Fields, _ = profile.FillFromImage(req.Fields, s.sizeOf(img))
 	}
 	clean, err := profile.Check(annotation.Values{Fields: req.Fields, Objects: req.Objects}, req.Complete)
 	if err != nil {
@@ -439,7 +445,7 @@ func (s *Service) handleNext(w http.ResponseWriter, r *http.Request) {
 		platform.ServerError(w, err)
 		return
 	}
-	platform.WriteJSON(w, http.StatusOK, img)
+	platform.WriteJSON(w, http.StatusOK, s.presented(r.Context(), img))
 }
 
 // POST /images/{sha1}/release: devolve a imagem para a fila.

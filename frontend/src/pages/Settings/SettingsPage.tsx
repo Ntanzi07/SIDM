@@ -29,7 +29,7 @@ import { SettingsIcon, type SettingsIconName } from './SettingsIcons'
 import { ColumnPicker } from './ColumnPicker'
 import { useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
-import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import { useSearchParams } from 'react-router-dom'
 import { useIsAdmin } from '../../services/user'
 import { AccountSection } from './AccountSection'
@@ -182,6 +182,66 @@ function advancedLabel(rule: FieldRule | undefined): string {
   if (rule.map) parts.push(`${Object.keys(rule.map).length} tradução(ões)`)
   if (rule.split) parts.push(`separa por "${rule.split}"`)
   return parts.join(', ')
+}
+
+// A silhueta do Configurar enquanto carrega (só o admin espera: cadastros e
+// perfis). O título é o de verdade; o menu e o painel são blocos, nos
+// mesmos lugares (grupos do menu, linhas do painel).
+const MENU_SHAPE = [[56, 118], [96, 84, 70], [112], [64, 104]] // nome de cada item, por grupo
+const ROW_SHAPE = [[96, '62%'], [120, '48%'], [84, '70%'], [108, '54%']]
+
+function SettingsSkeleton() {
+  return (
+    <section className="package-page settings-page">
+      <div className="page-heading">
+        <div>
+          <h1>Configurar</h1>
+          <p>Sua conta, o que se anota, como se importa e quem usa o SIDM.</p>
+        </div>
+      </div>
+      <Skeleton label="Carregando as configurações">
+        <div className="settings-skeleton">
+          <aside className="settings-sidebar">
+            <div className="settings-nav">
+              {MENU_SHAPE.map((group, g) => (
+                <div className="settings-skeleton__group" key={g}>
+                  <Bone h={10} w={64} />
+                  {group.map((w, i) => (
+                    <div className="settings-skeleton__item" key={i}>
+                      <Bone h={16} r={4} w={16} />
+                      <Bone h={12} w={w} />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </aside>
+          <div className="settings-content">
+            <div className="set-header">
+              <div className="settings-skeleton__title">
+                <Bone h={24} w={220} />
+                <Bone h={13} w="min(460px, 90%)" />
+              </div>
+            </div>
+            <div className="set-group">
+              <div className="set-group__head"><Bone h={14} w={120} /></div>
+              <div className="set-group__panel">
+                {ROW_SHAPE.map(([label, help], i) => (
+                  <div className="set-row" key={i}>
+                    <div className="set-row__text">
+                      <Bone h={14} w={label} />
+                      <Bone h={12} w={help} />
+                    </div>
+                    <Bone h={34} r={8} w={220} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </Skeleton>
+    </section>
+  )
 }
 
 export function SettingsPage() {
@@ -502,6 +562,16 @@ export function SettingsPage() {
   // colunas numeradas, o nome é digitado (com {n}). Data e hora mapeada
   // abre embaixo o formato.
   function renderTarget(field: ProfileField, path: string, value: string, onChange: (column: string) => void, original: FieldRule | undefined, typed: boolean) {
+    // vem do arquivo (ex.: a resolução): o import não preenche, então não há o que ligar
+    if (field.from_image) {
+      return (
+        <li className="im-row im-row--fixed" key={path}>
+          <div className="im-row__field"><span className="im-row__name">{fieldLabel(field)}</span></div>
+          <span aria-hidden="true" className="im-row__arrow">←</span>
+          <div className="im-row__source"><small className="im-sample">Medido do arquivo de cada imagem (largura × altura); o import não muda.</small></div>
+        </li>
+      )
+    }
     const sample = sampleOf(value)
     const id = `im-${path.replace(/[^a-z0-9]+/gi, '-')}`
     return (
@@ -610,7 +680,7 @@ export function SettingsPage() {
     </button>
   )
 
-  if (!loaded) return <section className="package-page settings-page"><PageLoader label="Carregando as configurações" /></section>
+  if (!loaded) return <SettingsSkeleton />
 
   return (
     <section className="package-page settings-page">

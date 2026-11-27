@@ -22,6 +22,8 @@ import { useIsAdmin } from '../../services/user'
 import '../Packages/Packages.css'
 import { useToastState } from '../../hooks/useToast'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
+import { SkButtons, SkSide, SkStats, SkTitle } from '../../components/Skeleton/Shapes'
 import './Tasks.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -49,6 +51,48 @@ export function TasksPage() {
 
 // ── A grade ─────────────────────────────────────────────────────────────
 const TASK_COLUMNS = [4, 3, 2, 1] as const satisfies readonly Columns[]
+// A silhueta enquanto carrega: a barra de busca e os cartões na grade
+// escolhida (lista ou colunas), com blocos no lugar do conteúdo.
+const TASK_NAME_WIDTHS = ['54%', '70%', '46%', '62%']
+const LABEL_WIDTHS = [[64, 48, 80], [92, 56], [52, 70, 44, 60], [76, 58, 66]]
+
+function TasksSkeleton({ columns }: { columns: Columns }) {
+  const count = columns === 1 ? 4 : columns * 2 // duas fileiras
+  return (
+    <Skeleton label="Carregando as tarefas">
+      <div className="package-toolbar">
+        <Bone h={40} r={8} w="min(420px, 100%)" />
+        <div className="package-toolbar__actions">
+          <Bone h={14} w={96} />
+          <Bone h={14} w={150} />
+          <Bone h={32} r={8} w={136} />
+        </div>
+      </div>
+      <div className={columns === 1 ? 'task-grid task-grid--list' : 'task-grid'} data-cols={columns} style={{ '--cols': columns } as CSSProperties}>
+        {Array.from({ length: count }, (_, i) => (
+          <div className="task-card" key={i}>
+            <div className="task-card__head">
+              <Bone h={columns === 1 ? 20 : 24} w={TASK_NAME_WIDTHS[i % TASK_NAME_WIDTHS.length]} />
+              <Bone h={12} w="78%" />
+            </div>
+            <div className="task-card__labels">
+              {LABEL_WIDTHS[i % LABEL_WIDTHS.length].map((w, n) => <Bone h={24} key={n} r={999} w={w} />)}
+            </div>
+            <dl className="task-card__stats">
+              {[0, 1, 2].map((n) => (
+                <div key={n}>
+                  <dt><Bone h={9} w={52} /></dt>
+                  <dd><Bone h={20} w={40} /></dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        ))}
+      </div>
+    </Skeleton>
+  )
+}
+
 const TASK_COLUMNS_KEY = 'sidm.tasks.columns'
 
 type SortBy = 'updated' | 'name' | 'images' | 'boxes'
@@ -114,7 +158,7 @@ function TaskGrid() {
         </div>
         {admin && <button className="button button--primary" onClick={() => setCreating(true)} type="button">+ Nova tarefa</button>}
       </div>
-      {tasks === null && <PageLoader label="Carregando as tarefas" />}
+      {tasks === null && <TasksSkeleton columns={columns} />}
       {tasks?.length === 0 && !error && (
         <div className="tasks-empty">
           <p>Nenhuma tarefa ainda.</p>
@@ -461,7 +505,29 @@ function TaskDetail({ name }: { name: string }) {
       </section>
     )
   }
-  if (!task) return <section className="tasks-page"><PageLoader label="Carregando a tarefa" /></section>
+  // a silhueta da tarefa: título, números, as labels e a tabela de pacotes
+  if (!task) return (
+    <section className="tasks-page">
+      <button className="back-button" onClick={() => navigate('/tarefas')} type="button">← Tarefas</button>
+      <Skeleton label="Carregando a tarefa">
+        <div className="page-heading task-heading">
+          <SkTitle sub={300} title={260} />
+          <SkButtons widths={[210, 140]} />
+        </div>
+        <SkStats className="detail-stats task-stats" count={4} />
+        <div className="task-layout">
+          <SkSide buttons={[]} lines={1}>
+            <div className="task-card__labels">{[70, 52, 88, 60, 74].map((w, i) => <Bone h={26} key={i} r={999} w={w} />)}</div>
+          </SkSide>
+          <SkSide buttons={[]} lines={0}>
+            {[0, 1, 2, 3].map((i) => (
+              <div className="sk-table-row" key={i}><Bone h={13} w={[150, 120, 170, 110][i]} /><Bone h={13} w={50} /><Bone h={13} w={44} /></div>
+            ))}
+          </SkSide>
+        </div>
+      </Skeleton>
+    </section>
+  )
 
   const stats = task.stats
   return (

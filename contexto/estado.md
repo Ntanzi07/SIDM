@@ -31,6 +31,28 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
 - **Admin cadastra conta** (`POST /users`, "+ Nova conta" em Configurar → Usuários): nome,
   e-mail, senha e papel; a conta já nasce ativa. Branch `feat/admin-cria-conta`.
 - Seta de voltar ao topo em todas as telas (`components/ScrollTop`).
+- **Resolução vem da imagem** (`from_image`, ver decisoes.md): `annotation/fromimage.go`,
+  `images/size.go`; na tela, só leitura ("Medida do arquivo da imagem"); no editor de perfil,
+  a opção "Vem do arquivo da imagem"; no editor de import, sem coluna para ligar. As imagens
+  As de antes se corrigem em **Configurar → Armazenamento → Manutenção** (ensaio, depois
+  corrigir; `images/fromimage_fix.go`). No banco local (27/11): 1.297 de 3.448 corrigidas, todas
+  pendentes sem resolução (nenhuma verificada mudou); backup antes em `backup-resolucao/` (fora
+  do git). **Na Jetson:** reconstruir o backend, fazer o backup (convencoes.md) e rodar lá.
+- **Dashboard refeito** (`components/Stats`, `SearchPage`): o seletor mostra por perfil as
+  verificadas de quantas (com barra), pacotes e datasets (`listPackageSummaries` + datasets,
+  dois pedidos); no perfil, 4 destaques (imagens, objetos, caixas, pacotes) que mudam com os
+  filtros; **caixas por label** em painéis por tarefa, ordenadas, na cor das caixas da anotação
+  (`colorOf`), sem caixas recolhidas; os campos em barras ordenadas (zerados recolhidos,
+  "Não informado" apagado, valor único vira uma linha), agrupados em "Na imagem" e por tipo de
+  objeto; esqueleto ao contar e barra fina ao filtrar. A rosca (`Donut`) e o CSS dos cartões
+  antigos saíram.
+- **Esqueleto ao carregar** (`components/Skeleton`): Pacotes, Tarefas e Configurar mostram a
+  silhueta da tela (os mesmos cartões na grade escolhida, a barra de busca, o menu e as
+  linhas do Configurar) no lugar do anel; aparece depois de 150 ms, brilho parado com
+  movimento reduzido. Também o detalhe do pacote (e a lista de imagens dele), a anotação, as
+  verificadas, o Dashboard, Exportar, Processar, o detalhe da tarefa, Usuários e Armazenamento,
+  com as peças de `components/Skeleton/Shapes.tsx`. O `PageLoader` ficou só em duas esperas
+  pequenas (as versões no Dashboard e os pacotes num pop-up das Tarefas).
 - **Import com andamento**: com `Accept: application/x-ndjson`, `POST /packages/{name}/import`
   responde uma linha JSON por passo (fases lendo, conferindo, cadastros, gravando) e o
   relatório no fim (`imports/progress.go`); sem o cabeçalho, igual a antes. O diálogo
@@ -144,6 +166,10 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
 - Subir com `docker compose up -d --build` (o `-d` deixa rodar com o terminal fechado).
 
 ## Pendências menores
+
+- O `npm run a11y` só confere o pacote, a anotação e as verificadas com `SIDM_A11Y_PACKAGE`
+  (ex.: `top`); vale pôr no `a11y.env.local`. (O contraste das etiquetas das caixas, que só aparecia
+  assim, foi corrigido.)
 
 - Recortes das letras da placa (anotar no recorte; decidir se o modelo treina na imagem inteira).
 - Mover os testes de cada módulo de `internal/api/` para o próprio módulo.

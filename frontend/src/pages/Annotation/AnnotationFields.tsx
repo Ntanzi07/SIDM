@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { searchCameras, searchEquipments, type PageResponse } from '../../services/api'
 import type { FormValue, ProfileField } from '../../types/annotation'
-import { fieldLabel } from '../../utils/annotationForm'
+import { fieldLabel, optionLabel } from '../../utils/annotationForm'
 
 // Os controles do formulário de anotação, um por tipo de campo do perfil.
 // Todo campo pode ficar "Não informado" (vazio): imagem sem o dado, ou que
@@ -183,6 +183,17 @@ export function FieldInput({ field, value, onChange, error, disabled }: FieldInp
   const text = typeof value === 'string' ? value : ''
   const common = { error, help: field.help, label, required: field.required }
   const select = { ...common, disabled }
+
+  // vem do arquivo (ex.: a resolução): quem anota só vê, quem manda é a imagem
+  if (field.from_image) {
+    const shown = field.type === 'choice' ? (text ? optionLabel(field, text) : '') : text
+    return (
+      <FieldWrap {...common} className="annotation-field--from-image">
+        <input readOnly title="Vem do arquivo da imagem" value={shown || 'O tamanho da imagem não está entre as opções'} />
+        <small className="annotation-field__from-image">Medida do arquivo da imagem</small>
+      </FieldWrap>
+    )
+  }
 
   switch (field.type) {
     case 'choice':
