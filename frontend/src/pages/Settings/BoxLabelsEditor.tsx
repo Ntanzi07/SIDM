@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { listTasks, type Problem } from '../../services/api'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import type { BoxLabel, ObjectType, ProfileField } from '../../types/annotation'
 
 // "Caixas que são este tipo": o nome de uma caixa (ex.: motorcycle), o que
@@ -116,11 +117,12 @@ export function BoxLabelsEditor({ object, problems, readOnly, onChange }: Props)
   return (
     <div className="pe-boxes">
       <div className="pe-boxes__head">
-        <h5>Caixas que são um {objectName}</h5>
-        <p className="pe-muted">
-          Na anotação, cada {objectName} se liga a uma caixa marcada na imagem. O que a caixa diz (uma caixa motorcycle
-          é um veículo do tipo moto) já vem preenchido e travado.
-        </p>
+        <h5 className="pe-label-row">
+          Caixas que são um {objectName}
+          <HelpTip label={`Caixas que são um ${objectName}`}>
+            Na anotação, cada {objectName} se liga a uma caixa da imagem. O que a caixa diz (motorcycle = moto) já vem preenchido e travado.
+          </HelpTip>
+        </h5>
       </div>
 
       {labels.length === 0 && (
@@ -159,7 +161,10 @@ export function BoxLabelsEditor({ object, problems, readOnly, onChange }: Props)
                   <div className="pe-box" id={`${id}-body`}>
                     <div className="pe-grid">
                       <div className="pe-field">
-                        <label htmlFor={`${id}-task`}>Tarefa</label>
+                        <span className="pe-label-row">
+                          <label htmlFor={`${id}-task`}>Tarefa</label>
+                          <HelpTip label="Tarefa">Só para achar o nome da caixa; ele vale em qualquer tarefa que o tenha.</HelpTip>
+                        </span>
                         <select
                           disabled={locked}
                           id={`${id}-task`}
@@ -173,7 +178,6 @@ export function BoxLabelsEditor({ object, problems, readOnly, onChange }: Props)
                           <option value="">Escolha a tarefa</option>
                           {tasks.map((t) => <option key={t.name} value={t.name}>{t.name} ({t.labels.length === 1 ? '1 caixa' : `${t.labels.length} caixas`})</option>)}
                         </select>
-                        <small className="pe-muted">Só para achar o nome; ele vale em qualquer tarefa que o tenha.</small>
                       </div>
                       <div className="pe-field">
                         <label htmlFor={`${id}-label`}>Nome da caixa</label>
@@ -201,8 +205,10 @@ export function BoxLabelsEditor({ object, problems, readOnly, onChange }: Props)
                     )}
 
                     <div className="pe-attrs" role="group" aria-labelledby={`${id}-attrs`}>
-                      <span className="pe-attrs__title" id={`${id}-attrs`}>Atributos da caixa que preenchem um campo</span>
-                      <p className="pe-muted">O campo vem do atributo ao ligar a caixa; depois vale o que for editado no SIDM.</p>
+                      <span className="pe-label-row">
+                        <span className="pe-attrs__title" id={`${id}-attrs`}>Atributos da caixa que preenchem um campo</span>
+                        <HelpTip label="Atributos da caixa">O campo vem do atributo ao ligar a caixa; depois vale o que for editado no SIDM.</HelpTip>
+                      </span>
                       {rows.length > 0 && (
                         <div className="pe-attrs__head" aria-hidden="true">
                           <span>Atributo da caixa</span>

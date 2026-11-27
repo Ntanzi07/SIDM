@@ -24,6 +24,7 @@ import { AnnotationProfilesSection } from './AnnotationProfilesSection'
 import { ImportProfileList } from './ImportProfileList'
 import { RegistrySection } from './RegistrySection'
 import { SettingRow, SettingsGroup, SettingsHeader } from './SettingsUI'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import './ImportEditor.css'
 import { SettingsIcon, type SettingsIconName } from './SettingsIcons'
 import { ColumnPicker } from './ColumnPicker'
@@ -507,8 +508,10 @@ export function SettingsPage() {
     return (
       <li className={value ? 'im-row im-row--linked' : 'im-row'} key={path}>
         <div className="im-row__field">
-          <label htmlFor={id}>{fieldLabel(field)}{field.required && <span className="im-req" title="Obrigatório para verificar"> *</span>}</label>
-          {TYPE_HINTS[field.type] && <small>{TYPE_HINTS[field.type]}</small>}
+          <span className="im-row__name">
+            <label htmlFor={id}>{fieldLabel(field)}{field.required && <span className="im-req" title="Obrigatório para verificar"> *</span>}</label>
+            {TYPE_HINTS[field.type] && <HelpTip label={fieldLabel(field)}>{TYPE_HINTS[field.type]}</HelpTip>}
+          </span>
         </div>
         <span aria-hidden="true" className="im-row__arrow">←</span>
         <div className="im-row__source">
@@ -552,7 +555,14 @@ export function SettingsPage() {
           </select>
         </div>
         <div className="pe-field">
-          <label htmlFor={`${id}-fmt`}>Formato</label>
+          <span className="im-row__name">
+            <label htmlFor={`${id}-fmt`}>Formato</label>
+            <HelpTip label="Formato da data">
+              {date.custom
+                ? <p>Escreva a data de referência <code>2006-01-02 15:04:05</code> no formato do arquivo, ex.: <code>02/01/2006 15:04:05.000</code>.</p>
+                : <p>Automático: dia antes do mês (DD/MM/AAAA) ou ano-mês-dia; hora com ou sem segundos.</p>}
+            </HelpTip>
+          </span>
           <select
             id={`${id}-fmt`}
             onChange={(event) => (event.target.value === 'custom'
@@ -571,12 +581,11 @@ export function SettingsPage() {
           <label htmlFor={`${id}-tz`}>Fuso horário</label>
           <input id={`${id}-tz`} onChange={(event) => changeDate(path, { timezone: event.target.value })} value={date.timezone} />
         </div>
-        <small className="pe-muted im-date__help">
-          {date.custom
-            ? 'Escreva a data de referência 2006-01-02 15:04:05 no formato do arquivo (não uma data do seu arquivo), ex.: 02/01/2006 15:04:05.000.'
-            : date.format ? `Layout: ${date.format}.` : 'Automático: dia antes do mês (DD/MM/AAAA) ou ano-mês-dia; hora com ou sem segundos.'}
-          {sampleOf(column) && <> Exemplo lido: <code>{[sampleOf(column), date.timeColumn ? sampleOf(date.timeColumn) : '', date.msColumn ? sampleOf(date.msColumn) : ''].filter(Boolean).join(' ')}</code></>}
-        </small>
+        {sampleOf(column) && (
+          <small className="pe-muted im-date__help">
+            Exemplo lido: <code>{[sampleOf(column), date.timeColumn ? sampleOf(date.timeColumn) : '', date.msColumn ? sampleOf(date.msColumn) : ''].filter(Boolean).join(' ')}</code>
+          </small>
+        )}
       </div>
     )
   }
@@ -720,11 +729,10 @@ export function SettingsPage() {
             <form className="set-page pe-editor im-editor" onSubmit={(event) => void submitProfile(event)}>
               <SettingsHeader
                 actions={viewOnly && editingOriginal ? <button className="button button--secondary button--sm" onClick={() => handleDuplicateProfile(editingOriginal)} type="button">Duplicar para editar</button> : undefined}
-                description={viewOnly
-                  ? 'Este é um perfil padrão do SIDM: só dá para ver. Para mudar, duplique.'
-                  : isIni
-                    ? 'Ligue as chaves do INI gravado dentro das imagens (Secao.Chave) aos campos da anotação.'
-                    : 'Ligue as colunas do seu CSV aos campos da anotação.'}
+                description={viewOnly ? 'Perfil padrão do SIDM: só dá para ver. Para mudar, duplique.' : undefined}
+                info={viewOnly ? undefined : isIni
+                  ? 'Liga as chaves do INI gravado nas imagens (Secao.Chave) aos campos da anotação.'
+                  : 'Liga as colunas do CSV aos campos da anotação.'}
                 title={viewOnly ? `Perfil ${editingProfile}` : editingProfile ? `Editar ${editingProfile}` : 'Criar perfil de importação'}
               />
 
@@ -745,15 +753,16 @@ export function SettingsPage() {
 
               <fieldset className="profile-fieldset" disabled={viewOnly}>
                 <SettingsGroup title="Sobre o perfil">
-                  <SettingRow help="Letras sem acento, números e hífen; espaço vira hífen." htmlFor="im-name" label="Nome">
+                  <SettingRow htmlFor="im-name" info="Letras sem acento, números e hífen; espaço vira hífen." label="Nome">
                     <input className="pe-mono pe-w-md" id="im-name" onChange={(event) => setProfileName(event.target.value)} placeholder={isIni ? 'ini-rodovia' : 'csv-rodovia'} value={profileName} />
                   </SettingRow>
-                  <SettingRow help="Aparece ao escolher o perfil no envio de imagens." htmlFor="im-desc" label="Descrição">
+                  <SettingRow htmlFor="im-desc" info="Aparece ao escolher o perfil no envio de imagens." label="Descrição">
                     <input className="pe-w-lg" id="im-desc" onChange={(event) => setProfileDescription(event.target.value)} placeholder={isIni ? 'INI dos equipamentos da rodovia' : 'Planilha da concessionária da rodovia'} value={profileDescription} />
                   </SettingRow>
                   <SettingRow
-                    help={<>{annotationProfile?.description ? `${annotationProfile.description}. ` : ''}Os campos a ligar são os deste perfil; trocar apaga as ligações.</>}
+                    help={annotationProfile?.description}
                     htmlFor="im-target"
+                    info="Os campos a ligar são os deste perfil. Trocar apaga as ligações."
                     label="Preenche o perfil de anotação"
                   >
                     <select className="pe-w-md" id="im-target" onChange={(event) => changeAnnotationProfile(event.target.value)} value={annotationProfileName}>
@@ -762,13 +771,13 @@ export function SettingsPage() {
                     </select>
                   </SettingRow>
                   {editingProfile && (
-                    <SettingRow help="Não muda depois de criado: para ler de outra fonte, crie outro perfil." label="Lê de">
+                    <SettingRow info="Não muda depois de criado. Para outra fonte, crie outro perfil." label="Lê de">
                       <span className="set-value">{isIni ? 'Dados gravados na imagem (INI)' : 'Planilha CSV'}</span>
                     </SettingRow>
                   )}
                   {!isIni && (
                     <>
-                      <SettingRow help="O caractere entre as colunas do arquivo." htmlFor="im-delim" label="Separador">
+                      <SettingRow htmlFor="im-delim" label="Separador">
                         <select className="pe-w-md" id="im-delim" onChange={(event) => setDelimiter(event.target.value)} value={delimiter}>
                           <option value="comma">Vírgula (,)</option>
                           <option value="semicolon">Ponto e vírgula (;)</option>
@@ -776,7 +785,7 @@ export function SettingsPage() {
                           <option value="pipe">Barra vertical (|)</option>
                         </select>
                       </SettingRow>
-                      <SettingRow help="Acentos trocados (Ã§ no lugar de ç)? Experimente Latin-1." htmlFor="im-enc" label="Codificação">
+                      <SettingRow htmlFor="im-enc" info="Acentos trocados (Ã§ no lugar de ç)? Use Latin-1." label="Codificação">
                         <select className="pe-w-md" id="im-enc" onChange={(event) => setEncoding(event.target.value)} value={encoding}>
                           <option value="utf-8">UTF-8</option>
                           <option value="latin1">Latin-1</option>
@@ -790,12 +799,14 @@ export function SettingsPage() {
               {!viewOnly && (
                 <section aria-labelledby="im-sample-title" className="set-group">
                   <div className="set-group__head">
-                    <h3 id="im-sample-title">{isIni ? 'Imagens de exemplo' : 'Arquivo de exemplo'}</h3>
-                    <p>
-                      {isIni
-                        ? 'Até 20 imagens (podem ser criptografadas): o SIDM lê as chaves do INI delas para você escolher.'
-                        : editingProfile ? 'Opcional: analise um CSV novo para ver outras colunas.' : 'O SIDM lê as colunas e a primeira linha para você escolher e conferir.'}
-                    </p>
+                    <h3 id="im-sample-title">
+                      {isIni ? 'Imagens de exemplo' : 'Arquivo de exemplo'}
+                      <HelpTip label={isIni ? 'Imagens de exemplo' : 'Arquivo de exemplo'}>
+                        {isIni
+                          ? 'Até 20 imagens (podem ser criptografadas). O SIDM lê as chaves do INI para você escolher.'
+                          : editingProfile ? 'Opcional: analise um CSV novo para ver outras colunas.' : 'O SIDM lê as colunas e a primeira linha para você escolher e conferir.'}
+                      </HelpTip>
+                    </h3>
                   </div>
                   <div className="im-file">
                     <label className={(isIni ? profileImages.length : profileFile) ? 'im-file__drop im-file__drop--chosen' : 'im-file__drop'}>
@@ -840,7 +851,7 @@ export function SettingsPage() {
                   </datalist>
 
                   {!isIni && (
-                    <SettingsGroup description="Cada linha do CSV vale para a imagem com o mesmo nome (ou SHA1)." title="Como achar a imagem">
+                    <SettingsGroup info="Cada linha do CSV vale para a imagem com o mesmo nome (ou SHA1)." title="Como achar a imagem">
                       <SettingRow htmlFor="im-match" label="Coluna da imagem" help={sampleOf(matchColumn) ? <>Exemplo: <code>{sampleOf(matchColumn)}</code></> : undefined}>
                         <select className="pe-w-md" id="im-match" onChange={(event) => setMatchColumn(event.target.value)} value={matchColumn}>
                           {availableColumns.map((column) => <option key={column} value={column}>{column}</option>)}
@@ -857,8 +868,10 @@ export function SettingsPage() {
 
                   <section aria-labelledby="im-fields" className="set-group">
                     <div className="set-group__head">
-                      <h3 id="im-fields">Campos da imagem</h3>
-                      <p>Busque a {word} de cada campo de {annotationProfileName}. O que não existe no arquivo fica sem ligar.</p>
+                      <h3 id="im-fields">
+                        Campos da imagem
+                        <HelpTip label="Campos da imagem">Escolha a {word} de cada campo de {annotationProfileName}. O que não existe no arquivo fica sem ligar.</HelpTip>
+                      </h3>
                     </div>
                     {imageTargets.length === 0
                       ? <div className="pe-empty"><span>Este perfil de anotação não tem campos na imagem.</span></div>
@@ -880,11 +893,13 @@ export function SettingsPage() {
                       <section aria-labelledby={`im-obj-${target.key}`} className="set-group" key={target.key}>
                         <div className="set-group__head">
                           <h3 id={`im-obj-${target.key}`}>{fieldLabel(target)}</h3>
-                          <p>Os campos de cada {fieldLabel(target).toLowerCase()} da imagem.</p>
                         </div>
                         <div className="im-object-mode">
                           <div className="pe-field">
-                            <label htmlFor={`im-mode-${target.key}`}>Como aparecem no arquivo</label>
+                            <span className="im-row__name">
+                              <label htmlFor={`im-mode-${target.key}`}>Como aparecem no arquivo</label>
+                              {setting.mode === 'columns' && <HelpTip label="Colunas numeradas">Escreva o nome da {word} com {'{n}'} no lugar do número, ex.: Placa{'{n}'}.</HelpTip>}
+                            </span>
                             {/* no CSV, "single" e "row" são o mesmo: um objeto por linha */}
                             <select
                               id={`im-mode-${target.key}`}
@@ -904,9 +919,6 @@ export function SettingsPage() {
                             </div>
                           )}
                         </div>
-                        {setting.mode === 'columns' && (
-                          <p className="pe-muted im-object-help">Escreva o nome da {word} com {'{n}'} no lugar do número, ex.: Placa{'{n}'}.</p>
-                        )}
                         <ul className="im-map">
                           {target.fields.map((field) => renderTarget(field, `${target.key}.${field.key}`, columns[field.key] ?? '',
                             (column) => setObjectColumns((current) => ({ ...current, [target.key]: { ...(current[target.key] ?? {}), [field.key]: column } })),

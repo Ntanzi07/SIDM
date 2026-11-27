@@ -134,6 +134,10 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
    envio que falhou, se o zip ainda estiver em `envios/`).
 5. Versionamento: o export de uma versão já existe; falta o histórico de atributos das caixas.
 6. Processar: testar LPR e eixos com fotos reais (fora do repositório) e ajustar o score.
+7. **Frontend enxuto** (branch `fix/cleaning-frontend`, regra em `convencoes.md`): feito o
+   ícone de ajuda (`components/HelpTip`), o Configurar (editores de perfil de importação e
+   de anotação, modais de Usuários), Exportar, o "Importar anotações" do pacote e a dica do
+   perfil na anotação. Falta passar nas telas com muito texto: Processar, Versões e Tarefas.
 
 ## Jetson (scs-orin-nano)
 

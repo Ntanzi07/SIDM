@@ -105,3 +105,10 @@
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
+
+/* título com o (?) ao lado (nos modais e no da página) */
+.modal-title-help,
+.users-page .page-heading h1 {
+  display: flex;
+  align-items: center;
+}

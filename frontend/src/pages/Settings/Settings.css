@@ -1014,6 +1014,13 @@
   min-width: 0;
 }
 
+.set-header h2,
+.set-group__head h3,
+.set-row__name {
+  display: flex;
+  align-items: center;
+}
+
 .set-row__label {
   color: var(--text);
   font-size: 14px;

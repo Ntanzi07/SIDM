@@ -65,7 +65,7 @@ export function UserMenu() {
             </NavLink>
           )}
           <NavLink className="user-menu__item" onClick={() => setOpen(false)} role="menuitem" to="/configurar?aba=atalhos">Atalhos de teclado</NavLink>
-          <button className="user-menu__item" onClick={() => { setOpen(false); setChanging(true) }} role="menuitem" type="button">Trocar a senha</button>
+          <button className="user-menu__item" onClick={() => { setOpen(false); setChanging(true) }} role="menuitem" type="button">Trocar senha</button>
           <button className="user-menu__item user-menu__item--out" onClick={() => void logout()} role="menuitem" type="button">Sair</button>
         </div>
       )}
@@ -110,7 +110,7 @@ export function ChangePasswordModal({ onClose }: { onClose: () => void }) {
     <div aria-modal="true" className="modal-backdrop" onClick={() => { if (!busy) onClose() }} role="dialog">
       <div className="modal-dialog" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <h2>Trocar a senha</h2>
+          <h2>Trocar senha</h2>
           <button aria-label="Fechar" className="modal-close" disabled={busy} onClick={onClose} type="button">✕</button>
         </div>
         {done ? (

@@ -46,6 +46,17 @@
   title, message, confirmLabel, tone: 'danger' })))` (`services/confirm.ts`; o
   `<ConfirmDialog />` fica no layout). `tone: 'danger'` para o que apaga ou não se desfaz.
 - A anotação usa a **fila** (`POST /packages/{nome}/next`), nunca a lista por índice.
+- **Texto enxuto.** Mostre só o que a pessoa precisa para agir; frases curtas, sem repetir o
+  que o título ou o nome do campo já dizem; exemplo no `placeholder`, não em instrução.
+  Onde a explicação **polui** (vários parágrafos, uma nota cinza embaixo de cada campo), ela
+  vai no ícone de ajuda `<HelpTip label="...">` (`components/HelpTip`: abre ao passar o
+  mouse ou focar, clicar fixa, Esc fecha), em tópicos (`<ul>`) se for mais de uma ideia. No
+  Configurar, use `info` em `SettingsHeader`/`SettingsGroup`/`SettingRow`. **Texto curto
+  fica à vista**, e também o que é estado ou aviso (espaço livre, "só dá para ver", o que
+  apaga de vez, erro de campo). O `?` nunca vai dentro de um `<label>` (roubaria o rótulo do
+  campo): fica ao lado. Mesmo nome para a mesma ação em toda tela (ex.: "Trocar senha").
+  Em telas de várias seções (ex.: Exportar, `SectionHead` em `ExportPage.tsx`), cada seção
+  tem o título, **uma linha** do que ela faz (à vista) e, se precisar, os detalhes no `?`.
 
 - **Visual:** tema escuro (padrão) e claro, com os mesmos tokens, em `src/styles/theme.css`
   (o claro vale com `data-theme="light"` no `<html>`; `services/theme.ts` guarda a escolha

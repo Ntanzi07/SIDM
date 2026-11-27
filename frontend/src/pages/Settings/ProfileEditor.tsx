@@ -1,6 +1,7 @@
 import { useId, useRef, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import type { Problem } from '../../services/api'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import type { FieldType, FormValue, ObjectType, ProfileField, ProfileOption } from '../../types/annotation'
 import { newField, optionValue, pathId, slug, summary, TYPES, under, withType } from './profileEditorUtils'
 import { FieldInput } from '../Annotation/AnnotationFields'
@@ -32,12 +33,20 @@ function OptionsTable({ field, onChange, readOnly, problems, base }: { field: Pr
     else table.current?.querySelectorAll<HTMLInputElement>('.pe-option')[i + 1]?.querySelector('input')?.focus()
   }
 
+  // multi: uma opção pode ser a exclusiva ("Sem avarias": não convive com as outras)
+  const multi = field.type === 'multi'
+  const setExclusive = (i: number, on: boolean) => onChange(options.map((o, j) => {
+    const exclusive = j === i ? on : on ? false : o.exclusive // só uma por campo
+    return exclusive ? { ...o, exclusive } : { ...o, exclusive: undefined }
+  }))
+
   return (
-    <div className="pe-options" ref={table} role="group" aria-label={`Opções de ${field.label || 'campo'}`}>
+    <div className={multi ? 'pe-options pe-options--multi' : 'pe-options'} ref={table} role="group" aria-label={`Opções de ${field.label || 'campo'}`}>
       <div className="pe-options__head" aria-hidden="true">
         <span>Nome na tela</span>
         <span>Valor guardado</span>
         <span>Sigla (opcional)</span>
+        {multi && <span>Exclusiva</span>}
         <span />
       </div>
       {options.length === 0 && <p className="pe-muted">Nenhuma opção ainda. Uma lista precisa de pelo menos uma, como Preto ou Branco.</p>}
@@ -74,6 +83,17 @@ function OptionsTable({ field, onChange, readOnly, problems, base }: { field: Pr
               placeholder={i === 0 && !option.label ? 'PT' : ''}
               value={option.code ?? ''}
             />
+            {multi && (
+              <label className="pe-option__exclusive">
+                <input
+                  aria-label={`${option.label || n}: exclusiva (não combina com as outras)`}
+                  checked={Boolean(option.exclusive)}
+                  disabled={readOnly}
+                  onChange={(e) => setExclusive(i, e.target.checked)}
+                  type="checkbox"
+                />
+              </label>
+            )}
             {!readOnly ? (
               <button aria-label={`Remover a opção ${option.label || i + 1}`} className="pe-icon pe-icon--danger" onClick={() => onChange(options.filter((_, j) => j !== i))} title="Remover opção" type="button">✕</button>
             ) : <span />}
@@ -81,14 +101,17 @@ function OptionsTable({ field, onChange, readOnly, problems, base }: { field: Pr
           </div>
         )
       })}
-      {!readOnly && (
-        <button className="pe-add" onClick={add} type="button">Adicionar opção</button>
-      )}
-      <p className="pe-muted">
-        O valor guardado é o que vai para o banco e para o export; se ficar vazio, sai do nome. A sigla é a forma curta
-        da opção no nome do arquivo exportado (Preto vira PT em <code>…_PT_…</code>) e também é aceita no import. Se
-        uma opção tiver sigla, todas precisam ter.
-      </p>
+      <div className="pe-options__foot">
+        {!readOnly && <button className="pe-add" onClick={add} type="button">Adicionar opção</button>}
+        <HelpTip label="Valor guardado e sigla">
+          <ul>
+            <li><strong>Valor guardado:</strong> vai para o banco e o export. Vazio, sai do nome.</li>
+            <li><strong>Sigla:</strong> a forma curta no nome do arquivo exportado (Preto vira PT em <code>…_PT_…</code>); o import também aceita.</li>
+            <li>Se uma opção tiver sigla, todas precisam ter.</li>
+            {multi && <li><strong>Exclusiva:</strong> a opção "nenhum dos outros" (ex.: Sem avarias). Marcar ela tira as outras, e marcar outra tira ela. Só uma por campo.</li>}
+          </ul>
+        </HelpTip>
+      </div>
     </div>
   )
 }
@@ -276,9 +299,11 @@ function FieldCard({ field, path, index, count, open, onToggle, onChange, onMove
             {field.type === 'text' && (
               <div className="pe-grid pe-grid--3">
                 <div className="pe-field">
-                  <label htmlFor={`${uid}-pattern`}>Formato (opcional)</label>
+                  <span className="pe-label-row">
+                    <label htmlFor={`${uid}-pattern`}>Formato (opcional)</label>
+                    <HelpTip label="Formato">Expressão regular para o valor inteiro (o exemplo é uma placa Mercosul).</HelpTip>
+                  </span>
                   <input className="pe-mono" disabled={readOnly} id={`${uid}-pattern`} onChange={(e) => set({ pattern: e.target.value || undefined })} placeholder="[A-Z]{3}[0-9][A-Z0-9][0-9]{2}" value={field.pattern ?? ''} />
-                  <small className="pe-muted">Expressão regular para o valor inteiro (o exemplo é uma placa Mercosul).</small>
                 </div>
                 <div className="pe-field">
                   <label htmlFor={`${uid}-max`}>Tamanho máximo</label>

@@ -141,6 +141,7 @@ func (f *Field) Clean(v any) (any, error) {
 			seen[s] = true
 			out = append(out, s)
 		}
+		out = f.dropExclusive(out)
 		if len(out) == 0 {
 			return nil, nil
 		}
@@ -219,6 +220,30 @@ func (f *Field) hasOption(v string) bool {
 		}
 	}
 	return false
+}
+
+// dropExclusive: a opção exclusiva ("Sem avarias") sai se vier junto de
+// outra (o problema marcado ganha); sozinha, fica.
+func (f *Field) dropExclusive(list []string) []string {
+	exclusive := map[string]bool{}
+	for _, o := range f.Options {
+		if o.Exclusive {
+			exclusive[o.Value] = true
+		}
+	}
+	if len(exclusive) == 0 {
+		return list
+	}
+	kept := []string{}
+	for _, v := range list {
+		if !exclusive[v] {
+			kept = append(kept, v)
+		}
+	}
+	if len(kept) == 0 {
+		return list // só a exclusiva
+	}
+	return kept
 }
 
 func (f *Field) optionList() string {

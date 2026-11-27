@@ -8,7 +8,16 @@ import { setPendingCount, useAccount, type Account } from '../../services/user'
 import { formatWhen } from '../Versions/format'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
 import { SettingsHeader } from '../Settings/SettingsUI'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import './Users.css'
+
+// O que cada papel pode (no (?) do título).
+const ROLES = (
+    <ul>
+      <li><strong>Admin:</strong> apaga, configura e aprova contas.</li>
+      <li><strong>Usuário:</strong> anota, importa, exporta e cria versões.</li>
+    </ul>
+  )
 
 // As contas (só admin): cadastrar um colaborador, aprovar quem pediu, trocar
 // o papel, desativar e definir uma senha nova para quem esqueceu.
@@ -61,14 +70,13 @@ export function UsersPage({ embedded = false }: { embedded?: boolean } = {}) {
       {embedded ? (
         <SettingsHeader
           actions={newAccountButton}
-          description="Quem entra no SIDM. Admin apaga, configura e aprova contas; usuário anota, importa, exporta e cria versões."
+          info={ROLES}
           title="Usuários"
         />
       ) : (
         <div className="page-heading">
           <div>
-            <h1>Usuários</h1>
-            <p>Quem pode entrar no SIDM. Admin apaga, mexe no Configurar e aprova contas; usuário anota, importa, exporta e cria versões.</p>
+            <h1>Usuários<HelpTip label="Usuários">{ROLES}</HelpTip></h1>
           </div>
           {newAccountButton}
         </div>
@@ -183,12 +191,20 @@ function ResetPasswordModal({ account, onClose, onDone }: { account: Account; on
     <div aria-modal="true" className="modal-backdrop" onClick={() => { if (!busy) onClose() }} role="dialog">
       <div className="modal-dialog" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <h2>Senha nova para {account.username}</h2>
+          <h2 className="modal-title-help">
+            Senha nova para {account.username}
+            <HelpTip label="Senha nova">
+              <ul>
+                <li>Passe a senha por um canal seguro.</li>
+                <li>Peça para a pessoa trocar em “Trocar senha”.</li>
+                <li>Quem estiver logado vai precisar entrar de novo.</li>
+              </ul>
+            </HelpTip>
+          </h2>
           <button aria-label="Fechar" className="modal-close" disabled={busy} onClick={onClose} type="button">✕</button>
         </div>
         <form onSubmit={(event) => void submit(event)}>
           <div className="modal-body password-form">
-            <p className="versions-hint">Passe a senha para a pessoa por um canal seguro e peça para ela trocar em “Trocar a senha”. Se estiver logada em algum computador, vai precisar entrar de novo.</p>
             <label>
               <span>Senha nova</span>
               <input autoComplete="new-password" autoFocus minLength={8} onChange={(event) => setPassword(event.target.value)} required type="password" value={password} />
@@ -241,12 +257,20 @@ function CreateAccountModal({ onClose, onDone }: { onClose: () => void; onDone: 
     <div aria-modal="true" className="modal-backdrop" onClick={() => { if (!busy) onClose() }} role="dialog">
       <div className="modal-dialog" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <h2>Nova conta</h2>
+          <h2 className="modal-title-help">
+            Nova conta
+            <HelpTip label="Nova conta">
+              <ul>
+                <li>A conta já entra ativa.</li>
+                <li>O nome de usuário sai do e-mail.</li>
+                <li>Passe a senha por um canal seguro e peça para a pessoa trocar em “Trocar senha”.</li>
+              </ul>
+            </HelpTip>
+          </h2>
           <button aria-label="Fechar" className="modal-close" disabled={busy} onClick={onClose} type="button">✕</button>
         </div>
         <form onSubmit={(event) => void submit(event)}>
           <div className="modal-body password-form">
-            <p className="versions-hint">A conta já entra ativa. Passe a senha para a pessoa por um canal seguro e peça para ela trocar em “Trocar a senha”.</p>
             <label>
               <span>Nome</span>
               <input autoComplete="off" autoFocus maxLength={80} onChange={(event) => setName(event.target.value)} required value={name} />
@@ -254,7 +278,6 @@ function CreateAccountModal({ onClose, onDone }: { onClose: () => void; onDone: 
             <label>
               <span>E-mail</span>
               <input autoComplete="off" onChange={(event) => setEmail(event.target.value)} placeholder="maria.silva@empresa.com.br" required type="email" value={email} />
-              <small>É com ele que a pessoa entra. O nome de usuário sai daqui.</small>
             </label>
             <label>
               <span>Senha</span>

@@ -1,4 +1,5 @@
 import type { FolderField, FolderLevel } from '../../services/api'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 
 // O nome na tela de um campo (o backend manda; campo que o perfil de
 // anotação não tem aparece pela chave).
@@ -118,23 +119,27 @@ export function FolderLevels({ levels, fields, unknownDefault, onChange }: {
           </div>
         )
       })}
-      {unused.length > 0 && (
-        <select
-          aria-label="Adicionar nível"
-          className="folder-levels__add"
-          onChange={(event) => {
-            if (event.target.value) onChange([...levels, { field: event.target.value }])
-          }}
-          value=""
-        >
-          <option value="">+ Adicionar nível de pasta…</option>
-          {unused.map((field) => <option key={field.field} value={field.field}>{field.label}</option>)}
-        </select>
-      )}
-      <p className="profile-name-hint">
-        Os campos de objeto vêm do primeiro objeto do tipo na imagem; de uma lista, o primeiro valor.
-        Nome de pasta não pode ter / \ : * ? " &lt; &gt; |.
-      </p>
+      <div className="folder-levels__foot">
+        {unused.length > 0 && (
+          <select
+            aria-label="Adicionar nível"
+            className="folder-levels__add"
+            onChange={(event) => {
+              if (event.target.value) onChange([...levels, { field: event.target.value }])
+            }}
+            value=""
+          >
+            <option value="">+ Adicionar nível de pasta…</option>
+            {unused.map((field) => <option key={field.field} value={field.field}>{field.label}</option>)}
+          </select>
+        )}
+        <HelpTip label="Níveis de pasta">
+          <ul>
+            <li>Campo de objeto: o do primeiro objeto do tipo; de uma lista, o primeiro valor.</li>
+            <li>Nome de pasta não pode ter <code>/ \ : * ? " &lt; &gt; |</code></li>
+          </ul>
+        </HelpTip>
+      </div>
     </div>
   )
 }

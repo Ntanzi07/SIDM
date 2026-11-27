@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { BoxAttributes } from '../../components/BoxAttributes/BoxAttributes'
 import { ImageWithBoxes } from '../../components/ImageWithBoxes/ImageWithBoxes'
 import { ZoomView } from '../../components/ZoomView/ZoomView'
@@ -13,6 +13,7 @@ import { linkedKeys, toObjectBox } from '../../utils/boxLinks'
 import { PageLoader } from '../../components/PageLoader/PageLoader'
 import { useShortcuts } from '../../hooks/useShortcuts'
 import { ShortcutsHelp } from './ShortcutsHelp'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import './Annotation.css'
 
 function formatSize(bytes: number) {
@@ -229,8 +230,26 @@ export function AnnotationPage() {
               <div className="annotation-form-card">
                 <div className="annotation-form-heading">
                   <div>
-                    <h2>Dados da anotação</h2>
-                    <p>Preencha os campos de acordo com o que aparece na imagem.</p>
+                    <h2>
+                      Dados da anotação
+                      <HelpTip label="Dados da anotação">
+                        <ul>
+                          <li>
+                            {profile.fields.some((field) => field.required) || profile.objects.some((type) => (type.min ?? 0) > 0)
+                              ? 'Campos com * são obrigatórios para verificar.'
+                              : 'Nenhum campo é obrigatório.'}
+                          </li>
+                          <li>Deixe vazio (ou "Não informado") o que a imagem não mostra.</li>
+                          {profile.fields.some((field) => field.type === 'ref') && (
+                            <>
+                              <li>Equipamento ou câmera novo: digite o nome e salve; a tela pede para confirmar.</li>
+                              <li>Renomear ou desativar: em Configurar.</li>
+                            </>
+                          )}
+                        </ul>
+                      </HelpTip>
+                    </h2>
+                    <p>Perfil <strong>{profile.name}</strong></p>
                   </div>
                   {/* pendente é o normal desta tela; só avisa ao rever uma já concluída */}
                   {image.status === 'verified' && <span className="annotation-status annotation-status--done">Concluída</span>}
@@ -249,16 +268,6 @@ export function AnnotationPage() {
                   ))}
                 </div>
 
-                <p className="annotation-hint">
-                  Perfil <strong>{profile.name}</strong>.
-                  {profile.fields.some((field) => field.required) || profile.objects.some((type) => (type.min ?? 0) > 0)
-                    ? ' Os campos com * são obrigatórios para verificar; o resto pode ficar vazio (ou "Não informado").'
-                    : ' Nenhum campo é obrigatório: deixe vazio (ou "Não informado") o que a imagem não tem ou não dá para conferir.'}
-                  {profile.fields.some((field) => field.type === 'ref') && (
-                    <> Equipamento ou câmera novo: digite o nome e salve; a tela pede para confirmar o cadastro.
-                      Para renomear ou desativar, use <Link to="/configurar">Configurar</Link>.</>
-                  )}
-                </p>
 
                 {form.objects.map((object, index) => {
                   const type = objectTypes.find((t) => t.key === object.type)
@@ -335,7 +344,7 @@ export function AnnotationPage() {
                 )}
 
                 {boxSets.some((set) => set.boxes.length > 0) && (
-                  <BoxAttributes actionFor={actionFor} linked={linkedNames} onSaved={reloadBoxes} onSelect={(ref) => (ref ? showBox(ref) : selectBox(null))} profile={profile} selected={selectedBox} sets={boxSets} />
+                  <BoxAttributes actionFor={actionFor} collapsible linked={linkedNames} onSaved={reloadBoxes} onSelect={(ref) => (ref ? showBox(ref) : selectBox(null))} profile={profile} selected={selectedBox} sets={boxSets} />
                 )}
 
                 {generalProblems.length > 0 && (
