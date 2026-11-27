@@ -63,7 +63,8 @@ Campos: `choice`, `multi`, `text` (`pattern` do valor inteiro, `max_len`, `upper
 `number` (`min`, `max`, `integer`), `bool`, `datetime`, `ref` (`equipment`/`camera`).
 Cada campo pode ter `required`, `default`, `help` e (só campo da imagem) `repeat` (a próxima
 pendente do pacote vem com o valor da última salva); opções podem ter `code` (forma curta no
-nome de arquivo; se uma tem, todas têm). Tipos de objeto: `key`, `label`, `box`, `min`, `max`,
+nome de arquivo; se uma tem, todas têm) e, num `multi`, uma pode ser `exclusive` ("nenhum
+dos outros", como Sem avarias: junto de outra, sai). Tipos de objeto: `key`, `label`, `box`, `min`, `max`,
 `fields`. O padrão `veiculos` é montado das tabelas do `filename` (mesmos códigos do v2).
 
 ## Migrações

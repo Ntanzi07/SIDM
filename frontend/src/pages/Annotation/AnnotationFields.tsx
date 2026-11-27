@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { searchCameras, searchEquipments, type PageResponse } from '../../services/api'
-import type { FormValue, ProfileField } from '../../types/annotation'
+import type { FormValue, ProfileField, ProfileOption } from '../../types/annotation'
 import { fieldLabel, optionLabel } from '../../utils/annotationForm'
 
 // Os controles do formulário de anotação, um por tipo de campo do perfil.
@@ -209,22 +209,30 @@ export function FieldInput({ field, value, onChange, error, disabled }: FieldInp
       return <SelectField {...select} onChange={onChange} options={[['true', 'Sim'], ['false', 'Não']]} value={text} />
     case 'multi': {
       const chosen = Array.isArray(value) ? value : []
+      const options = field.options ?? []
+      // A exclusiva ("Sem avarias") fica na grade com as outras, mas não
+      // convive com elas: marcar ela tira as outras; marcar um problema tira
+      // ela; tirar o último problema traz ela de volta.
+      const exclusive = options.filter((option) => option.exclusive)
+      const isExclusive = (v: string) => exclusive.some((option) => option.value === v)
+      const toggle = (option: ProfileOption, on: boolean) => {
+        if (option.exclusive) {
+          onChange(on ? [option.value] : chosen.filter((v) => v !== option.value))
+          return
+        }
+        const problems = chosen.filter((v) => !isExclusive(v))
+        const next = on ? [...problems, option.value] : problems.filter((v) => v !== option.value)
+        onChange(next.length === 0 && exclusive.length === 1 ? [exclusive[0].value] : next)
+      }
+      const check = (option: ProfileOption) => (
+        <label className={chosen.includes(option.value) ? 'annotation-check annotation-check--on' : 'annotation-check'} key={option.value}>
+          <input checked={chosen.includes(option.value)} onChange={(event) => toggle(option, event.target.checked)} type="checkbox" />
+          {option.label || option.value}
+        </label>
+      )
       return (
         <FieldWrap {...common} className="annotation-field--wide" group unknown={chosen.length === 0}>
-          <div className="annotation-multi">
-            {(field.options ?? []).map((option) => (
-              <label className={chosen.includes(option.value) ? 'annotation-chip annotation-chip--on' : 'annotation-chip'} key={option.value}>
-                <input
-                  checked={chosen.includes(option.value)}
-                  onChange={(event) => onChange(event.target.checked
-                    ? [...chosen, option.value]
-                    : chosen.filter((v) => v !== option.value))}
-                  type="checkbox"
-                />
-                {option.label || option.value}
-              </label>
-            ))}
-          </div>
+          <div className="annotation-multi">{options.map(check)}</div>
         </FieldWrap>
       )
     }

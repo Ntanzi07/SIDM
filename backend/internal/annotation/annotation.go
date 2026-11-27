@@ -45,6 +45,10 @@ type Option struct {
 	// Code é a forma curta usada no nome do arquivo (ex.: "F"). Opcional,
 	// mas se uma opção do campo tem, todas têm.
 	Code string `json:"code,omitempty" bson:"code,omitempty"`
+	// Exclusive (só em multi): a opção que diz "nenhum dos outros" (ex.:
+	// "Sem avarias"). Não convive com as outras: se vier junto de alguma,
+	// sai (o problema marcado ganha). No máximo uma por campo.
+	Exclusive bool `json:"exclusive,omitempty" bson:"exclusive,omitempty"`
 }
 
 // Field é um campo da imagem ou de um objeto.

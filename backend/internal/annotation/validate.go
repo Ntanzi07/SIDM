@@ -166,7 +166,7 @@ func validFields(ps *problems, base string, fs []Field) {
 
 		switch f.Type {
 		case TypeChoice, TypeMulti:
-			validOptions(ps, path+".options", f.Options)
+			validOptions(ps, path+".options", f.Options, f.Type == TypeMulti)
 		case TypeText:
 			if f.Pattern != "" {
 				if _, err := regexp.Compile(f.Pattern); err != nil {
@@ -196,14 +196,23 @@ func validFields(ps *problems, base string, fs []Field) {
 	}
 }
 
-func validOptions(ps *problems, path string, opts []Option) {
+func validOptions(ps *problems, path string, opts []Option, multi bool) {
 	if len(opts) == 0 {
 		ps.add(path, "faltou a lista de opções")
 		return
 	}
-	values, codes, withCode := map[string]bool{}, map[string]bool{}, 0
+	values, codes, withCode, exclusive := map[string]bool{}, map[string]bool{}, 0, 0
 	for j, o := range opts {
 		op := fmt.Sprintf("%s[%d]", path, j)
+		if o.Exclusive {
+			exclusive++
+			switch {
+			case !multi:
+				ps.add(op+".exclusive", "exclusiva só vale para multi (numa lista de uma escolha, toda opção já é única)")
+			case exclusive > 1:
+				ps.add(op+".exclusive", "só uma opção exclusiva por campo")
+			}
+		}
 		switch {
 		case !valueRe.MatchString(o.Value):
 			ps.add(op+".value", "use letras minúsculas, números, _ . - (até 48), ex.: \"front\"")

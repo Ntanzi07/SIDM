@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import type { ReactNode } from 'react'
 import {
   createExportProfile,
   deleteExportProfile,
@@ -25,6 +26,7 @@ import { confirmDialog } from '../../services/confirm'
 import { useIsAdmin } from '../../services/user'
 import { Skeleton } from '../../components/Skeleton/Skeleton'
 import { SkFormCard, SkProfileList } from '../../components/Skeleton/Shapes'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import './Export.css'
 
 const fmt = (n: number) => n.toLocaleString('pt-BR')
@@ -32,8 +34,8 @@ const fmt = (n: number) => n.toLocaleString('pt-BR')
 const FORMATS = [
   ['coco', 'RF-DETR (COCO)', 'train/, valid/, test/ com _annotations.coco.json (layout do Roboflow)'],
   ['yolo', 'YOLO (Ultralytics)', 'images/, labels/ e data.yaml'],
-  ['voc', 'Pascal VOC', 'um .xml por imagem, ao lado dela; em train/valid/test ou em pastas pelos metadados'],
-  ['images', 'Só imagens', 'as imagens com o nome de saída e um anotacoes.csv com os dados anotados; sem caixas nem tarefa'],
+  ['voc', 'Pascal VOC', 'um .xml por imagem, ao lado dela'],
+  ['images', 'Só imagens', 'as imagens e um anotacoes.csv, sem caixas'],
 ] as const
 
 const FORMAT_NAMES: Record<ExportProfile['format'], string> = {
@@ -152,7 +154,18 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
   }
 }
 
-const EXPORT_INTRO = 'Gere datasets de treino com as imagens verificadas e as caixas do CVAT de uma tarefa, ou só as imagens com o nome e os dados anotados.'
+const EXPORT_INTRO = 'Datasets de treino com as imagens verificadas: com as caixas do CVAT ou só as imagens.'
+
+// O cabeçalho de cada seção: o título, uma linha do que ela faz e, se
+// precisar, os detalhes no (?). Mesmo formato em toda seção.
+function SectionHead({ title, hint, help }: { title: string; hint?: ReactNode; help?: ReactNode }) {
+  return (
+    <div className="export-section-head">
+      <h3>{title}{help && <HelpTip label={title}>{help}</HelpTip>}</h3>
+      {hint && <p>{hint}</p>}
+    </div>
+  )
+}
 
 export function ExportPage() {
   const admin = useIsAdmin() // salvar e apagar perfis: só admin
@@ -405,9 +418,7 @@ export function ExportPage() {
           <div className="create-card settings-card">
             <h2>{selected ? (isBuiltin ? `${selected} (padrão)` : selected) : 'Novo perfil'}</h2>
             {isBuiltin && (
-              <p className="profile-name-hint">
-                Perfil padrão: dá para mudar os campos e exportar, mas para guardar as mudanças, salve com outro nome.
-              </p>
+              <p className="profile-name-hint">Perfil padrão: para guardar mudanças, salve com outro nome.</p>
             )}
 
             <div className="profile-form-grid">
@@ -423,14 +434,22 @@ export function ExportPage() {
             </div>
 
             {!noBoxes && <>
-            <h3>Tarefa</h3>
+            <SectionHead
+              help={(
+                <ul>
+                  <li>Várias juntam as caixas num dataset só (ex.: para-brisa + placa).</li>
+                  {isBuiltin && <li>Os perfis padrão servem para qualquer tarefa: escolha na hora.</li>}
+                </ul>
+              )}
+              hint="As caixas de quais tarefas entram no dataset."
+              title="Tarefa"
+            />
             {tasks.length === 0 ? (
               <p className="form-error">
                 Nenhuma tarefa ainda: crie uma em <Link to="/tarefas">Tarefas</Link> e importe as caixas do CVAT.
               </p>
             ) : (
               <>
-                <p className="profile-name-hint">As caixas de quais tarefas entram (várias juntam as caixas num dataset só, ex.: para-brisa + placa).</p>
                 <div className="export-packages">
                   {tasks.map((task) => (
                     <label className="export-check" key={task.name}>
@@ -453,33 +472,36 @@ export function ExportPage() {
                     </label>
                     <p className={draft.all_tasks ? 'profile-name-hint' : 'profile-name-hint export-warning'}>
                       {draft.all_tasks
-                        ? 'Uma imagem anotada só em parte das tarefas fica de fora.'
-                        : 'Atenção: uma imagem anotada só numa tarefa entra sem as caixas das outras, e o modelo aprende que o objeto não marcado é fundo.'}
-                      {' '}A mesma label em duas tarefas vira uma classe só (renomeie abaixo para separar).
+                        ? 'Imagens anotadas só em parte das tarefas ficam de fora.'
+                        : 'Atenção: imagem anotada só numa tarefa entra sem as caixas das outras (o modelo aprende que é fundo).'}
                     </p>
                   </>
                 )}
               </>
             )}
-            {isBuiltin && <p className="profile-name-hint">Os perfis padrão servem para qualquer tarefa: escolha na hora.</p>}
             </>}
 
-            <h3>Perfil de anotação</h3>
+            <SectionHead
+              help={(
+                <ul>
+                  <li>Use o perfil dos pacotes que vão no dataset.</li>
+                  <li>Imagens de outro perfil entram sem esses campos: não passam nos filtros e vão para "Desconhecido" nas pastas.</li>
+                </ul>
+              )}
+              hint="Dá os campos dos filtros, das pastas e do nome dos arquivos."
+              title="Perfil de anotação"
+            />
             <div className="profile-form-grid">
               <label className="form-field">
-                <span>Os campos dos filtros, das pastas e do nome</span>
+                <span>Perfil</span>
                 <select onChange={(event) => changeAnnotationProfile(event.target.value)} value={annotationName}>
                   {annotationProfiles.map((profile) => <option key={profile.name} value={profile.name}>{profile.name}</option>)}
                   {!annotationProfile && annotationProfiles.length > 0 && <option value={annotationName}>{annotationName} (não existe mais)</option>}
                 </select>
               </label>
             </div>
-            <p className="profile-name-hint">
-              Use o perfil dos pacotes que vão no dataset. Imagens de pacotes de outro perfil entram, mas sem esses campos
-              (não passam nos filtros e vão para "Desconhecido" nas pastas).
-            </p>
 
-            <h3>Formato</h3>
+            <SectionHead hint="Como o dataset sai dentro do zip." title="Formato" />
             <div className="export-formats">
               {FORMATS.map(([value, label, hint]) => (
                 <label className={draft.format === value ? 'export-format export-format--active' : 'export-format'} key={value}>
@@ -497,7 +519,7 @@ export function ExportPage() {
 
             {withFolders(draft.format) && (
               <>
-                <h3>Pastas de saída</h3>
+                <SectionHead hint="Como as imagens se organizam no zip." title="Pastas de saída" />
                 <div className="export-formats">
                   <label className={!isFolders ? 'export-format export-format--active' : 'export-format'}>
                     <input checked={!isFolders} name="layout" onChange={() => change({ layout: 'split', folders: undefined })} type="radio" />
@@ -531,7 +553,17 @@ export function ExportPage() {
             )}
 
             {splitMatters && <>
-            <h3>Divisão</h3>
+            <SectionHead
+              help={(
+                <ul>
+                  <li>Fixa por imagem: re-exportar com imagens novas não muda o grupo das antigas.</li>
+                  {draft.format === 'yolo' && <li>No YOLO, a validação não pode ser 0.</li>}
+                  {isFolders && <li>Com o nível "Divisão" nas pastas, train/valid/test viram pastas na posição dele.</li>}
+                </ul>
+              )}
+              hint="Quanto vai para treino, validação e teste."
+              title="Divisão"
+            />
             <div className="export-split">
               {(['train', 'valid', 'test'] as const).map((key) => (
                 <label className="form-field" key={key}>
@@ -549,14 +581,20 @@ export function ExportPage() {
                 Soma: {splitSum}%
               </span>
             </div>
-            <p className="profile-name-hint">
-              A divisão é fixa por imagem: re-exportar com imagens novas não muda o grupo das antigas.
-              {draft.format === 'yolo' && ' No YOLO, a validação não pode ser 0.'}
-              {isFolders && ' Com o nível "Divisão" nas pastas, train/valid/test viram pastas na posição dele.'}
-            </p>
             </>}
 
-            <h3>Nome dos arquivos</h3>
+            <SectionHead
+              help={(
+                <ul>
+                  <li>Campo de lista com código sai com o código (ex.: direção F/T).</li>
+                  <li>Campo sem valor vira "_" na largura dele.</li>
+                  <li>Campo de objeto: o do primeiro objeto do tipo; de uma lista, o primeiro valor.</li>
+                  <li>A extensão é a do arquivo. O exemplo aparece na prévia.</li>
+                </ul>
+              )}
+              hint="Como cada imagem se chama no zip."
+              title="Nome dos arquivos"
+            />
             <FileNameTemplate
               key={selected ?? 'novo'}
               fields={folderFields.fields}
@@ -565,7 +603,7 @@ export function ExportPage() {
               value={draft.file_name ?? ''}
             />
 
-            <h3>Pacotes</h3>
+            <SectionHead hint="De quais pacotes vêm as imagens." title="Pacotes" />
             <div className="export-packages">
               <label className="export-check">
                 <input checked={!draft.packages?.length} onChange={() => change({ packages: [] })} type="checkbox" />
@@ -580,7 +618,7 @@ export function ExportPage() {
               ))}
             </div>
 
-            <h3>Filtros</h3>
+            <SectionHead hint="Só entram as imagens verificadas com estes valores." title="Filtros" />
             {!annotationProfile ? (
               <p className="profile-name-hint">Carregando os campos do perfil de anotação…</p>
             ) : (
@@ -614,7 +652,16 @@ export function ExportPage() {
             )}
 
             {!noBoxes && <>
-            <h3>Labels</h3>
+            <SectionHead
+              help={(
+                <ul>
+                  <li>Mesmo nome em duas labels junta as duas numa classe (ex.: "Placa" e "placa").</li>
+                  <li>A mesma label em duas tarefas vira uma classe só: renomeie para separar.</li>
+                </ul>
+              )}
+              hint="Quais labels entram e com que nome no dataset."
+              title="Labels"
+            />
             {!hasTasks ? (
               <p className="profile-name-hint">Escolha a tarefa para ver as labels dela.</p>
             ) : rows.length === 0 ? (
@@ -642,9 +689,6 @@ export function ExportPage() {
                 </tbody>
               </table>
             )}
-            <p className="profile-name-hint">
-              Dê o mesmo nome a duas labels para juntá-las (ex.: "Placa" e "placa" viram uma classe só).
-            </p>
             </>}
 
             <div className="export-actions">
@@ -728,7 +772,7 @@ export function ExportPage() {
                     </tbody>
                   </table>}
                   {preview.format === 'images' && (
-                    <p className="profile-name-hint">O zip leva também o anotacoes.csv, com os dados anotados de cada imagem (abre no Excel).</p>
+                    <p className="profile-name-hint">O zip leva também o anotacoes.csv (abre no Excel).</p>
                   )}
                 </>
               )}

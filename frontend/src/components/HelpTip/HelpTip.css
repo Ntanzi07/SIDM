@@ -1,0 +1,69 @@
+/* o ícone (?) ao lado de um título ou de um nome de campo */
+.help-tip {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 6px;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-3);
+  font-family: var(--font);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: help;
+}
+
+.help-tip:hover,
+.help-tip[aria-expanded='true'] {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
+
+.help-tip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* o balão (portal no body, posição fixa) */
+.help-tip__bubble {
+  position: fixed;
+  z-index: 1200; /* acima dos modais e dos avisos */
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 10px 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+}
+
+.help-tip__bubble p,
+.help-tip__bubble ul {
+  margin: 0;
+}
+
+.help-tip__bubble p + p,
+.help-tip__bubble p + ul {
+  margin-top: 6px;
+}
+
+.help-tip__bubble ul {
+  padding-left: 16px;
+}
+
+.help-tip__bubble code {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}

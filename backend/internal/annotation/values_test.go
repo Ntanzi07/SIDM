@@ -190,3 +190,38 @@ func TestFitFieldsDeUmaCaixa(t *testing.T) {
 		t.Error("plate não tem caixa")
 	}
 }
+
+// A opção exclusiva ("Sem avarias") não convive com as outras: junto de um
+// problema, sai; sozinha, fica.
+func TestMultiExclusiva(t *testing.T) {
+	f := Field{Key: "conditions", Type: TypeMulti, Options: []Option{{Value: "no_damage", Exclusive: true}, {Value: "glare"}, {Value: "low_contrast"}}}
+	cases := []struct {
+		in   []string
+		want string
+	}{
+		{[]string{"no_damage"}, "no_damage"},
+		{[]string{"no_damage", "glare"}, "glare"},
+		{[]string{"glare", "no_damage", "low_contrast"}, "glare low_contrast"},
+		{[]string{"glare"}, "glare"},
+	}
+	for _, c := range cases {
+		got, err := f.Clean(c.in)
+		if err != nil {
+			t.Fatalf("%v: %v", c.in, err)
+		}
+		if s := strings.Join(got.([]string), " "); s != c.want {
+			t.Errorf("%v = %q, esperava %q", c.in, s, c.want)
+		}
+	}
+	// no perfil veiculos, "Sem avarias" é a exclusiva das condições
+	v := Vehicles()
+	for _, field := range v.Fields {
+		if field.Key != "conditions" {
+			continue
+		}
+		got, _ := field.Clean([]string{"no_damage", "glare"})
+		if s := strings.Join(got.([]string), " "); s != "glare" {
+			t.Errorf("veiculos: %q", s)
+		}
+	}
+}

@@ -68,6 +68,24 @@
   font-size: 14px;
 }
 
+/* cabeçalho de seção: título + uma linha do que ela faz */
+.export-section-head {
+  margin: 24px 0 10px;
+}
+
+.export-section-head h3 {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+
+.export-section-head p {
+  margin: 3px 0 0;
+  color: var(--text-3);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
 .export-formats {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -351,4 +369,17 @@
 
 .export-warning {
   color: var(--warning);
+}
+
+.folder-levels__foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* os avisos da tela (perfil padrão, tarefas, prévia): legíveis, no tom das
+   linhas de seção */
+.export-page .profile-name-hint {
+  font-size: 12px;
+  line-height: 1.45;
 }

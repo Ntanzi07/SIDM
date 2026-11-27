@@ -15,6 +15,7 @@ import { defaultIniProfile, forPackage, optionLabel } from '../../utils/importPr
 import { useToastState } from '../../hooks/useToast'
 import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import { SkButtons, SkImageFeed, SkSide, SkStats, SkTitle } from '../../components/Skeleton/Shapes'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import './Packages.css'
 import { useIsAdmin } from '../../services/user'
 
@@ -236,9 +237,8 @@ export function PackageDetailPage() {
           <BoxesSection packageName={selectedPackage.name} total={selectedPackage.total} />
           <section className="side-section">
             <div className="side-section__head">
-              <h2>Importar anotações</h2>
+              <h2>Importar anotações<HelpTip label="Importar anotações">Preenche os rascunhos das imagens com dados que já existem, antes de verificar.</HelpTip></h2>
             </div>
-            <p className="side-section__hint">Preenche os rascunhos das imagens com dados que já existem, antes de verificar.</p>
             <div className="side-section__actions">
               <button className="button button--secondary button--sm" onClick={() => setImporting('csv')} type="button">Importar CSV</button>
               {iniProfiles.length > 0 && (

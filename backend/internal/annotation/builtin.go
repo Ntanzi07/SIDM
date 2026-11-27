@@ -19,7 +19,7 @@ var vehicleLabels = map[string]map[string]string{
 	"image_range":   {"narrow": "Estreito (1 placa)", "wide": "Amplo (várias placas)"},
 	"weather":       {"clear": "Sem chuva", "rain": "Chuva", "fog": "Neblina"},
 	"conditions": {
-		"no_damage": "Sem avarias", "plate_shadow": "Sombra na placa", "duplicate_plate": "Placa duplicada (caminhões)",
+		"no_damage": "Sem avarias", "plate_shadow": "Sombra na placa", "duplicate_plate": "Placa duplicada",
 		"distorted_plate": "Placa distorcida", "glare": "Ofuscamento", "low_resolution": "Baixa resolução",
 		"low_contrast": "Baixo contraste", "distorted_image": "Imagem distorcida", "multiple_plates": "Diversas placas",
 	},
@@ -52,6 +52,16 @@ func codedOptions(table string) []Option {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
 	return out
+}
+
+// exclusive marca a opção que não convive com as outras (ver Option.Exclusive).
+func exclusive(opts []Option, value string) []Option {
+	for i := range opts {
+		if opts[i].Value == value {
+			opts[i].Exclusive = true
+		}
+	}
+	return opts
 }
 
 // Vehicles é o perfil "veiculos": os campos que o SIDM sempre teve, com as
@@ -89,8 +99,10 @@ func Vehicles() Profile {
 			choice("day_time", "Período", "day_time", "day"),
 			choice("image_range", "Abrangência", "image_range", "narrow"),
 			repeat(choice("weather", "Clima", "weather", "clear")),
-			{Key: "conditions", Label: "Condições", Type: TypeMulti, Options: codedOptions("conditions"), Default: []string{"no_damage"}},
+			// a data vem antes das condições: é um campo curto, e as condições
+			// (várias opções) fecham o grupo na tela
 			{Key: "captured_at", Label: "Data e hora da captura", Type: TypeDateTime},
+			{Key: "conditions", Label: "Condições", Type: TypeMulti, Options: exclusive(codedOptions("conditions"), "no_damage"), Default: []string{"no_damage"}},
 		},
 		Objects: []ObjectType{{
 			Key: "vehicle", Label: "Veículo",

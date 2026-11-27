@@ -7,6 +7,7 @@ export type ProfileOption = {
   value: string
   label?: string
   code?: string // a forma curta no nome do arquivo
+  exclusive?: boolean // só em multi: "nenhum dos outros" (ex.: Sem avarias)
 }
 
 export type ProfileField = {

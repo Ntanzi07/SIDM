@@ -11,6 +11,7 @@ import type { AnnotationProfile, ObjectType } from '../../types/annotation'
 import { useToast, useToastState } from '../../hooks/useToast'
 import { confirmDialog } from '../../services/confirm'
 import { BoxLabelsEditor } from './BoxLabelsEditor'
+import { HelpTip } from '../../components/HelpTip/HelpTip'
 import { applyParent, ownFields, ownIndex, parentChoices } from './profileInheritance'
 import { FieldList, ObjectHead } from './ProfileEditor'
 import { pathId, profileName, under } from './profileEditorUtils'
@@ -156,7 +157,12 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
     <div className="set-page">
       <SettingsHeader
         actions={<button className="button button--primary button--sm" onClick={() => open(empty(), true)} type="button">Criar perfil</button>}
-        description="Cada pacote usa um perfil, que diz o que se anota em cada imagem. Um perfil pode estender outro: herda tudo dele e acrescenta o que falta."
+        info={(
+          <ul>
+            <li>Cada pacote usa um perfil: o que se anota em cada imagem.</li>
+            <li>Um perfil pode estender outro: herda tudo e acrescenta o que falta.</li>
+          </ul>
+        )}
         title="Perfis de anotação"
       />
       <ProfileList onDuplicate={duplicate} onOpen={(p) => open(p, false)} onRemove={(name) => void remove(name)} profiles={profiles} />
@@ -180,15 +186,14 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
     <div className="set-page pe-editor">
       <SettingsHeader
         actions={readOnly ? <button className="button button--secondary button--sm" onClick={() => duplicate(draft)} type="button">Duplicar para editar</button> : undefined}
-        description={readOnly
-          ? 'Este é um perfil padrão do SIDM: só dá para mudar as caixas ligadas a cada tipo de objeto. Para mudar o resto, duplique.'
-          : 'Os campos que se preenchem em cada imagem e os objetos que se anotam nela. Abra um campo para editar e ver como ele fica na anotação.'}
+        description={readOnly ? 'Perfil padrão do SIDM: só as caixas de cada tipo de objeto mudam. Para o resto, duplique.' : undefined}
+        info={readOnly ? undefined : 'Abra um campo para editar e ver como ele fica na anotação.'}
         title={isNew ? 'Criar perfil de anotação' : readOnly ? `Perfil ${draft.name}` : `Editar ${draft.name}`}
       />
 
       <SettingsGroup title="Sobre o perfil">
         <SettingRow
-          help={isNew ? 'Vai na URL e no pacote: minúsculas, números e hífen. Não muda depois.' : 'O nome não muda depois de criado. Para outro nome, duplique.'}
+          info={isNew ? 'Minúsculas, números e hífen. Não muda depois.' : 'Não muda depois de criado. Para outro nome, duplique.'}
           htmlFor={`${uid}-name`}
           label="Nome"
         >
@@ -210,7 +215,7 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
             )}
           </div>
         </SettingRow>
-        <SettingRow help="Aparece na lista e ao escolher o perfil de um pacote." htmlFor={`${uid}-desc`} label="Descrição">
+        <SettingRow htmlFor={`${uid}-desc`} info="Aparece na lista e ao escolher o perfil de um pacote." label="Descrição">
           <input
             className="pe-w-lg"
             disabled={readOnly}
@@ -221,9 +226,14 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
           />
         </SettingRow>
         <SettingRow
-          help={draft.extends
-            ? `Herda os campos e os tipos de ${draft.extends}, que aparecem aqui só para leitura. Os pacotes deste perfil entram nos datasets e na pesquisa de ${draft.extends}.`
-            : 'Herdar de outro perfil traz os campos e os tipos dele; aqui você só acrescenta.'}
+          info={draft.extends
+            ? (
+              <ul>
+                <li>Herda os campos e os tipos de {draft.extends} (só leitura aqui).</li>
+                <li>Os pacotes deste perfil entram nos datasets e na pesquisa de {draft.extends}.</li>
+              </ul>
+            )
+            : 'Herdar traz os campos e os tipos do outro perfil; aqui você só acrescenta.'}
           htmlFor={`${uid}-extends`}
           label="Estende"
         >
@@ -243,8 +253,7 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
 
       <section className="set-group" aria-labelledby={`${uid}-fields`}>
         <div className="set-group__head">
-          <h3 id={`${uid}-fields`}>Campos da imagem</h3>
-          <p>Preenchidos uma vez por imagem, como o clima, a câmera ou o ângulo.</p>
+          <h3 id={`${uid}-fields`}>Campos da imagem<HelpTip label="Campos da imagem">Preenchidos uma vez por imagem, como o clima, a câmera ou o ângulo.</HelpTip></h3>
         </div>
         <FieldList
           addLabel={ownFieldCount ? 'Adicionar campo' : 'Adicionar o primeiro campo'}
@@ -259,8 +268,7 @@ export function AnnotationProfilesSection({ view, onView, onSummary }: Props) {
 
       <section className="set-group" aria-labelledby={`${uid}-objects`}>
         <div className="set-group__head">
-          <h3 id={`${uid}-objects`}>Tipos de objeto</h3>
-          <p>O que aparece dentro da imagem e tem campos próprios, como um veículo ou um capacete.</p>
+          <h3 id={`${uid}-objects`}>Tipos de objeto<HelpTip label="Tipos de objeto">O que aparece dentro da imagem e tem campos próprios, como um veículo ou um capacete.</HelpTip></h3>
         </div>
         {draft.objects.length === 0 && (
           <div className="pe-empty">

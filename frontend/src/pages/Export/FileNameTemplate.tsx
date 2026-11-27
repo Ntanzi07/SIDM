@@ -48,7 +48,7 @@ export function FileNameTemplate({ value, fields, legacy, onChange }: {
   }
 
   const options: Array<[Mode, string, string]> = [
-    ['v2', 'Nome do SIDM', 'o nome guardado (no perfil veiculos, o v2: sha1_v2_equipamento_câmera_…; nos outros, o sha1)'],
+    ['v2', 'Nome do SIDM', 'o nome guardado no banco (v2 no perfil veiculos; sha1 nos outros)'],
     ...(legacy ? [['legacy', 'Padrão antigo', 'hash + características + placa: …3a3fF01LDBEB1S01KOY7386.jpg'] as [Mode, string, string]] : []),
     ['custom', 'Personalizado', 'monte o nome com os campos'],
   ]
@@ -93,11 +93,6 @@ export function FileNameTemplate({ value, fields, legacy, onChange }: {
           {unknown.length > 0 && (
             <p className="form-error">O perfil de anotação não tem: {unknown.map((field) => `{${field}}`).join(' ')}.</p>
           )}
-          <p className="profile-name-hint">
-            Os campos de lista com código saem com o código (no perfil veiculos, o do nome v2: direção F/T, resolução 01…10, …).
-            Campo sem valor vira "_" na largura dele. Os de objeto vêm do primeiro objeto do tipo; de uma lista, o primeiro valor.
-            A extensão é a do arquivo. O exemplo do nome aparece na prévia.
-          </p>
         </>
       )}
     </div>

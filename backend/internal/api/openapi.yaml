@@ -2903,6 +2903,7 @@ components:
               value: { type: string, example: night }
               label: { type: string, example: Noite }
               code: { type: string, example: N }
+              exclusive: { type: boolean, description: "Só em multi, no máximo uma por campo: a opção \"nenhum dos outros\" (no veiculos, Sem avarias). Se vier junto de outra, sai (o problema marcado ganha)." }
         pattern: { type: string, description: "text: expressão regular do valor inteiro.", example: "[A-Z0-9]{7}" }
         max_len: { type: integer, description: text }
         upper: { type: boolean, description: "text: guarda em maiúsculas." }

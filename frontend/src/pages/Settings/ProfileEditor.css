@@ -45,7 +45,9 @@
 }
 
 .pe-field > label,
-.pe-field > legend {
+.pe-field > legend,
+.pe-field > .pe-label-row > label,
+.pe-field > .im-label-row > label {
   color: var(--text-2);
   font-size: 13px;
   font-weight: 600;
@@ -444,6 +446,22 @@
   align-items: center;
 }
 
+.pe-options--multi .pe-options__head,
+.pe-options--multi .pe-option {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) 110px 72px 32px;
+}
+
+.pe-option__exclusive {
+  display: flex;
+  justify-content: center;
+}
+
+.pe-option__exclusive input {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
 .pe-options__head span {
   color: var(--text-2);
   font-size: 13px;
@@ -609,10 +627,6 @@
   font-weight: 600;
 }
 
-.pe-boxes__head .pe-muted {
-  max-width: 70ch;
-}
-
 .pe-mono-name {
   font-family: var(--font-mono);
   font-size: 13.5px;
@@ -658,10 +672,6 @@
 .pe-attrs__title {
   float: none;
   margin-bottom: 0;
-}
-
-.pe-attrs > .pe-muted {
-  margin-bottom: 4px;
 }
 
 .pe-attrs__head,
@@ -742,7 +752,8 @@
     display: none;
   }
 
-  .pe-option {
+  .pe-option,
+  .pe-options--multi .pe-option {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px;
   }
 
@@ -764,4 +775,20 @@
   .pe-chevron {
     transition: none;
   }
+}
+
+/* um rótulo com o (?) ao lado */
+.pe-label-row {
+  display: flex;
+  align-items: center;
+}
+
+.pe-options__foot {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.pe-label-row > .pe-attrs__title {
+  width: auto;
 }
