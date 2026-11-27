@@ -3,6 +3,7 @@ import { cancelZipUpload, getStorage, purgeTrash, type StorageSummary } from '..
 import { confirmDialog } from '../../services/confirm'
 import { notify } from '../../services/toast'
 import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
+import { FromImageFix } from './FromImageFix'
 import { SettingRow, SettingsGroup, SettingsHeader } from './SettingsUI'
 
 const size = (bytes: number) => {
@@ -137,6 +138,8 @@ export function SystemSection() {
       <SettingsGroup description="Imagens apagadas ficam aqui para uma versão poder trazer de volta." title="Lixeira">
         <SettingRow help={st.trash.count ? `${size(st.trash.bytes)} ocupados.` : 'Vazia.'} label={`${st.trash.count.toLocaleString('pt-BR')} imagem(ns)`} />
       </SettingsGroup>
+
+      <FromImageFix />
 
       <SettingsGroup tone="danger" title="Zona de perigo">
         <SettingRow help="Apaga de vez. Uma versão antiga não vai mais conseguir trazer essas imagens de volta." htmlFor="purge-days" label="Esvaziar a lixeira">

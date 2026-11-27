@@ -17,6 +17,9 @@ export type ProfileField = {
   help?: string
   default?: unknown // o valor que a tela já traz numa imagem sem rascunho
   repeat?: boolean // a próxima imagem pendente do pacote vem com o valor da última salva
+  // o valor vem do arquivo, não de quem anota: "size" = "<largura>x<altura>"
+  // (a resolução). O servidor mede ao subir e ao salvar; na tela é só leitura.
+  from_image?: 'size'
   options?: ProfileOption[] // choice, multi
   pattern?: string // text: o valor inteiro
   max_len?: number

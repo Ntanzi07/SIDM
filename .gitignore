@@ -26,3 +26,5 @@ frontend/dist/
 Thumbs.db
 
 backend/backup-antes-perfis/
+# backup antes de corrigir a resolução pelo arquivo (2026-11-27)
+backup-resolucao/

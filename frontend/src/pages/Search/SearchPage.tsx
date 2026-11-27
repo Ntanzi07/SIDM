@@ -19,7 +19,8 @@ import {
 import type { AnnotationProfile } from '../../types/annotation'
 import { fieldLabel } from '../../utils/annotationForm'
 import { facetsOf, fmt, valuesOf } from '../../utils/stats'
-import { CountCard, LabelCard } from '../../components/Stats/StatsCards'
+import { BarCard, KpiStrip, LabelPanel } from '../../components/Stats/StatsCards'
+import { Bone, Skeleton } from '../../components/Skeleton/Skeleton'
 import '../Packages/Packages.css'
 import { useToastState } from '../../hooks/useToast'
 import './Search.css'
@@ -120,6 +121,40 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
 
   const activeFilters = Object.keys(filters).length
 
+  // os destaques: mudam com os filtros; null = ainda contando
+  const where = version ? (version.number === 0 ? 'agora' : `na v${version.number}`) : 'agora'
+  const filtered = activeFilters + chosenPackages.length > 0
+  const objectCount = stats ? Object.values(stats.objects).reduce((sum, item) => sum + item.count, 0) : null
+  const boxCount = labels ? labels.tasks.reduce((sum, task) => sum + task.boxes, 0) : null
+  const packageCount = stats ? Object.values(stats.packages).filter((n) => n > 0).length : null
+  const objectNames = profile ? profile.objects.filter((type) => !type.box).map((type) => fieldLabel(type)).join(', ') : ''
+  const imageFacets = facets.filter((facet) => !facet.objectType)
+  const objectTypes = profile ? profile.objects.filter((type) => !type.box && stats?.objects[type.key]) : []
+
+  // as linhas de um campo (os valores do perfil e os guardados que ele não tem mais)
+  function facetCard(facet: (typeof facets)[number]) {
+    if (!stats) return null
+    const counts: Counts | undefined = facet.objectType ? stats.objects[facet.objectType]?.fields[facet.field.key] : stats.fields[facet.field.key]
+    const missing = facet.objectType ? stats.objects[facet.objectType]?.missing[facet.field.key] ?? 0 : stats.missing[facet.field.key] ?? 0
+    const of = facet.objectType ? stats.objects[facet.objectType]?.count ?? 0 : stats.total
+    const known = valuesOf(facet.field)
+    const extra = Object.keys(counts ?? {}).filter((value) => !known.some((item) => item.value === value))
+    const rows = [...known, ...extra.map((value) => ({ value, label: value }))].map((item) => ({ ...item, count: counts?.[item.value] ?? 0 }))
+    return (
+      <BarCard
+        active={filters[facet.key]}
+        key={facet.key}
+        missing={missing}
+        note={facet.field.type === 'multi' ? 'Uma imagem pode ter vários valores: a soma passa do total.' : undefined}
+        of={of}
+        onPick={(value) => setFilter(facet.key, filters[facet.key] === value ? '' : value)}
+        rows={rows}
+        title={facet.objectType ? fieldLabel(facet.field) : facet.title}
+        unit={facet.objectType ? 'objetos' : 'imagens'}
+      />
+    )
+  }
+
   return (
     <div className="search-body">
       {profile && saving && (
@@ -135,16 +170,16 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
         />
       )}
 
-      {/* Sem cartão de busca: os filtros vêm de clicar nos gráficos (a rosca,
-          as barras), e aparecem aqui como etiquetas para tirar. */}
+      {/* Sem cartão de busca: os filtros vêm de clicar nas barras e aparecem
+          aqui como etiquetas para tirar. */}
       <div className="search-filterbar">
-        <span className="eyebrow">Filtros</span>
+        <span className="search-filterbar__title">Filtros</span>
         {chosenPackages.map((name) => (
           <button className="search-filterbar__chip" key={`pkg-${name}`} onClick={() => setChosenPackages([])} title="Tirar o filtro" type="button">
             Pacote: <strong>{name}</strong> <span aria-hidden="true">✕</span>
           </button>
         ))}
-        {activeFilters === 0 && chosenPackages.length === 0 && <span className="search-filterbar__hint">nenhum · clique num valor dos gráficos para filtrar</span>}
+        {!filtered && <span className="search-filterbar__hint">nenhum: clique num valor das barras para filtrar</span>}
         {Object.entries(filters).map(([key, value]) => {
           const facet = facets.find((item) => item.key === key)
           const label = facet ? valuesOf(facet.field).find((item) => item.value === value)?.label ?? value : value
@@ -166,66 +201,64 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
 
       {!profile && profiles.length > 0 && <p className="profile-name-hint">O perfil {profileName} não existe.</p>}
 
+      {!stats && !(profiles.length > 0 && !profile) && <DashboardSkeleton />}
+
       {profile && stats && (
-        <div className={loading ? 'search-results search-results--loading' : 'search-results'}>
+        <div aria-busy={loading || undefined} className={loading ? 'search-results search-results--loading' : 'search-results'}>
+          {loading && <span aria-hidden="true" className="search-results__progress" />}
+
+          <KpiStrip
+            items={[
+              { label: 'Imagens verificadas', value: stats.total, note: filtered ? `com os filtros, ${where}` : where },
+              { label: 'Objetos', value: objectCount, note: objectNames ? `${objectNames}` : 'sem tipos de lista' },
+              { label: 'Caixas', value: boxCount, note: labels ? `em ${labels.tasks.length} ${labels.tasks.length === 1 ? 'tarefa' : 'tarefas'}` : 'contando…' },
+              { label: 'Pacotes', value: packageCount, note: 'com imagens nesta pesquisa' },
+            ]}
+          />
 
           {labels && labels.tasks.length > 0 && (
-            <>
-              <h2 className="search-section">Caixas por label</h2>
-              <div className="search-grid">
-                {labels.tasks.map((task) => <LabelCard key={task.task} searchImages={labels.images} task={task} />)}
+            <section aria-labelledby="dash-labels" className="dash-section">
+              <div className="dash-section__head">
+                <h2 id="dash-labels">Caixas por label</h2>
+                <p>Da label com mais caixas para a com menos; a cor é a das caixas na anotação.</p>
               </div>
-              <h2 className="search-section">Campos da anotação</h2>
-            </>
+              <div className="label-panels">
+                {labels.tasks.map((task) => <LabelPanel key={task.task} searchImages={labels.images} task={task} />)}
+              </div>
+            </section>
           )}
-          <div className="search-grid">
-            <CountCard
-              headline={{
-                value: stats.total,
-                caption: `imagem(ns) verificada(s)${activeFilters + chosenPackages.length > 0 ? ' com os filtros' : ''}${version ? (version.number === 0 ? ' agora' : ` na v${version.number}`) : ''}`,
-              }}
-              active={chosenPackages[0]}
-              onPick={(name) => setChosenPackages((current) => (current[0] === name ? [] : [name]))}
-              rows={Object.keys(stats.packages).sort().map((name) => ({ value: name, label: name, count: stats.packages[name] }))}
-              of={stats.total}
-              title="Imagens por pacote"
-            />
-            {Object.entries(stats.objects).map(([type, item]) => (
-              <div className="search-card" key={type}>
-                <h2>{fieldLabel(profile.objects.find((object) => object.key === type) ?? { key: type })}</h2>
-                <p className="search-card__big">{fmt(item.count)} <span>objeto(s) em {fmt(item.images)} imagem(ns)</span></p>
-              </div>
-            ))}
-            {facets.map((facet) => {
-              const counts: Counts | undefined = facet.objectType
-                ? stats.objects[facet.objectType]?.fields[facet.field.key]
-                : stats.fields[facet.field.key]
-              const missing = facet.objectType
-                ? stats.objects[facet.objectType]?.missing[facet.field.key] ?? 0
-                : stats.missing[facet.field.key] ?? 0
-              const of = facet.objectType ? stats.objects[facet.objectType]?.count ?? 0 : stats.total
-              const known = valuesOf(facet.field)
-              // valores guardados que o perfil não tem mais também aparecem
-              const extra = Object.keys(counts ?? {}).filter((value) => !known.some((item) => item.value === value))
-              const rows = [...known, ...extra.map((value) => ({ value, label: value }))]
-                .map((item) => ({ ...item, count: counts?.[item.value] ?? 0 }))
-              return (
-                <CountCard
-                  active={filters[facet.key]}
-                  donut={facet.field.type !== 'multi'}
-                  key={facet.key}
-                  missing={missing}
-                  note={facet.field.type === 'multi' ? 'Uma imagem pode ter vários valores: a soma passa do total.' : facet.objectType ? 'Conta objetos.' : undefined}
-                  of={of}
-                  onPick={(value) => setFilter(facet.key, filters[facet.key] === value ? '' : value)}
-                  rows={rows}
-                  title={facet.title}
-                  unit={facet.objectType ? 'objetos' : 'imagens'}
-                />
-              )
-            })}
-          </div>
 
+          <section aria-labelledby="dash-image" className="dash-section">
+            <div className="dash-section__head">
+              <h2 id="dash-image">Na imagem</h2>
+              <p><strong>{fmt(stats.total)}</strong> {stats.total === 1 ? 'imagem verificada' : 'imagens verificadas'}</p>
+            </div>
+            <div className="dash-grid">
+              <BarCard
+                active={chosenPackages[0]}
+                of={stats.total}
+                onPick={(name) => setChosenPackages((current) => (current[0] === name ? [] : [name]))}
+                rows={Object.keys(stats.packages).map((name) => ({ value: name, label: name, count: stats.packages[name] }))}
+                title="Pacote"
+              />
+              {imageFacets.map(facetCard)}
+            </div>
+          </section>
+
+          {objectTypes.map((type) => {
+            const item = stats.objects[type.key]
+            return (
+              <section aria-labelledby={`dash-obj-${type.key}`} className="dash-section" key={type.key}>
+                <div className="dash-section__head">
+                  <h2 id={`dash-obj-${type.key}`}>{fieldLabel(type)}</h2>
+                  <p><strong>{fmt(item.count)}</strong> {item.count === 1 ? 'objeto' : 'objetos'} em <strong>{fmt(item.images)}</strong> {item.images === 1 ? 'imagem' : 'imagens'}</p>
+                </div>
+                <div className="dash-grid">
+                  {facets.filter((facet) => facet.objectType === type.key).map(facetCard)}
+                </div>
+              </section>
+            )
+          })}
 
           {!version && <ImageList
             key={requestKey}
@@ -237,6 +270,46 @@ export function SearchPage({ profileName, version }: { profileName: string; vers
         </div>
       )}
     </div>
+  )
+}
+
+// A silhueta enquanto conta: os destaques, dois painéis de labels e os campos.
+function DashboardSkeleton() {
+  return (
+    <Skeleton label="Contando as imagens">
+      <div className="search-results">
+        <div className="kpi-strip">
+          {[0, 1, 2, 3].map((i) => (
+            <div className="kpi" key={i}><Bone h={12} w={[120, 70, 64, 76][i]} /><Bone h={38} r={8} w={[90, 70, 84, 40][i]} /><Bone h={11} w={110} /></div>
+          ))}
+        </div>
+        <div className="dash-section">
+          <Bone h={20} w={190} />
+          <div className="label-panels">
+            {[0, 1].map((p) => (
+              <div className="label-panel" key={p}>
+                <Bone h={15} w={140} />
+                <Bone h={12} w={220} />
+                {[0, 1, 2].map((i) => (
+                  <div className="sk-title" key={i}><Bone h={14} w={[110, 80, 130][i]} /><Bone h={6} r={999} w={['92%', '60%', '34%'][i]} /><Bone h={11} w={130} /></div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="dash-section">
+          <Bone h={20} w={120} />
+          <div className="dash-grid">
+            {[0, 1, 2].map((c) => (
+              <div className="bar-card" key={c}>
+                <Bone h={15} w={[110, 90, 130][c]} />
+                {[0, 1, 2, 3].map((i) => <Bone h={12} key={i} w={['88%', '70%', '52%', '40%'][i]} />)}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </Skeleton>
   )
 }
 

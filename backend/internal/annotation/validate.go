@@ -99,6 +99,9 @@ func (p *Profile) Validate() error {
 			if f.Repeat {
 				ps.add(fmt.Sprintf("%s.fields[%d].repeat", path, j), "repeat só vale nos campos da imagem")
 			}
+			if f.FromImage != "" {
+				ps.add(fmt.Sprintf("%s.fields[%d].from_image", path, j), "from_image só vale nos campos da imagem")
+			}
 		}
 	}
 	if len(ps) > 0 {
@@ -142,6 +145,15 @@ func validFields(ps *problems, base string, fs []Field) {
 		}
 		if f.Type != TypeRef && f.Ref != "" {
 			ps.add(path+".ref", "ref só vale para o tipo ref")
+		}
+		switch {
+		case f.FromImage == "":
+		case f.FromImage != FromImageSize:
+			ps.add(path+".from_image", "use %q (largura x altura da imagem)", FromImageSize)
+		case f.Type != TypeChoice && f.Type != TypeText:
+			ps.add(path+".from_image", "o tamanho da imagem só preenche campos de lista ou texto")
+		case f.Repeat || f.Default != nil:
+			ps.add(path+".from_image", "um campo que vem da imagem não repete nem tem valor inicial")
 		}
 
 		if f.Default != nil && f.Type != TypeRef {

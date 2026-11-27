@@ -245,3 +245,14 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* um campo que vem do arquivo da imagem: na lista, mas sem coluna para ligar */
+.im-row__name {
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.im-row--fixed .im-row__source {
+  padding-top: 8px;
+}

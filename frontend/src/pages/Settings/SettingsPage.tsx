@@ -562,6 +562,16 @@ export function SettingsPage() {
   // colunas numeradas, o nome é digitado (com {n}). Data e hora mapeada
   // abre embaixo o formato.
   function renderTarget(field: ProfileField, path: string, value: string, onChange: (column: string) => void, original: FieldRule | undefined, typed: boolean) {
+    // vem do arquivo (ex.: a resolução): o import não preenche, então não há o que ligar
+    if (field.from_image) {
+      return (
+        <li className="im-row im-row--fixed" key={path}>
+          <div className="im-row__field"><span className="im-row__name">{fieldLabel(field)}</span></div>
+          <span aria-hidden="true" className="im-row__arrow">←</span>
+          <div className="im-row__source"><small className="im-sample">Medido do arquivo de cada imagem (largura × altura); o import não muda.</small></div>
+        </li>
+      )
+    }
     const sample = sampleOf(value)
     const id = `im-${path.replace(/[^a-z0-9]+/gi, '-')}`
     return (

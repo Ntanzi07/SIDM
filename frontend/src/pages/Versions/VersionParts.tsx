@@ -127,7 +127,7 @@ export function VersionPanel({ dataset, version, versions, profile, tab, onTab, 
     <div className="version-panel">
       <div className="version-panel__head">
         <div>
-          <span className="eyebrow">{dataset} · {now ? 'agora, não salvo' : `versão ${version.number}`}</span>
+          <span className="version-panel__kicker">{dataset}, {now ? 'agora (não salvo)' : `versão ${version.number}`}</span>
           <h2>{now ? 'Estado atual' : version.message}</h2>
           <p className="versions-hint">
             {now

@@ -1271,3 +1271,36 @@
     display: none;
   }
 }
+
+/* a manutenção (FromImageFix.tsx): os exemplos do ensaio e os botões */
+.fix-row {
+  display: grid;
+  gap: 10px;
+}
+
+.fix-row__examples {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  list-style: none;
+}
+
+.fix-row__more {
+  color: var(--text-3);
+  font-family: var(--font);
+}
+
+.fix-row__error {
+  color: var(--danger);
+}
+
+.fix-row__actions {
+  display: flex;
+  gap: 8px;
+}

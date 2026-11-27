@@ -915,3 +915,11 @@ p.diff-detail {
   color: var(--text-3);
   cursor: pointer;
 }
+
+/* de onde vêm os dados do painel (o dataset e a versão), em texto normal */
+.version-panel__kicker {
+  display: block;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}

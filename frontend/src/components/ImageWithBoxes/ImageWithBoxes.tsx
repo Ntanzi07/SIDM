@@ -1,5 +1,5 @@
 import { imageFileUrl, type BoxSet } from '../../services/api'
-import { colorOf, type BoxRef } from '../../utils/boxes'
+import { colorOf, inkOn, type BoxRef } from '../../utils/boxes'
 import { useTaskColors } from '../../utils/taskColors'
 import './ImageWithBoxes.css'
 
@@ -48,7 +48,7 @@ export function ImageWithBoxes({ sha1, alt, sets, show, selected, onSelect, pend
             }}
             title={[sets.length > 1 ? `${set.task}: ${box.label}` : box.label, box.occluded ? 'oculta' : '', isPending ? 'atributo obrigatório faltando' : '', ...Object.entries(box.attributes ?? {}).map(([k, v]) => `${k}: ${String(v)}`)].filter(Boolean).join(' · ')}
           >
-            <span style={{ background: colorOf(box.label, set.task) }}>{box.label}{isPending ? ' !' : ''}</span>
+            <span style={{ background: colorOf(box.label, set.task), color: inkOn(colorOf(box.label, set.task)) }}>{box.label}{isPending ? ' !' : ''}</span>
           </div>
         )
       })}

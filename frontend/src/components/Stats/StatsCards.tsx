@@ -1,193 +1,175 @@
 import { useState } from 'react'
+import type { ReactNode } from 'react'
 import type { LabelStats } from '../../services/api'
-import { Donut } from '../Charts/Donut'
-import { MISSING_COLOR, PALETTE } from '../Charts/palette'
+import { colorOf } from '../../utils/boxes'
+import { useTaskColors } from '../../utils/taskColors'
 import { fmt, pct } from '../../utils/stats'
-import '../../pages/Search/Search.css'
+import './Stats.css'
 
-// Os cartões de contagem da Pesquisa (e do resumo de uma versão).
+// As peças dos números do Dashboard (a pesquisa de agora e o resumo de uma
+// versão): os números de destaque, as caixas por label e os campos em barras.
 
 export type TaskLabels = LabelStats['tasks'][number]
 
-// Uma tarefa do CVAT: para cada label, em quantas imagens ela aparece e qual
-// parte de todas as caixas da tarefa é dela.
-export function LabelCard({ task, searchImages }: { task: TaskLabels; searchImages: number }) {
-  const names = Object.keys(task.labels).sort()
+// ---------------------------------------------------------------- destaques
+
+export type Kpi = { label: string; value: number | null; note?: ReactNode }
+
+// Os números de destaque no topo (no máximo quatro). null = ainda contando.
+export function KpiStrip({ items }: { items: Kpi[] }) {
   return (
-    <div className="search-card">
-      <h2>Tarefa {task.task}</h2>
-      <p className="profile-name-hint">
-        {fmt(task.images)} de {fmt(searchImages)} imagens da pesquisa foram anotadas nesta tarefa ({fmt(task.boxes)} caixas). Por label: em quantas dessas imagens ela aparece, e quanto das caixas é dela.
-      </p>
-      <ul className="search-labels">
-        {names.map((name) => {
+    <dl className="kpi-strip">
+      {items.map((item) => (
+        <div className="kpi" key={item.label}>
+          <dt>{item.label}</dt>
+          <dd>
+            <strong>{item.value === null ? '…' : fmt(item.value)}</strong>
+            {item.note && <span>{item.note}</span>}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+// ---------------------------------------------------------------- caixas por label
+
+// Uma tarefa: as labels da que tem mais caixas para a que tem menos, cada uma
+// na cor que tem nas caixas da anotação. As sem caixas ficam recolhidas.
+export function LabelPanel({ task, searchImages }: { task: TaskLabels; searchImages: number }) {
+  useTaskColors() // redesenha quando as cores escolhidas em Tarefas chegam
+  const [showEmpty, setShowEmpty] = useState(false)
+  const names = Object.keys(task.labels)
+  const used = names.filter((name) => task.labels[name].boxes > 0).sort((a, b) => task.labels[b].boxes - task.labels[a].boxes)
+  const empty = names.filter((name) => task.labels[name].boxes === 0).sort()
+  const top = used.length ? task.labels[used[0]].boxes : 0
+  const shown = showEmpty ? [...used, ...empty] : used
+
+  return (
+    <section aria-labelledby={`lp-${task.task}`} className="label-panel">
+      <header className="label-panel__head">
+        <h3 id={`lp-${task.task}`}>{task.task}</h3>
+        <p>
+          <strong>{fmt(task.boxes)}</strong> caixas em <strong>{fmt(task.images)}</strong> de {fmt(searchImages)} imagens
+        </p>
+      </header>
+      {task.boxes === 0 && <p className="label-panel__none">Nenhuma imagem desta pesquisa tem caixa nesta tarefa.</p>}
+      <ul className="label-rows">
+        {shown.map((name) => {
           const item = task.labels[name]
+          const color = colorOf(name, task.task)
           return (
-            <li key={name}>
-              <strong>{name}</strong>
-              <div className="search-labels__line">
-                <span>Em {fmt(item.images)} de {fmt(task.images)} imagens</span>
-                <span className="search-bar__track"><span className="search-bar__fill" style={{ width: pct(item.images, task.images) }} /></span>
-                <small>{pct(item.images, task.images)}</small>
-              </div>
-              <div className="search-labels__line">
-                <span>{fmt(item.boxes)} de {fmt(task.boxes)} caixas da tarefa</span>
-                <span className="search-bar__track"><span className="search-bar__fill search-bar__fill--boxes" style={{ width: pct(item.boxes, task.boxes) }} /></span>
-                <small>{pct(item.boxes, task.boxes)}</small>
-              </div>
+            <li className={item.boxes === 0 ? 'label-row label-row--empty' : 'label-row'} key={name}>
+              <span className="label-row__name">
+                <i aria-hidden="true" style={{ background: color }} />
+                {name}
+              </span>
+              <span className="label-row__boxes">{fmt(item.boxes)}</span>
+              {/* a barra é relativa à label com mais caixas: a maior enche */}
+              <span aria-hidden="true" className="label-row__track">
+                <span style={{ width: top ? `${(item.boxes / top) * 100}%` : '0%', background: color }} />
+              </span>
+              <span className="label-row__images">
+                em {fmt(item.images)} {item.images === 1 ? 'imagem' : 'imagens'} <small>{pct(item.images, task.images)}</small>
+              </span>
             </li>
           )
         })}
       </ul>
-    </div>
+      {empty.length > 0 && (
+        <button className="stats-more" onClick={() => setShowEmpty(!showEmpty)} type="button">
+          {showEmpty ? 'Esconder as labels sem caixas' : `+${empty.length} ${empty.length === 1 ? 'label sem caixas' : 'labels sem caixas'}`}
+        </button>
+      )}
+    </section>
   )
 }
 
-// Uma escolha de vários: "Todos" ou os itens marcados.
-export function Chips({ title, items, chosen, all, allLabel, empty, onAll, onToggle }: {
+// ---------------------------------------------------------------- campos em barras
+
+type Row = { value: string; label: string; count: number }
+
+// Um campo: os valores da maior contagem para a menor (só os que aparecem; os
+// zerados ficam recolhidos), o "Não informado" apagado no fim. Com um valor
+// só, vira um cartão compacto. Clicar num valor filtra a pesquisa por ele.
+export function BarCard({ title, rows, of, missing = 0, note, active, onPick, unit = 'imagens' }: {
   title: string
-  items: string[]
-  chosen: string[]
-  all: boolean
-  allLabel: string
-  empty: string
-  onAll: () => void
-  onToggle: (item: string) => void
+  rows: Row[]
+  of: number // o total do cartão (a % é dele)
+  missing?: number
+  note?: string
+  active?: string
+  onPick?: (value: string) => void
+  unit?: string
 }) {
+  const [showAll, setShowAll] = useState(false)
+  const used = rows.filter((row) => row.count > 0).sort((a, b) => b.count - a.count)
+  const zero = rows.filter((row) => row.count === 0)
+  const top = Math.max(...used.map((row) => row.count), missing, 1)
+
+  // um valor só e nada faltando: a resposta cabe numa linha
+  if (used.length === 1 && missing === 0 && !active) {
+    const only = used[0]
+    return (
+      <div className="bar-card bar-card--single">
+        <h3>{title}</h3>
+        <p className="bar-card__single">
+          <Pick active={active} onPick={onPick} row={only}><strong>{only.label}</strong></Pick>
+          <span>em todas as {fmt(only.count)} {unit}</span>
+        </p>
+        {zero.length > 0 && <p className="bar-card__note">{zero.length === 1 ? 'A outra opção não aparece.' : `Nenhuma das outras ${zero.length} opções aparece.`}</p>}
+      </div>
+    )
+  }
+
+  const shown = showAll ? [...used, ...zero] : used
   return (
-    <div className="search-chips">
-      <span>{title}</span>
-      {items.length === 0 ? (
-        <p className="profile-name-hint">{empty}</p>
-      ) : (
-        <div className="search-chips__list">
-          <button className={all ? 'search-chip search-chip--on' : 'search-chip'} onClick={onAll} type="button">{allLabel}</button>
-          {items.map((item) => (
-            <button
-              className={!all && chosen.includes(item) ? 'search-chip search-chip--on' : 'search-chip'}
-              key={item}
-              onClick={() => onToggle(item)}
-              type="button"
-            >
-              {item}
-            </button>
-          ))}
-        </div>
+    <div className="bar-card">
+      <h3>{title}</h3>
+      {note && <p className="bar-card__note">{note}</p>}
+      {used.length === 0 && missing === 0 && <p className="bar-card__note">Nenhum{unit === 'imagens' ? 'a imagem' : ' objeto'} com valor neste campo.</p>}
+      <ul className="bars">
+        {shown.map((row) => (
+          <li key={row.value}>
+            <Pick active={active} onPick={onPick} row={row}>
+              <span className="bars__label">{row.label}</span>
+              <span aria-hidden="true" className="bars__track"><span style={{ width: `${(row.count / top) * 100}%` }} /></span>
+              <span className="bars__count">{fmt(row.count)} <small>{pct(row.count, of)}</small></span>
+            </Pick>
+          </li>
+        ))}
+        {missing > 0 && (
+          <li>
+            <div className="bars__row bars__row--missing">
+              <span className="bars__label">Não informado</span>
+              <span aria-hidden="true" className="bars__track"><span style={{ width: `${(missing / top) * 100}%` }} /></span>
+              <span className="bars__count">{fmt(missing)} <small>{pct(missing, of)}</small></span>
+            </div>
+          </li>
+        )}
+      </ul>
+      {zero.length > 0 && (
+        <button className="stats-more" onClick={() => setShowAll(!showAll)} type="button">
+          {showAll ? 'Esconder as sem ' + unit : `+${zero.length} sem ${unit}`}
+        </button>
       )}
     </div>
   )
 }
 
-// Um cartão de contagens: uma barra por valor (a % é do total do cartão) e o
-// "Não informado" no fim.
-export function CountCard({ title, rows, of, missing, note, active, onPick, donut = false, unit = 'imagens', headline }: {
-  title: string
-  rows: Array<{ value: string; label: string; count: number }>
-  of: number
-  missing?: number
-  note?: string
-  active?: string
-  onPick?: (value: string) => void
-  // em rosca (com a legenda ao lado). Só para valores que se excluem (cada
-  // imagem conta uma vez): numa lista de vários, a soma passa do total.
-  donut?: boolean
-  unit?: string // o que se conta (o meio da rosca): imagens, objetos
-  headline?: { value: number; caption: string } // o número grande em cima das barras
-}) {
-  const all = missing !== undefined ? [...rows, { value: '', label: 'Não informado', count: missing }] : rows
-  if (donut && all.length > 0 && all.length <= 9) {
-    return <DonutCard active={active} all={all} note={note} of={of} onPick={onPick} title={title} unit={unit} />
-  }
+// Uma linha que filtra ao clicar (ou só texto, sem onPick).
+function Pick({ row, active, onPick, children }: { row: Row; active?: string; onPick?: (value: string) => void; children: ReactNode }) {
+  const on = active === row.value
+  if (!onPick) return <div className="bars__row">{children}</div>
   return (
-    <div className="search-card">
-      <h2>{title}</h2>
-      {headline && <p className="search-card__headline"><strong>{fmt(headline.value)}</strong> <span>{headline.caption}</span></p>}
-      {note && <p className="profile-name-hint">{note}</p>}
-      {rows.length === 0 && missing === undefined && <p className="profile-name-hint">Nenhuma imagem.</p>}
-      <ul className="search-bars">
-        {all.map((row) => {
-          const clickable = Boolean(onPick && row.value)
-          const className = [
-            'search-bar',
-            clickable ? 'search-bar--clickable' : '',
-            active && row.value === active ? 'search-bar--active' : '',
-            row.value === '' ? 'search-bar--missing' : '',
-          ].filter(Boolean).join(' ')
-          const content = (
-            <>
-              <span className="search-bar__label">{row.label}</span>
-              <span className="search-bar__track"><span className="search-bar__fill" style={{ width: pct(row.count, of) }} /></span>
-              <span className="search-bar__count">{fmt(row.count)} <small>{pct(row.count, of)}</small></span>
-            </>
-          )
-          return (
-            <li key={row.value || '__missing'}>
-              {clickable ? (
-                <button className={className} onClick={() => onPick?.(row.value)} title={active === row.value ? 'Tirar o filtro' : 'Filtrar por este valor'} type="button">
-                  {content}
-                </button>
-              ) : (
-                <div className={className}>{content}</div>
-              )}
-            </li>
-          )
-        })}
-      </ul>
-    </div>
-  )
-}
-
-function DonutCard({ title, all, of, note, active, onPick, unit }: {
-  title: string
-  unit: string
-  all: Array<{ value: string; label: string; count: number }>
-  of: number
-  note?: string
-  active?: string
-  onPick?: (value: string) => void
-}) {
-  const [hovered, setHovered] = useState<string | undefined>()
-  const segments = all.map((row, i) => ({
-    key: row.value || '__missing',
-    label: row.label,
-    count: row.count,
-    color: row.value === '' ? MISSING_COLOR : PALETTE[i % PALETTE.length],
-  }))
-  const pick = (key: string) => { if (onPick && key !== '__missing') onPick(key) }
-  return (
-    <div className="search-card">
-      <h2>{title}</h2>
-      {note && <p className="profile-name-hint">{note}</p>}
-      <div className="donut-card">
-        <Donut centerLabel={unit} hovered={hovered} onHover={setHovered} onPick={onPick ? pick : undefined} segments={segments} total={of} />
-        <ul className="donut-legend">
-          {segments.map((item) => {
-            const className = [
-              'donut-legend__row',
-              hovered === item.key ? 'donut-legend__row--on' : '',
-              hovered && hovered !== item.key ? 'donut-legend__row--dim' : '',
-              active && item.key === active ? 'donut-legend__row--active' : '',
-            ].filter(Boolean).join(' ')
-            const content = (
-              <>
-                <i style={{ background: item.color }} />
-                <span>{item.label}</span>
-                <strong>{fmt(item.count)}</strong>
-                <small>{pct(item.count, of)}</small>
-              </>
-            )
-            return (
-              <li key={item.key} onMouseEnter={() => setHovered(item.key)} onMouseLeave={() => setHovered(undefined)}>
-                {onPick && item.key !== '__missing' ? (
-                  <button className={className} onClick={() => pick(item.key)} title={active === item.key ? 'Tirar o filtro' : 'Filtrar por este valor'} type="button">{content}</button>
-                ) : (
-                  <div className={className}>{content}</div>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      </div>
-    </div>
+    <button
+      aria-pressed={on}
+      className={on ? 'bars__row bars__row--pick bars__row--on' : 'bars__row bars__row--pick'}
+      onClick={() => onPick(row.value)}
+      title={on ? 'Tirar o filtro' : 'Filtrar por este valor'}
+      type="button"
+    >
+      {children}
+    </button>
   )
 }
