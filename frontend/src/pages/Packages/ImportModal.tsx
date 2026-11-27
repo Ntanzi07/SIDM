@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { createPortal } from 'react-dom'
-import { applyIniProfile, importPackageCsv, type ImportProfile, type ImportReport } from '../../services/api'
+import { runImport, type ImportProfile, type ImportReport, type ImportStep } from '../../services/api'
+import { ImportProgress } from './ImportProgress'
 import { ImportWarnings } from './ImportWarnings'
 import { forPackage, optionLabel } from '../../utils/importProfiles'
 import { useToastState } from '../../hooks/useToast'
@@ -27,6 +28,10 @@ export function ImportModal({ packageName, packageProfile, source: initialSource
   const [report, setReport] = useState<ImportReport | null>(null)
   const [, setError] = useToastState('error')
   const [busy, setBusy] = useState<'testing' | 'applying' | ''>('')
+  // o andamento (o servidor manda as etapas) e quando começou
+  const [step, setStep] = useState<ImportStep | null>(null)
+  const [startedAt, setStartedAt] = useState(0)
+  const abort = useRef<AbortController | null>(null)
 
   const options = forPackage(source === 'csv' ? csvProfiles : iniProfiles, packageProfile)
   const ready = profile !== '' && (source === 'ini' || file !== null)
@@ -40,16 +45,21 @@ export function ImportModal({ packageName, packageProfile, source: initialSource
     if (!ready) return
     setBusy(dryRun ? 'testing' : 'applying')
     setError('')
+    setStep(null)
+    setStartedAt(Date.now())
+    // só o ensaio pode parar (aplicar pela metade deixa parte gravada)
+    abort.current = dryRun ? new AbortController() : null
     try {
-      const result = source === 'ini'
-        ? await applyIniProfile(packageName, profile, dryRun, overwrite)
-        : await importPackageCsv(packageName, profile, file as File, dryRun, overwrite)
+      const result = await runImport(packageName, profile, source === 'csv' ? file : null, dryRun, overwrite, setStep, abort.current?.signal)
       if (dryRun) setReport(result)
       else onApplied()
     } catch (requestError: unknown) {
+      if (requestError instanceof DOMException && requestError.name === 'AbortError') return // parou o ensaio
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível importar.')
     } finally {
+      abort.current = null
       setBusy('')
+      setStep(null)
     }
   }
 
@@ -126,7 +136,9 @@ export function ImportModal({ packageName, packageProfile, source: initialSource
             </label>
 
 
-            {report && (
+            {busy !== '' && <ImportProgress dryRun={busy === 'testing'} source={source} startedAt={startedAt} step={step} stoppable />}
+
+            {report && busy === '' && (
               <div className="import-report">
                 <h2>Ensaio: nada foi alterado ainda</h2>
                 <div className="import-report__stats">
@@ -140,14 +152,16 @@ export function ImportModal({ packageName, packageProfile, source: initialSource
             )}
           </div>
           <div className="modal-actions">
-            <button className="button button--secondary" disabled={busy !== ''} onClick={close} type="button">Cancelar</button>
+            {busy === 'testing'
+              ? <button className="button button--secondary" onClick={() => abort.current?.abort()} type="button">Parar o ensaio</button>
+              : <button className="button button--secondary" disabled={busy !== ''} onClick={close} type="button">Cancelar</button>}
             {report ? (
-              <button className="button button--primary" disabled={busy !== ''} onClick={() => void run(false)} type="button">
-                {busy === 'applying' ? 'Aplicando...' : 'Aplicar importação'}
+              <button aria-busy={busy === 'applying' || undefined} className="button button--primary" disabled={busy !== ''} onClick={() => void run(false)} type="button">
+                {busy === 'applying' ? 'Aplicando…' : 'Aplicar importação'}
               </button>
             ) : (
-              <button className="button button--primary" disabled={busy !== '' || !ready} type="submit">
-                {busy === 'testing' ? 'Ensaiando...' : 'Ensaiar'}
+              <button aria-busy={busy === 'testing' || undefined} className="button button--primary" disabled={busy !== '' || !ready} type="submit">
+                {busy === 'testing' ? 'Ensaiando…' : 'Ensaiar'}
               </button>
             )}
           </div>

@@ -183,6 +183,7 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 	// perfil de import): o que ele não tem fica de fora e é listado.
 	p.Normalize()
 
+	run.step(PhaseReading, 0, 0)
 	var records []importer.Record
 	var byKey map[string][]images.Image
 	if p.Reader.Type == importer.ReaderJPEGINI {
@@ -202,7 +203,10 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 	type write struct{ before, after images.Image }
 	var writes []write
 
-	for _, rec := range records {
+	for i, rec := range records {
+		if i%progressEvery == 0 {
+			run.step(PhaseChecking, i, len(records))
+		}
 		found := byKey[rec.Key]
 		switch {
 		case len(found) == 0:
@@ -273,7 +277,10 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 		writes = append(writes, write{before: before, after: img})
 	}
 
+	run.step(PhaseChecking, len(records), len(records))
+
 	// 2ª passada: equipamentos e câmeras que ainda não existem.
+	run.step(PhaseRegistry, 0, 0)
 	// Ao aplicar, são criados ANTES das imagens, para que nenhuma imagem
 	// fique apontando para um cadastro que não existe.
 	if rep.NewEquipments, err = s.registerMissing(ctx, sortedSet(equipments), run.DryRun,
@@ -291,7 +298,10 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 	}
 
 	// 3ª passada: grava as imagens.
-	for _, wr := range writes {
+	for i, wr := range writes {
+		if i%progressEvery == 0 {
+			run.step(PhaseWriting, i, len(writes))
+		}
 		img := wr.after
 		img.UpdatedAt = now
 		if err := s.images.Replace(ctx, &img, wr.before.UpdatedAt); err != nil {
@@ -307,6 +317,7 @@ func (s *Service) Import(ctx context.Context, run Run, table *importer.Table) (*
 			platform.LogError(err)
 		}
 	}
+	run.step(PhaseWriting, len(writes), len(writes))
 	return rep, nil
 }
 

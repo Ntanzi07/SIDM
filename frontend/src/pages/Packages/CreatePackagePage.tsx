@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { ChangeEvent, FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createPackage, imageFiles, importPackageCsv, listAnnotationProfiles, listImportProfiles, listIniProfiles, sendZip, uploadImages, type ImportProfile, type ImportReport, type UploadProgress, type ZipUpload } from '../../services/api'
+import { createPackage, imageFiles, listAnnotationProfiles, listImportProfiles, listIniProfiles, runImport, sendZip, uploadImages, type ImportProfile, type ImportReport, type ImportStep, type UploadProgress, type ZipUpload } from '../../services/api'
+import { ImportProgress } from './ImportProgress'
 import { useFolderReading } from '../../hooks/useFolderReading'
 import type { AnnotationProfile } from '../../types/annotation'
 import { ImportWarnings } from './ImportWarnings'
@@ -32,6 +33,9 @@ export function CreatePackagePage() {
   const [upload, setUpload] = useState<UploadProgress | null>(null)
   const [createdPackageName, setCreatedPackageName] = useState('')
   const [importReport, setImportReport] = useState<ImportReport | null>(null)
+  // o andamento do ensaio/aplicar do CSV (o servidor manda as etapas)
+  const [importStep, setImportStep] = useState<ImportStep | null>(null)
+  const [importStartedAt, setImportStartedAt] = useState(0)
   const { reading: readingFolder, start: startReadingFolder, done: doneReadingFolder, inputRef: folderInputRef } = useFolderReading()
 
   useEffect(() => {
@@ -137,7 +141,9 @@ export function CreatePackagePage() {
       }
 
       setSaving('testing')
-      const report = await importPackageCsv(createdName, profileName, csvFile, true, overwrite)
+      setImportStep(null)
+      setImportStartedAt(Date.now())
+      const report = await runImport(createdName, profileName, csvFile, true, overwrite, setImportStep)
       setImportReport(report)
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível criar o pacote.')
@@ -150,8 +156,10 @@ export function CreatePackagePage() {
     if (!createdPackageName || !profileName || !csvFile) return
     setSaving('applying')
     setError('')
+    setImportStep(null)
+    setImportStartedAt(Date.now())
     try {
-      await importPackageCsv(createdPackageName, profileName, csvFile, false, overwrite)
+      await runImport(createdPackageName, profileName, csvFile, false, overwrite, setImportStep)
       navigate(`/pacotes/${encodeURIComponent(createdPackageName)}`)
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : 'Não foi possível aplicar a importação.')
@@ -300,7 +308,10 @@ export function CreatePackagePage() {
             </p>
           </div>
         )}
-        {importReport && (
+        {(saving === 'testing' || saving === 'applying') && (
+          <ImportProgress dryRun={saving === 'testing'} source="csv" startedAt={importStartedAt} step={importStep} />
+        )}
+        {importReport && saving !== 'applying' && (
           <div className="import-report">
             <h2>Ensaio da importação</h2>
             <div className="import-report__stats">
@@ -311,7 +322,7 @@ export function CreatePackagePage() {
             </div>
             <ImportWarnings report={importReport} />
             <button className="button button--primary" disabled={saving !== ''} onClick={() => void handleApplyImport()} type="button">
-              {saving === 'applying' ? 'Aplicando...' : 'Aplicar importação e abrir pacote'}
+              Aplicar importação e abrir pacote
             </button>
           </div>
         )}
@@ -322,7 +333,7 @@ export function CreatePackagePage() {
           <button className="button button--primary" disabled={saving !== '' || Boolean(importReport) || readingFolder} type="submit">
             {saving === 'creating' ? 'Criando...'
               : saving === 'uploading' ? 'Enviando imagens...'
-                : saving === 'testing' ? 'Ensaiando CSV...'
+                : saving === 'testing' ? 'Ensaiando CSV…'
                   : createdPackageName ? 'Tentar de novo' : 'Criar pacote'}
           </button>
         </div>

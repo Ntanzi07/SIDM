@@ -27,6 +27,12 @@ Atualizado em 2026-11-26. Branch de trabalho: `feat/perfil_anotacao` (já com a 
   `pages/Settings/SettingsUI.tsx` (cabeçalho, grupo, linha). Sistema: disco, lixeira
   (`POST /system/trash/purge`), envios parados (`GET /system/storage`).
 - Seta de voltar ao topo em todas as telas (`components/ScrollTop`).
+- **Import com andamento**: com `Accept: application/x-ndjson`, `POST /packages/{name}/import`
+  responde uma linha JSON por passo (fases lendo, conferindo, cadastros, gravando) e o
+  relatório no fim (`imports/progress.go`); sem o cabeçalho, igual a antes. O diálogo
+  "Importar anotações" mostra a etapa, a barra com "N de M" e o tempo (`ImportProgress.tsx`);
+  o ensaio pode parar. A criação do pacote mostra o mesmo painel no ensaio e no aplicar do
+  CSV. As duas telas usam `runImport` (o `importPackageCsv`/`applyIniProfile` saíram).
 - **Acessibilidade (WCAG 2.2 AA) zerada** com `npm run a11y` (axe + puppeteer, usa o Edge
   no Windows; login de admin em `frontend/a11y.env.local`, fora do git). Cores do tema
   ajustadas para ≥ 4,5:1 (`--text-3` nos dois temas; `--accent` e `--success` no claro).

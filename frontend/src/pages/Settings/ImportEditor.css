@@ -78,10 +78,11 @@
 
 /* ---------------------------------------------------------------- ligações */
 
+/* sem overflow: hidden (a lista de colunas do ColumnPicker abre por baixo e
+   era cortada no último campo); os cantos ficam com a primeira e a última linha */
 .im-map {
   margin: 0;
   padding: 0;
-  overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
   background: var(--surface);
@@ -94,6 +95,20 @@
   gap: 6px 14px;
   align-items: start;
   padding: 12px 16px 12px 18px;
+}
+
+.im-row:first-child {
+  border-radius: 11px 11px 0 0;
+}
+
+.im-row:last-child {
+  border-radius: 0 0 11px 11px;
+}
+
+/* a linha com a lista aberta fica por cima das de baixo */
+.im-row:focus-within {
+  position: relative;
+  z-index: 2;
 }
 
 .im-row + .im-row {

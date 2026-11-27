@@ -1350,6 +1350,12 @@ paths:
 
         Com um perfil do tipo `jpeg-ini`, **não mande arquivo**: o import usa o INI
         já guardado de cada imagem pendente do pacote.
+
+        **Andamento**: com `Accept: application/x-ndjson`, a resposta vem aos poucos,
+        uma linha JSON por vez: `{"progress": {"phase", "done", "total"}}` (fases
+        `lendo`, `conferindo`, `cadastros`, `gravando` — esta só ao aplicar) e, no
+        fim, `{"report": ImportReport}` ou `{"error": "..."}`. Os erros de antes de
+        começar (pacote, perfil, arquivo) continuam vindo como 400/404.
       parameters:
         - $ref: "#/components/parameters/PackageName"
         - $ref: "#/components/parameters/XUser"
@@ -1375,10 +1381,23 @@ paths:
                 file: { type: string, format: binary }
       responses:
         "200":
-          description: Relatório do import.
+          description: Relatório do import (ou, com Accept application/x-ndjson, o andamento linha a linha).
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ImportReport" }
+            application/x-ndjson:
+              schema:
+                type: object
+                description: Uma por linha. As do meio têm progress; a última, report ou error.
+                properties:
+                  progress:
+                    type: object
+                    properties:
+                      phase: { type: string, enum: [lendo, conferindo, cadastros, gravando] }
+                      done: { type: integer }
+                      total: { type: integer, description: "0 nas fases sem contagem." }
+                  report: { $ref: "#/components/schemas/ImportReport" }
+                  error: { type: string }
         "400": { $ref: "#/components/responses/BadRequest" }
         "404": { $ref: "#/components/responses/NotFound" }
         "413": { description: Arquivo maior que 20 MB. }

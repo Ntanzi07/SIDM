@@ -10,6 +10,10 @@ type ColumnPickerProps = {
   id?: string // para o <label htmlFor> de fora
 }
 
+// O espaço que a lista precisa embaixo do campo (a altura máxima dela, 240,
+// mais a barra de salvar presa no fim da tela); menos que isso, abre para cima.
+const LIST_ROOM = 320
+
 // Tira acento e caixa para a busca ("Data/Hora" acha "data").
 const normalize = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
 
@@ -21,6 +25,8 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não lig
   // text: o que está sendo digitado (null = não está editando, mostra o valor)
   const [text, setText] = useState<string | null>(null)
   const [active, setActive] = useState(0)
+  // sem espaço embaixo (fim da página, barra de salvar presa): abre para cima
+  const [up, setUp] = useState(false)
 
   const open = text !== null
   // Um valor salvo que estas imagens/este CSV não têm continua escolhível.
@@ -70,6 +76,9 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não lig
         onFocus={(event) => {
           setText('') // ao entrar, mostra todas
           setActive(0)
+          const box = event.target.getBoundingClientRect()
+          const below = window.innerHeight - box.bottom
+          setUp(below < LIST_ROOM && box.top > below)
           event.target.select()
         }}
         onKeyDown={handleKeyDown}
@@ -78,7 +87,7 @@ export function ColumnPicker({ value, columns, onChange, placeholder = 'Não lig
         value={text ?? value}
       />
       {open && (
-        <ul className="column-picker__list" id={list} role="listbox">
+        <ul className={up ? 'column-picker__list column-picker__list--up' : 'column-picker__list'} id={list} role="listbox">
           {options.map((column, i) => (
             <li
               aria-selected={column === value}

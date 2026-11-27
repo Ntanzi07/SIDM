@@ -229,6 +229,13 @@ func (s *Service) handleImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A tela pede o andamento: a resposta vem aos poucos, uma linha JSON por
+	// passo ({"progress": ...}) e, no fim, {"report": ...} ou {"error": ...}.
+	if strings.Contains(r.Header.Get("Accept"), ndjson) {
+		s.streamImport(w, r, run, table)
+		return
+	}
+
 	rep, err := s.Import(r.Context(), run, table)
 	var invalid *InvalidError
 	switch {

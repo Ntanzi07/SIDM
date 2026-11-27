@@ -657,43 +657,60 @@ export async function deleteImportProfile(name: string): Promise<void> {
   await request(`/import-profiles/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
-export async function importPackageCsv(
-  packageName: string,
-  profileName: string,
-  file: File,
-  dryRun: boolean,
-  overwrite: boolean,
-): Promise<ImportReport> {
-  const formData = new FormData()
-  formData.append('file', file, file.name)
-  const query = new URLSearchParams({
-    profile: profileName,
-    dry_run: String(dryRun),
-    overwrite: String(overwrite),
-  })
-  return request<ImportReport>(
-    `/packages/${encodeURIComponent(packageName)}/import?${query.toString()}`,
-    { method: 'POST', body: formData },
-  )
-}
+// O andamento do import (o servidor manda uma linha JSON por passo).
+export type ImportPhase = 'lendo' | 'conferindo' | 'cadastros' | 'gravando'
+export type ImportStep = { phase: ImportPhase; done: number; total: number }
 
-// Aplica um perfil de INI nas imagens PENDENTES do pacote, usando o INI que
-// já foi guardado no upload (sem arquivo). Mesmo ensaio/aplicação do CSV.
-export async function applyIniProfile(
+// Import (CSV ou INI) com andamento: o mesmo POST de importPackageCsv /
+// applyIniProfile, pedindo Accept: application/x-ndjson. onStep recebe cada
+// passo; a promessa termina com o relatório. signal para (só faz sentido no
+// ensaio: parar no meio de "aplicar" deixa parte gravada).
+export async function runImport(
   packageName: string,
   profileName: string,
+  file: File | null,
   dryRun: boolean,
   overwrite: boolean,
+  onStep: (step: ImportStep) => void,
+  signal?: AbortSignal,
 ): Promise<ImportReport> {
-  const query = new URLSearchParams({
-    profile: profileName,
-    dry_run: String(dryRun),
-    overwrite: String(overwrite),
+  const query = new URLSearchParams({ profile: profileName, dry_run: String(dryRun), overwrite: String(overwrite) })
+  let body: FormData | undefined
+  if (file) {
+    body = new FormData()
+    body.append('file', file, file.name)
+  }
+  const response = await fetch(`${API_BASE_URL}/packages/${encodeURIComponent(packageName)}/import?${query.toString()}`, {
+    method: 'POST',
+    body,
+    headers: { Accept: 'application/x-ndjson' },
+    signal,
   })
-  return request<ImportReport>(
-    `/packages/${encodeURIComponent(packageName)}/import?${query.toString()}`,
-    { method: 'POST' },
-  )
+  if (response.status === 401) setAccount(null)
+  if (!response.ok) {
+    const error = await response.json().catch(() => null) as { error?: string; problems?: Problem[] } | null
+    throw new RequestError(error?.error ?? `Não foi possível importar (${response.status}).`, error?.problems ?? [], response.status)
+  }
+  if (!response.body) throw new Error('O navegador não leu a resposta do import.')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  let buffered = ''
+  for (;;) {
+    const { done, value } = await reader.read()
+    buffered += decoder.decode(value, { stream: !done })
+    const lines = buffered.split('\n')
+    buffered = lines.pop() ?? ''
+    for (const line of lines) {
+      if (!line.trim()) continue
+      const message = JSON.parse(line) as { progress?: ImportStep; report?: ImportReport; error?: string }
+      if (message.progress) onStep(message.progress)
+      if (message.error) throw new RequestError(message.error, [], 0)
+      if (message.report) return message.report
+    }
+    if (done) break
+  }
+  throw new Error('A resposta do import parou antes do fim (a conexão caiu?). Confira o pacote antes de importar de novo.')
 }
 
 // ---------- caixas (bounding boxes) do CVAT ----------

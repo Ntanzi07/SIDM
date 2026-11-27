@@ -67,6 +67,30 @@ type Run struct {
 	User      string
 	DryRun    bool // só o relatório, nada é gravado
 	Overwrite bool // o valor do CSV substitui o do rascunho (senão, só preenche vazios)
+	// Progress, se não for nil, recebe o andamento (a tela mostra a barra).
+	Progress func(Step)
+}
+
+// Step é o andamento do import: a fase e, nas que têm, quantos de quantos.
+type Step struct {
+	Phase string `json:"phase"` // lendo, conferindo, cadastros, gravando
+	Done  int    `json:"done"`
+	Total int    `json:"total"`
+}
+
+// As fases do import, na ordem.
+const (
+	PhaseReading  = "lendo"      // o arquivo (ou o INI das imagens) e as imagens do pacote
+	PhaseChecking = "conferindo" // o que muda em cada imagem
+	PhaseRegistry = "cadastros"  // equipamentos e câmeras novos
+	PhaseWriting  = "gravando"   // os rascunhos (só ao aplicar)
+	progressEvery = 500          // de quantos em quantos itens avisa
+)
+
+func (r Run) step(phase string, done, total int) {
+	if r.Progress != nil {
+		r.Progress(Step{Phase: phase, Done: done, Total: total})
+	}
 }
 
 // Report é a resposta do import (e do ensaio).

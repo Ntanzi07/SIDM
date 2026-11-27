@@ -489,6 +489,13 @@
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.3);
 }
 
+/* sem espaço embaixo: a lista abre para cima do campo */
+.column-picker__list--up {
+  top: auto;
+  bottom: 100%;
+  margin: 0 0 4px;
+}
+
 .column-picker__item {
   padding: 7px 10px;
   color: var(--text);
