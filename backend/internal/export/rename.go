@@ -41,6 +41,10 @@ func (p *Profile) FileNameOf(m Meta, ext string) string {
 		if value != "" && spec.codes != nil {
 			if code, ok := spec.codes[value]; ok {
 				value = code
+			} else if _, known := spec.Values[value]; !known {
+				// fora das opções (ex.: resolução medida que o perfil não tem):
+				// sai como desconhecido, para não quebrar a largura fixa
+				value = ""
 			}
 		}
 		if field == "plate" || field == "vehicle_plate" {

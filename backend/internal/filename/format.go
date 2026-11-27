@@ -20,6 +20,13 @@ var (
 	colorRev         = invert(colorCodes)
 )
 
+// HasResolution: a resolução tem código no padrão v2? (Uma medida fora da
+// tabela fica no banco, mas sai como desconhecida no nome.)
+func HasResolution(value string) bool {
+	_, ok := resolutionRev[value]
+	return ok
+}
+
 func invert(m map[string]string) map[string]string {
 	out := make(map[string]string, len(m))
 	for k, v := range m {

@@ -194,15 +194,28 @@
 .annotation-fields {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: start;
   gap: 14px;
 }
 
+/* rótulo numa linha só e controle logo abaixo: os campos de uma linha ficam
+   com os controles na mesma altura, e as colunas, na mesma largura */
 .annotation-field {
   display: grid;
+  grid-template-rows: auto auto;
+  align-content: start;
   gap: 6px;
+  min-width: 0;
   color: var(--text-2);
   font-size: 11px;
   font-weight: 600;
+}
+
+.annotation-field > span:first-child {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  line-height: 16px;
 }
 
 .annotation-field input,
@@ -599,10 +612,4 @@ kbd {
 
 .annotation-field--from-image input:focus {
   border-color: var(--border-strong);
-}
-
-.annotation-field__from-image {
-  color: var(--text-3);
-  font-size: 11.5px;
-  font-weight: 400;
 }

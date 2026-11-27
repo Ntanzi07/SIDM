@@ -77,11 +77,14 @@ func MetaFromImage(img *Image) filename.ImageMeta {
 		Equipment:    str(f, "equipment"),
 		Camera:       str(f, "camera"),
 		Direction:    str(f, "direction"),
-		Resolution:   str(f, "resolution"),
 		CaptureAngle: str(f, "capture_angle"),
 		DayTime:      str(f, "day_time"),
 		ImageRange:   str(f, "image_range"),
 		Weather:      str(f, "weather"),
+	}
+	// a resolução vem medida do arquivo e pode não ter código: aí, desconhecida
+	if r := str(f, "resolution"); filename.HasResolution(r) {
+		meta.Resolution = r
 	}
 	if c, ok := f["conditions"].([]string); ok {
 		meta.Conditions = c

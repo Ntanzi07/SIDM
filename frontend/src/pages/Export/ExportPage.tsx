@@ -156,13 +156,48 @@ function labelsFrom(rows: LabelRow[], previousInclude: string[] | undefined): Ex
 
 const EXPORT_INTRO = 'Datasets de treino com as imagens verificadas: com as caixas do CVAT ou só as imagens.'
 
-// O cabeçalho de cada seção: o título, uma linha do que ela faz e, se
-// precisar, os detalhes no (?). Mesmo formato em toda seção.
-function SectionHead({ title, hint, help }: { title: string; hint?: ReactNode; help?: ReactNode }) {
+// As seções vêm minimizadas; as que a pessoa abriu ficam abertas nas
+// próximas visitas.
+const OPEN_KEY = 'sidm.export.secoes-abertas'
+
+function readOpen(): string[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(OPEN_KEY) ?? '[]')
+    return Array.isArray(saved) ? saved.filter((id) => typeof id === 'string') : []
+  } catch {
+    return [] // navegador sem localStorage ou JSON estragado: tudo minimizado
+  }
+}
+
+type SectionProps = {
+  title: string
+  hint?: ReactNode
+  help?: ReactNode
+  summary?: ReactNode // o que está escolhido, mostrado quando minimizada
+  closed: boolean
+  onToggle: () => void
+  children: ReactNode
+}
+
+// Cada seção: o título (clica para minimizar, como as "Opções avançadas" do
+// Processar), uma linha do que ela faz e, se precisar, os detalhes no (?).
+// Minimizada, mostra o resumo do que está escolhido. O conteúdo só fica
+// escondido (hidden), sem desmontar: o estado de dentro não se perde.
+function Section({ title, hint, help, summary, closed, onToggle, children }: SectionProps) {
   return (
-    <div className="export-section-head">
-      <h3>{title}{help && <HelpTip label={title}>{help}</HelpTip>}</h3>
-      {hint && <p>{hint}</p>}
+    <div className="export-section">
+      <div className="export-section-head">
+        <h3>
+          <button aria-expanded={!closed} className="export-section-toggle" onClick={onToggle} type="button">
+            <span aria-hidden="true" className="export-section-toggle__arrow">{closed ? '▸' : '▾'}</span>
+            {title}
+          </button>
+          {help && <HelpTip label={title}>{help}</HelpTip>}
+          {closed && summary && <small className="export-section-summary">{summary}</small>}
+        </h3>
+        {hint && !closed && <p>{hint}</p>}
+      </div>
+      <div hidden={closed}>{children}</div>
     </div>
   )
 }
@@ -223,6 +258,21 @@ export function ExportPage() {
   const noBoxes = draft.format === 'images' // só imagens: sem tarefa, sem labels
   const isFolders = withFolders(draft.format) && draft.layout === 'folders'
   const splitMatters = usesSplit(draft)
+
+  // Seções abertas (lembradas no navegador); o padrão é minimizada.
+  const [opened, setOpened] = useState<string[]>(readOpen)
+  function section(id: string) {
+    return {
+      closed: !opened.includes(id),
+      onToggle: () => setOpened((current) => {
+        const next = current.includes(id) ? current.filter((c) => c !== id) : [...current, id]
+        try { localStorage.setItem(OPEN_KEY, JSON.stringify(next)) } catch { /* sem localStorage: só não lembra */ }
+        return next
+      }),
+    }
+  }
+  const filterCount = Object.values(draft.filters.fields ?? {}).filter(Boolean).length
+    + Object.values(draft.filters.objects ?? {}).reduce((n, values) => n + Object.values(values ?? {}).filter(Boolean).length, 0)
   const fileNameOk = !draft.file_name || /\{(sha1|name)\}/.test(draft.file_name)
   const foldersOk = (!isFolders || (draft.folders ?? []).length > 0) && fileNameOk
   const hasTasks = (draft.tasks?.length ?? 0) > 0
@@ -433,8 +483,10 @@ export function ExportPage() {
               </label>
             </div>
 
-            {!noBoxes && <>
-            <SectionHead
+            {!noBoxes && (
+            <Section
+              {...section('tarefa')}
+              summary={draft.tasks?.length ? draft.tasks.join(', ') : 'nenhuma escolhida'}
               help={(
                 <ul>
                   <li>Várias juntam as caixas num dataset só (ex.: para-brisa + placa).</li>
@@ -443,7 +495,7 @@ export function ExportPage() {
               )}
               hint="As caixas de quais tarefas entram no dataset."
               title="Tarefa"
-            />
+            >
             {tasks.length === 0 ? (
               <p className="form-error">
                 Nenhuma tarefa ainda: crie uma em <Link to="/tarefas">Tarefas</Link> e importe as caixas do CVAT.
@@ -479,9 +531,12 @@ export function ExportPage() {
                 )}
               </>
             )}
-            </>}
+            </Section>
+            )}
 
-            <SectionHead
+            <Section
+              {...section('perfil')}
+              summary={annotationName}
               help={(
                 <ul>
                   <li>Use o perfil dos pacotes que vão no dataset.</li>
@@ -490,7 +545,7 @@ export function ExportPage() {
               )}
               hint="Dá os campos dos filtros, das pastas e do nome dos arquivos."
               title="Perfil de anotação"
-            />
+            >
             <div className="profile-form-grid">
               <label className="form-field">
                 <span>Perfil</span>
@@ -500,8 +555,9 @@ export function ExportPage() {
                 </select>
               </label>
             </div>
+            </Section>
 
-            <SectionHead hint="Como o dataset sai dentro do zip." title="Formato" />
+            <Section {...section('formato')} hint="Como o dataset sai dentro do zip." summary={FORMAT_NAMES[draft.format] ?? draft.format} title="Formato">
             <div className="export-formats">
               {FORMATS.map(([value, label, hint]) => (
                 <label className={draft.format === value ? 'export-format export-format--active' : 'export-format'} key={value}>
@@ -516,10 +572,15 @@ export function ExportPage() {
                 </label>
               ))}
             </div>
+            </Section>
 
             {withFolders(draft.format) && (
-              <>
-                <SectionHead hint="Como as imagens se organizam no zip." title="Pastas de saída" />
+              <Section
+                {...section('pastas')}
+                hint="Como as imagens se organizam no zip."
+                summary={isFolders ? `por pastas: ${(draft.folders ?? []).map((level) => level.field).join(' / ') || 'nenhum nível'}` : 'por divisão'}
+                title="Pastas de saída"
+              >
                 <div className="export-formats">
                   <label className={!isFolders ? 'export-format export-format--active' : 'export-format'}>
                     <input checked={!isFolders} name="layout" onChange={() => change({ layout: 'split', folders: undefined })} type="radio" />
@@ -549,11 +610,13 @@ export function ExportPage() {
                     unknownDefault={folderFields.unknown}
                   />
                 )}
-              </>
+              </Section>
             )}
 
-            {splitMatters && <>
-            <SectionHead
+            {splitMatters && (
+            <Section
+              {...section('divisao')}
+              summary={`${draft.split.train} / ${draft.split.valid} / ${draft.split.test}`}
               help={(
                 <ul>
                   <li>Fixa por imagem: re-exportar com imagens novas não muda o grupo das antigas.</li>
@@ -563,7 +626,7 @@ export function ExportPage() {
               )}
               hint="Quanto vai para treino, validação e teste."
               title="Divisão"
-            />
+            >
             <div className="export-split">
               {(['train', 'valid', 'test'] as const).map((key) => (
                 <label className="form-field" key={key}>
@@ -581,9 +644,12 @@ export function ExportPage() {
                 Soma: {splitSum}%
               </span>
             </div>
-            </>}
+            </Section>
+            )}
 
-            <SectionHead
+            <Section
+              {...section('nome')}
+              summary={draft.file_name ? draft.file_name : 'nome do SIDM (v2)'}
               help={(
                 <ul>
                   <li>Campo de lista com código sai com o código (ex.: direção F/T).</li>
@@ -594,7 +660,7 @@ export function ExportPage() {
               )}
               hint="Como cada imagem se chama no zip."
               title="Nome dos arquivos"
-            />
+            >
             <FileNameTemplate
               key={selected ?? 'novo'}
               fields={folderFields.fields}
@@ -602,8 +668,14 @@ export function ExportPage() {
               onChange={(fileName) => change({ file_name: fileName || undefined })}
               value={draft.file_name ?? ''}
             />
+            </Section>
 
-            <SectionHead hint="De quais pacotes vêm as imagens." title="Pacotes" />
+            <Section
+              {...section('pacotes')}
+              hint="De quais pacotes vêm as imagens."
+              summary={draft.packages?.length ? draft.packages.join(', ') : 'todos'}
+              title="Pacotes"
+            >
             <div className="export-packages">
               <label className="export-check">
                 <input checked={!draft.packages?.length} onChange={() => change({ packages: [] })} type="checkbox" />
@@ -617,8 +689,14 @@ export function ExportPage() {
                 </label>
               ))}
             </div>
+            </Section>
 
-            <SectionHead hint="Só entram as imagens verificadas com estes valores." title="Filtros" />
+            <Section
+              {...section('filtros')}
+              hint="Só entram as imagens verificadas com estes valores."
+              summary={filterCount === 0 ? 'nenhum' : `${filterCount} ${filterCount === 1 ? 'filtro' : 'filtros'}`}
+              title="Filtros"
+            >
             {!annotationProfile ? (
               <p className="profile-name-hint">Carregando os campos do perfil de anotação…</p>
             ) : (
@@ -650,9 +728,12 @@ export function ExportPage() {
                 ))}
               </>
             )}
+            </Section>
 
-            {!noBoxes && <>
-            <SectionHead
+            {!noBoxes && (
+            <Section
+              {...section('labels')}
+              summary={rows.length ? `${rows.filter((row) => row.checked).length} de ${rows.length} labels` : undefined}
               help={(
                 <ul>
                   <li>Mesmo nome em duas labels junta as duas numa classe (ex.: "Placa" e "placa").</li>
@@ -661,7 +742,7 @@ export function ExportPage() {
               )}
               hint="Quais labels entram e com que nome no dataset."
               title="Labels"
-            />
+            >
             {!hasTasks ? (
               <p className="profile-name-hint">Escolha a tarefa para ver as labels dela.</p>
             ) : rows.length === 0 ? (
@@ -689,7 +770,8 @@ export function ExportPage() {
                 </tbody>
               </table>
             )}
-            </>}
+            </Section>
+            )}
 
             <div className="export-actions">
               <button

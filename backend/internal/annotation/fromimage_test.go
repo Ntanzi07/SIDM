@@ -23,10 +23,17 @@ func TestFillFromImage(t *testing.T) {
 	if out["resolution"] != "640x480" || out["weather"] != "rain" || len(w) != 0 {
 		t.Errorf("medido: %v %v", out, w)
 	}
-	// tamanho fora das opções: o campo fica vazio e volta aviso
+	// tamanho fora das opções: fica a medida (com aviso), e o Check aceita
 	out, w = p.FillFromImage(map[string]any{"resolution": "640x480"}, ImageSize{33, 33})
-	if _, ok := out["resolution"]; ok || len(w) != 1 || !strings.Contains(w[0], "33x33") {
+	if out["resolution"] != "33x33" || len(w) != 1 || !strings.Contains(w[0], "33x33") {
 		t.Errorf("fora das opções: %v %v", out, w)
+	}
+	if _, err := res.Clean("33x33"); err != nil {
+		t.Errorf("Clean da medida fora das opções: %v", err)
+	}
+	// quem anota não inventa valor: só o formato de medida passa
+	if _, err := res.Clean("grande"); err == nil {
+		t.Error("Clean aceitou um valor que não é opção nem medida")
 	}
 	// sem medir: fica como veio
 	out, _ = p.FillFromImage(map[string]any{"resolution": "640x480"}, ImageSize{})

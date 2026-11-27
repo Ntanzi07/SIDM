@@ -76,7 +76,38 @@
 .export-section-head h3 {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0 8px;
   margin: 0;
+}
+
+/* título da seção: clica para minimizar (como as "Opções avançadas" do Processar) */
+.export-section-toggle {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.export-section-toggle__arrow {
+  width: 10px;
+  color: var(--text-3);
+}
+
+/* minimizada: o que está escolhido, ao lado do título */
+.export-section-summary {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .export-section-head p {

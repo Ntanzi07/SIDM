@@ -23,9 +23,9 @@ func TestResolucaoVemDaImagem(t *testing.T) {
 	if got := get(ok).Fields["resolution"]; got != "640x480" {
 		t.Errorf("depois do upload: resolution = %v", got)
 	}
-	// 33x33 não é opção do perfil: fica vazio
-	if _, has := get(odd).Fields["resolution"]; has {
-		t.Errorf("33x33 virou resolução: %v", get(odd).Fields)
+	// 33x33 não é opção do perfil: fica a medida do arquivo assim mesmo
+	if got := get(odd).Fields["resolution"]; got != "33x33" {
+		t.Errorf("33x33 fora das opções: resolution = %v", got)
 	}
 
 	// salvar com outra resolução: o servidor mede e põe a do arquivo
@@ -40,8 +40,15 @@ func TestResolucaoVemDaImagem(t *testing.T) {
 	assertStatus(t, rec, http.StatusOK)
 	var savedOdd images.Image // variável nova: decodificar num mapa existente soma as chaves
 	decode(t, rec, &savedOdd)
-	if _, has := savedOdd.Fields["resolution"]; has {
-		t.Errorf("33x33 salvo com resolução: %v", savedOdd.Fields)
+	if savedOdd.Fields["resolution"] != "33x33" {
+		t.Errorf("33x33 salvo: %v", savedOdd.Fields)
+	}
+
+	// verificar a de 33x33: o nome v2 sai com a resolução desconhecida
+	rec = env.doJSON("PUT", "/images/"+odd, `{"fields": {"weather": "rain"}, "complete": true}`)
+	assertStatus(t, rec, http.StatusOK)
+	if img := env.img.Images[odd]; img.Fields["resolution"] != "33x33" || img.FileName == "" {
+		t.Errorf("verificada 33x33: %v %q", img.Fields, img.FileName)
 	}
 }
 

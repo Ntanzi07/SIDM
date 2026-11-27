@@ -184,13 +184,13 @@ export function FieldInput({ field, value, onChange, error, disabled }: FieldInp
   const common = { error, help: field.help, label, required: field.required }
   const select = { ...common, disabled }
 
-  // vem do arquivo (ex.: a resolução): quem anota só vê, quem manda é a imagem
+  // vem do arquivo (ex.: a resolução): quem anota só vê, quem manda é a imagem.
+  // Mostra a medida mesmo quando ela não é uma das opções do perfil.
   if (field.from_image) {
-    const shown = field.type === 'choice' ? (text ? optionLabel(field, text) : '') : text
+    const shown = field.type === 'choice' && text ? optionLabel(field, text) : text
     return (
-      <FieldWrap {...common} className="annotation-field--from-image">
-        <input readOnly title="Vem do arquivo da imagem" value={shown || 'O tamanho da imagem não está entre as opções'} />
-        <small className="annotation-field__from-image">Medida do arquivo da imagem</small>
+      <FieldWrap {...common} className="annotation-field--from-image" help="Medida do arquivo da imagem">
+        <input readOnly title="Medida do arquivo da imagem" value={shown || 'Não foi possível medir'} />
       </FieldWrap>
     )
   }

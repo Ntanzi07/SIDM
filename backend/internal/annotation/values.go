@@ -120,7 +120,8 @@ func (f *Field) Clean(v any) (any, error) {
 		if s = strings.TrimSpace(s); s == "" {
 			return nil, nil
 		}
-		if !f.hasOption(s) {
+		// o tamanho medido do arquivo vale mesmo fora das opções (FillFromImage)
+		if !f.hasOption(s) && !(f.FromImage == FromImageSize && sizeRe.MatchString(s)) {
 			return nil, fmt.Errorf("%q não é uma opção (%s)", s, f.optionList())
 		}
 		return s, nil
